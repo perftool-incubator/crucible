@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+# <Need emacs setup here>
+
+function help() {
+    echo "Usage:"
+    echo "  crucible <command> [command-specific-options]"
+    echo ""
+    echo "The following commands are supported"
+    echo ""
+    echo "help            |  Show this help message"
+    echo "install         |  Ensure crucible is symlinked from /usr/bin/ to \$CRUCIBLE_HOME/bin"
+    echo "sync            |  Fetch from origin and resync to selected branch/commit via git"
+    echo "auth-endpoint   |  Install ssh key into endpoint's authorized_keys file"
+    echo "run-benchmark   |  Run the suite of iterations for a benchmark"
+    echo "gen-iterations  |  Show the iterations generated for a benchmark"
+    echo "register-tool   |  Register a tool on one or more hosts"
+    echo "unregister-tool |  Unregister a tool on one or more hosts"
+    echo "import-elastic  |  Import result from a run into Elasticsearch"
+    echo "query-elastic   |  Query for data such as runs and metrics from Elasticsearch"
+    echo "clear-result    |  Clear a result from local storage"
+    echo ""
+    echo "For more detailed help for each command, try:"
+    echo "  crucible help <command>"
+    echo ""
+}
+
+function help_register_tool() {
+    echo "register-tool --name=NAME"
+    echo "              --hosts=HOSTS"
+    echo ""
+    echo "NAME is a tool name which is supported in crucible:"
+    echo ""
+    echo "$(cd $CRUCIBLE_HOME/subprojects/tools/; find . -mindepth 1 -maxdepth 1 -type d | sed 'sX./X  X')"
+    echo ""
+    echo "HOSTS is a comma-separated list of hosts or"
+    echo "URLs to files with one host name per line, for example:"
+    echo ""
+    echo "  file://relative/path/file"
+    echo "  file:///absolute/path/file"
+    echo "  http://web-server:port/path/to/file"
+    echo ""
+}
+
+if [ "$1" == "help" ]; then
+    shift
+    if [ -z "$1" ]; then
+        help
+        exit
+    elif [ "$1" == "register-tool" ]; then
+        help_register_tool
+        exit
+    fi
+else
+    echo "This function has not been implemented"
+fi

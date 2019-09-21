@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+# <Need emacs setup here>
+
+_crucible_completions() {
+    case "${#COMP_WORDS[@]}" in
+        2)
+            COMPREPLY=($(compgen -W "help install sync auth-endpoint run-benchmark gen-iterations register-tool unregister-tool import-elastic clear-result query-elastic" "${COMP_WORDS[1]}"))
+            ;;
+        3)
+            case "${COMP_WORDS[1]}" in
+                help)
+                    COMPREPLY=($(compgen -W "register-tool" "${COMP_WORDS[2]}"))
+                    ;;
+                register-tool)
+                    COMPREPLY=($(compgen -W "--name" "${COMP_WORDS[2]}"))
+                    ;;
+                auth-endpoint)
+                    COMPREPLY=($(compgen -W "hosts passwords" "${COMP_WORDS[2]}"))
+                    ;;
+            esac
+            ;;
+        4)
+            if [ "${COMP_WORDS[1]}" == "register-tool" -a "${COMP_WORDS[2]}" == "--name" ]; then
+                COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/tools/; find . -mindepth 1 -maxdepth 1 -type d | sed 'sX./XX')" "${COMP_WORDS[3]}"))
+            fi
+            ;;
+    esac
+}
+
+complete -F _crucible_completions crucible
