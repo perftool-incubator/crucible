@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+# <Need emacs setup here>
+
+function exit_error() {
+    echo $1
+    exit 1
+}
+
+# Check for dependencies
+missing_bins=""
+for bin in sed git; do
+    which $bin >/dev/null 2>&1 || missing_bins="$missing_bins $bin"
+done
+if [ ! -z "$missing_bins" ]; then
+    exit_error "Could not find the following, lease install and try again: $missing_bins"
+fi
+
+# Find the git repo base directory
+this_pwd="`/bin/pwd`"
+this_dirname="/`/bin/dirname $0 | /bin/sed -e 'sX^\./XX' -e 'sX^.$XX'`"
+crucible_repo_bin_dir="` echo $this_pwd$this_dirname | sed -e 'sX/$XX'`"
+echo "$crucible_repo_bin_dir" | /bin/grep -q '/bin$' || exit_error "Expected \"bin\" in path immediately preceeding \"install\""
+crucible_repo_dir="`echo $crucible_repo_bin_dir | sed -e 'sX/binXX'`"
+
+if [ `id -u` == "0" ]; then
+    # Create a new /etc/sysconfig/crucible
+    echo "CRUCIBLE_HOME=$crucible_repo_dir" >/etc/sysconfig/crucible
+
+    # Install the tab completions for crucible
+    if [ -d /etc/profile.d ]; then
+        if [ -e "$crucible_repo_bin_dir/_crucible_completions" ]; then
+            ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
+        else
+            echo "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
+        fi
+    fi
+    # Install the only bin we need for crucible in /usr/bin
+    if [ -e "$crucible_repo_bin_dir/crucible" ]; then
+        ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
+    else
+        echo "file $crucible_repo_bin_dir/crucible was not found, exiting"
+    fi
+fi
+
+# Load the subprojects from ./config/default_subprojects, then from $HOME/.crucible/subprojects to get local overrides
+declare -A subprojects
+for conf_file in "$crucible_repo_dir/config/default_subprojects" "$HOME/.crucible/subprojects"; do
+    if [ -e "$conf_file" ]; then
+        while read line; do
+            if echo $line | grep -q "^\#"; then
+                continue
+            fi
+            name=`echo $line | awk '{print $1}'`
+            subprojects["$name"]="$line"
+        done < "$conf_file"
+    fi
+done
+
+no_clone=""
+pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change direcotry to $crucible_repo_dir"
+/bin/mkdir -p subprojects/benchmarks subprojects/tools subprojects/core
+for subproject in "${!subprojects[@]}"; do
+    sp_type=`echo ${subprojects[$subproject]} | awk '{print $2}'`
+    sp_git_user_host_org_proj=`echo ${subprojects[$subproject]} | awk '{print $3}'`
+    sp_git_proj=`echo $sp_git_user_host_org_proj | awk -F/ '{print $2}'`
+    sp_git_user_host_org=`echo $sp_git_user_host_org_proj | awk -F/ '{print $1}'`
+    # If the repo location was omitted, get this from existing crucible repo
+    if [ -z "$sp_git_user_host_org" ]; then
+        pushd $crucible_repo_dir >/dev/null
+        sp_git_user_host_org=`git remote -v | grep fetch | awk '{print $2}' | awk -F/ '{print $1}'`
+    fi
+    sp_git_org=`echo $sp_git_user_host_org | awk -F: '{print $2}'`
+    sp_git_user=`echo $sp_git_user_host_org | awk -F@ '{print $1}'`
+    sp_git_host=`echo $sp_git_user_host_org | awk -F: '{print $1}' | awk -F@ '{print $2}'`
+    sp_branch=`echo ${subprojects[$subproject]} | awk '{print $4}'`
+    case "$sp_type" in
+        "benchmark")
+            sp_dir_prefix="benchmarks/"
+            ;;
+        "tool")
+            sp_dir_prefix="tools/"
+            ;;
+        "core")
+            sp_dir_prefix="core/"
+            ;;
+    esac
+    /bin/mkdir -p "repos/$sp_git_user_host_org"
+    clone_dir="repos/$sp_git_user_host_org/$sp_git_proj"
+    subproject_dir="subprojects/$sp_dir_prefix$subproject"
+    if [ ! -e "$clone_dir" ]; then
+        echo "git clone $sp_git_user_host_org_proj $clone_dir"
+        git clone $sp_git_user_host_org/$sp_git_proj "$clone_dir" || exit_error "Could not clone repo $sp_git_user_host_org_proj"
+    else
+        no_clone="$no_clone $subproject"
+        pushd $clone_dir >/dev/null
+        git checkout $sp_branch >/dev/null 2>&1 || exit_error "Could not checkout $sp_branch for $sp_git_user_host_org/$sp_git_proj"
+        popd >/dev/null
+    fi
+    /bin/rm -f "$subproject_dir"
+    /bin/ln -sf "../../$clone_dir" "$subproject_dir"
+done
+if [ ! -z "$no_clone" ]; then
+    echo "Not cloning these subprojects as they already exist:"
+    echo "$no_clone"
+fi
+popd >/dev/null
+

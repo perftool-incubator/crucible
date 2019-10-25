@@ -2,6 +2,76 @@
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # <Need emacs setup here>
 
+# Crucible's purpose is to provide a single interface
+# for all of these subprojects for a seamless performance
+# benchmark and tool harness solution
+
+# Crucible expects to have these subprojects (eventually):
+#
+# Project-name      Commands        Purpose                   Status
+#
+# Rickshaw          run-benchmark   Coordinate a full "run"   Not implemented
+#                   clear-result    of a benchmark with one
+#                                   or more iterations
+#
+# Multiplex         gen-iterations  Convert a user's list     Minimally viable,
+#                                   of benchamrk params       Integrated
+#                                   (--opt val1,val2)
+#                                   into multiple benchmark
+#                                   iterations
+#
+# <remote-exec>     auth-hosts      Automated ssh key         Not implemented
+#                   ssh-hosts       installation, multi-
+#                                   remote-host execution
+#
+# Roadblock         <TBD>           Provide synchrnization    Minimally viable,
+#                                   across endpoints (hosts   Not integrated
+#                                   and/or containers) and
+#                                   this controller
+#
+# Workshop          <TBD>           Image management for      Under Development
+#                                   endpoint execution
+#
+# <tools-project>   register-tool   Integrate various tools   Not implemented
+#                   unregister-tool for execution
+#
+# <elastic/CDM>     query-elastic   Data storage, query,      Under developoment
+#                   import-elastic  reporting, etc.
+#                   build-elastic
+#
+#
+# Addtionally, Crucible will work with one or more
+# benchmark or tool subprojects, found in:
+# ./subprojects/tools
+# ./subprojects/benchmarks
+# 
+# These subprojects provide configuration information,
+# integration scripts, and post-processing scripts
+# for a specific benchmark or tool, like Fio or Iostat.
+
+# Crucible is meant to be run from a single command, 'crucible'
+# and provide all the functionality from these projects.
+
+if [ -z "$CRUCIBLE_HOME" ]; then
+    if [ -e /etc/sysconfig/crucible ]; then
+        . /etc/sysconfig/crucible
+        if [ -z "$CRUCIBLE_HOME" ]; then
+            echo "\$CRUCIBLE_HOME does not appear to be defined in /etc/sysconfig/crucible, exiting"
+            exit 1
+        else
+            export CRUCIBLE_HOME=$CRUCIBLE_HOME
+        fi
+    else
+        echo "Could not find /etc/sysconfig/crucible.  Please ensure crucible is installed first."
+        exit 1
+    fi
+fi
+
+if [ ! -e $CRUCIBLE_HOME ]; then
+    echo "Could not find $CRUCIBLE_HOME, exiting."
+    exit 1
+fi
+
 function help() {
     echo "Usage:"
     echo "  crucible <command> [command-specific-options]"
@@ -9,36 +79,10 @@ function help() {
     echo "The following commands are supported"
     echo ""
     echo "help            |  Show this help message"
-    echo "install         |  Ensure crucible is symlinked from /usr/bin/ to \$CRUCIBLE_HOME/bin"
-    echo "sync            |  Fetch from origin and resync to selected branch/commit via git"
-    echo "auth-endpoint   |  Install ssh key into endpoint's authorized_keys file"
-    echo "run-benchmark   |  Run the suite of iterations for a benchmark"
     echo "gen-iterations  |  Show the iterations generated for a benchmark"
-    echo "register-tool   |  Register a tool on one or more hosts"
-    echo "unregister-tool |  Unregister a tool on one or more hosts"
-    echo "import-elastic  |  Import result from a run into Elasticsearch"
-    echo "query-elastic   |  Query for data such as runs and metrics from Elasticsearch"
-    echo "clear-result    |  Clear a result from local storage"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
-    echo ""
-}
-
-function help_register_tool() {
-    echo "register-tool --name=NAME"
-    echo "              --hosts=HOSTS"
-    echo ""
-    echo "NAME is a tool name which is supported in crucible:"
-    echo ""
-    echo "$(cd $CRUCIBLE_HOME/subprojects/tools/; find . -mindepth 1 -maxdepth 1 -type d | sed 'sX./X  X')"
-    echo ""
-    echo "HOSTS is a comma-separated list of hosts or"
-    echo "URLs to files with one host name per line, for example:"
-    echo ""
-    echo "  file://relative/path/file"
-    echo "  file:///absolute/path/file"
-    echo "  http://web-server:port/path/to/file"
     echo ""
 }
 
@@ -47,10 +91,24 @@ if [ "$1" == "help" ]; then
     if [ -z "$1" ]; then
         help
         exit
-    elif [ "$1" == "register-tool" ]; then
-        help_register_tool
-        exit
+    elif [ "$1" == "gen-iterations" ]; then
+        shift
+        if [ -z "$1" ]; then
+            test -e $CRUCIBLE_HOME/subprojects/core/multiplex/print_help && \
+            $CRUCIBLE_HOME/subprojects/core/multiplex/print_help || \
+            echo "No help found"
+        else
+            test -e $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help && \
+            $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help || \
+            echo "No help found"
+        fi
     fi
+elif [ "$1" == "gen-iterations" ]; then
+    shift
+    benchmark=$1
+    shift
+    "$CRUCIBLE_HOME"/subprojects/core/multiplex/multiplex \
+        "$CRUCIBLE_HOME/subprojects/benchmarks/$benchmark/params.json" "$@"
 else
     echo "This function has not been implemented"
 fi

@@ -3,29 +3,41 @@
 # <Need emacs setup here>
 
 _crucible_completions() {
-    case "${#COMP_WORDS[@]}" in
-        2)
-            COMPREPLY=($(compgen -W "help install sync auth-endpoint run-benchmark gen-iterations register-tool unregister-tool import-elastic clear-result query-elastic" "${COMP_WORDS[1]}"))
-            ;;
-        3)
-            case "${COMP_WORDS[1]}" in
-                help)
-                    COMPREPLY=($(compgen -W "register-tool" "${COMP_WORDS[2]}"))
-                    ;;
-                register-tool)
-                    COMPREPLY=($(compgen -W "--name" "${COMP_WORDS[2]}"))
-                    ;;
-                auth-endpoint)
-                    COMPREPLY=($(compgen -W "hosts passwords" "${COMP_WORDS[2]}"))
-                    ;;
-            esac
-            ;;
-        4)
-            if [ "${COMP_WORDS[1]}" == "register-tool" -a "${COMP_WORDS[2]}" == "--name" ]; then
-                COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/tools/; find . -mindepth 1 -maxdepth 1 -type d | sed 'sX./XX')" "${COMP_WORDS[3]}"))
+    if [ -z "$CRUCIBLE_HOME" ]; then
+        if [ -e /etc/sysconfig/crucible ]; then
+            . /etc/sysconfig/crucible
+            if [ -z "$CRUCIBLE_HOME" ]; then
+                return
             fi
-            ;;
-    esac
+        else
+            return
+        fi
+    fi
+    num_words=${#COMP_WORDS[@]} # Total number of words on the command
+    let num_index=$num_words-1
+    if [ $num_words -eq 2 ]; then
+        COMPREPLY=($(compgen -W "help gen-iterations" -- "${COMP_WORDS[1]}"))
+    elif [ $num_words -eq 3 ]; then
+        case "${COMP_WORDS[1]}" in
+            help)
+                COMPREPLY=($(compgen -W "gen-iterations" -- "${COMP_WORDS[2]}"))
+                ;;
+            gen-iterations)
+                COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/benchmarks/; find . -mindepth 1 -maxdepth 1 -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
+                ;;
+        esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "gen-iterations" ]; then
+        params=""
+        bench_params_file="$CRUCIBLE_HOME/subprojects/benchmarks/${COMP_WORDS[2]}/params"
+        multiplex_params_file="$CRUCIBLE_HOME/subprojects/core/multiplex/params"
+        if [ -e "$bench_params_file" ]; then
+            params="$params $(cat $bench_params_file)"
+        fi
+        if [ -e "$geni_params_file" ]; then
+            params="$params $(cat $multiplex_params_file)"
+        fi
+        COMPREPLY=($(compgen -W "$params" -- "${COMP_WORDS[$num_index]}"))
+    fi
 }
 
 complete -F _crucible_completions crucible
