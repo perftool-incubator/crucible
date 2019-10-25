@@ -23,24 +23,31 @@ crucible_repo_bin_dir="` echo $this_pwd$this_dirname | sed -e 'sX/$XX'`"
 echo "$crucible_repo_bin_dir" | /bin/grep -q '/bin$' || exit_error "Expected \"bin\" in path immediately preceeding \"install\""
 crucible_repo_dir="`echo $crucible_repo_bin_dir | sed -e 'sX/binXX'`"
 
-if [ `id -u` == "0" ]; then
-    # Create a new /etc/sysconfig/crucible
-    echo "CRUCIBLE_HOME=$crucible_repo_dir" >/etc/sysconfig/crucible
+# The three sections below use sudo to install files and links as root.
+# This script could be run by root (in which the sudo does not matter),
+# or it could be run by a non-root user, in which you need sudo below.
+# If you "sudo ./install" or use root, you will pick up /root/.crucible
+# and not your user's .crucible, so don't do that unless you never use
+# a non-root user to install crucible.
 
-    # Install the tab completions for crucible
-    if [ -d /etc/profile.d ]; then
-        if [ -e "$crucible_repo_bin_dir/_crucible_completions" ]; then
-            ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
-        else
-            echo "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
-        fi
-    fi
-    # Install the only bin we need for crucible in /usr/bin
-    if [ -e "$crucible_repo_bin_dir/crucible" ]; then
-        ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
+# Create a new /etc/sysconfig/crucible
+sudo /bin/bash -c "echo \"CRUCIBLE_HOME=$crucible_repo_dir\" >/etc/sysconfig/crucible"
+export CRUCIBLE_HOME="$crucible_repo_dir"
+
+# Install the tab completions for crucible
+if [ -d /etc/profile.d ]; then
+    if [ -e "$crucible_repo_bin_dir/_crucible_completions" ]; then
+        sudo ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
+        . "$crucible_repo_bin_dir/_crucible_completions"
     else
-        echo "file $crucible_repo_bin_dir/crucible was not found, exiting"
+        echo "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
     fi
+fi
+# Install the only bin we need for crucible in /usr/bin
+if [ -e "$crucible_repo_bin_dir/crucible" ]; then
+    sudo ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
+else
+    echo "file $crucible_repo_bin_dir/crucible was not found, exiting"
 fi
 
 # Load the subprojects from ./config/default_subprojects, then from $HOME/.crucible/subprojects to get local overrides
