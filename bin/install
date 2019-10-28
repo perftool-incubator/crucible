@@ -70,16 +70,22 @@ pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change direcotry 
 for subproject in "${!subprojects[@]}"; do
     sp_type=`echo ${subprojects[$subproject]} | awk '{print $2}'`
     sp_git_user_host_org_proj=`echo ${subprojects[$subproject]} | awk '{print $3}'`
-    sp_git_proj=`echo $sp_git_user_host_org_proj | awk -F/ '{print $2}'`
-    sp_git_user_host_org=`echo $sp_git_user_host_org_proj | awk -F/ '{print $1}'`
+    # sp_git_user_host_org_proj has two possible formats:
+    #   https://github.com/perftool-incubator/crucible.git
+    #   git@github.com:perftool-incubator/crucible.git
+    sp_git_proj=`echo $sp_git_user_host_org_proj | awk -F/ '{print $NF}'`
+    sp_git_user_host_org=`echo $sp_git_user_host_org_proj | sed -e s/$sp_git_proj$// -e s,/$,,`
     # If the repo location was omitted, get this from existing crucible repo
     if [ -z "$sp_git_user_host_org" ]; then
         pushd $crucible_repo_dir >/dev/null
-        sp_git_user_host_org=`git remote -v | grep fetch | awk '{print $2}' | awk -F/ '{print $1}'`
+        cru_git_user_host_org_proj=`git remote -v | grep fetch | awk '{print $2}'`
+        cru_git_proj=`echo $cru_git_user_host_org_proj | awk -F/ '{print $NF}'`
+	    sp_git_user_host_org=`echo $cru_git_user_host_org_proj | sed -e s/$cru_git_proj$// -e s,/$,,`
+	    popd >/dev/null
     fi
-    sp_git_org=`echo $sp_git_user_host_org | awk -F: '{print $2}'`
-    sp_git_user=`echo $sp_git_user_host_org | awk -F@ '{print $1}'`
-    sp_git_host=`echo $sp_git_user_host_org | awk -F: '{print $1}' | awk -F@ '{print $2}'`
+    sp_git_host_org=`echo $sp_git_user_host_org | sed -e 'sXhttps://XX' -e 'sXhttp://XX' -e 's/.*@//'`
+    sp_git_user=`echo $sp_git_user_host_org | sed -e s,$sp_git_host_org,, -e 'sX://X:X'`
+    sp_git_host_org=`echo $sp_git_host_org | sed -e 's,/,:,g'`
     sp_branch=`echo ${subprojects[$subproject]} | awk '{print $4}'`
     case "$sp_type" in
         "benchmark")
@@ -92,20 +98,23 @@ for subproject in "${!subprojects[@]}"; do
             sp_dir_prefix="core/"
             ;;
     esac
-    /bin/mkdir -p "repos/$sp_git_user_host_org"
-    clone_dir="repos/$sp_git_user_host_org/$sp_git_proj"
+    clone_user_host_org_dir="repos/$sp_git_user$sp_git_host_org"
+    mkdir -p "$clone_user_host_org_dir"
+    clone_user_host_org_proj_dir="$clone_user_host_org_dir/$sp_git_proj"
     subproject_dir="subprojects/$sp_dir_prefix$subproject"
-    if [ ! -e "$clone_dir" ]; then
-        echo "git clone $sp_git_user_host_org_proj $clone_dir"
-        git clone $sp_git_user_host_org/$sp_git_proj "$clone_dir" || exit_error "Could not clone repo $sp_git_user_host_org_proj"
+    if [ ! -e "$clone_user_host_org_proj_dir" ]; then
+        echo git clone $sp_git_user_host_org/$sp_git_proj "$clone_user_host_org_proj_dir"
+        git clone $sp_git_user_host_org/$sp_git_proj "$clone_user_host_org_proj_dir" || \
+            exit_error "Could not clone repo $sp_git_user_host_org_proj"
     else
         no_clone="$no_clone $subproject"
-        pushd $clone_dir >/dev/null
-        git checkout $sp_branch >/dev/null 2>&1 || exit_error "Could not checkout $sp_branch for $sp_git_user_host_org/$sp_git_proj"
-        popd >/dev/null
     fi
-    /bin/rm -f "$subproject_dir"
-    /bin/ln -sf "../../$clone_dir" "$subproject_dir"
+    pushd "$clone_user_host_org_proj_dir" >/dev/null || exit_error "Could not chdir to $clone_user_host_org_proj_dir"
+    git checkout $sp_branch >/dev/null 2>&1 || exit_error "Could not checkout $sp_branch for $sp_git_user_host_org/$sp_git_proj"
+    popd >/dev/null
+    /bin/rm -f "$subproject_dir" || exit_error "Could not rm $subproject_dir"
+    /bin/ln -sf "../../$clone_user_host_org_proj_dir" "$subproject_dir" || \
+        exit_error "Symlinking $subproject_dir to ../../$clone_user_host_org_proj_dir failed"
 done
 if [ ! -z "$no_clone" ]; then
     echo "Not cloning these subprojects as they already exist:"
