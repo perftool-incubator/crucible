@@ -1,4 +1,5 @@
 #project-name        project-type   git-repo-url                                    branch                
 multiplex            core           /multiplex                                      master                
 roadblock            core           /roadblock                                      master
+workshop             core           /workshop                                       master
 fio                  benchmark      /fio                                            master                
