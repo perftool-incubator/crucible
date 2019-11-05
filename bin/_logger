@@ -1,0 +1,99 @@
+#!/usr/bin/perl
+# -*- mode: perl; indent-tabs-mode: t; perl-indent-level: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=perl
+#
+
+use strict;
+use warnings;
+
+use Time::HiRes qw(time);
+use IO::Select;
+
+# disable STDOUT output buffering
+$|++;
+
+my $log_filename = $ARGV[0];
+my $stdout_pipe = $ARGV[1];
+my $stderr_pipe = $ARGV[2];
+
+my $log_fh;
+my $stdout_fh;
+my $stderr_fh;
+
+# prevent CTRL-C from tearing down the logger while it is processing
+# the logger should gracefully exit on it's own
+$SIG{'INT'} = sub { my $foo = 1; };
+
+if (!open($log_fh, ">>", $log_filename)) {
+    printf("ERROR: Logger could not open '%s' for writing!\n", $log_filename);
+    exit(1);
+}
+
+if (!open($stdout_fh, "<", $stdout_pipe)) {
+    printf("ERROR: Logger could not open the stdout pipe '%s'!\n", $stdout_pipe);
+    exit(1);
+}
+
+if (!open($stderr_fh, "<", $stderr_pipe)) {
+    printf("ERROR: Logger could not open the stderr pipe '%s'!\n", $stderr_pipe);
+    exit(1);
+}
+
+# disable logfile output buffering
+my $ofh = select($log_fh);
+$|++;
+select($ofh);
+
+my $s = IO::Select->new();
+$s->add($stdout_fh);
+$s->add($stderr_fh);
+
+while($s->count()) {
+    my @ready = $s->can_read(1);
+    
+    foreach my $fh (@ready) {
+	$_ = readline($fh);
+	if (!defined($_)) {
+	    next;
+	}
+
+	my $ts = time();
+	chomp($_);
+
+	my @var = localtime(int($ts));
+	my $subsec = ($ts - int($ts))*1000;
+	my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
+
+	my $stream = "UNKOWN";
+	my $logit = 0;
+	if ($fh == $stdout_fh) {
+	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
+		$s->remove($stdout_fh);
+		close($stdout_fh);
+	    } else {
+		$logit = 1;
+		$stream = "STDOUT";
+		if ($_ !~ /^CRUCIBLE_INTERNAL/) {
+		    printf("[%s] %s\n", $timestamp, $_);
+		} else {
+		    $_ =~ s/^CRUCIBLE_INTERNAL//;
+		}
+	    }
+	} elsif ($fh == $stderr_fh) {
+	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
+		$s->remove($stderr_fh);
+		close($stderr_fh);
+	    } else {
+		$logit = 1;
+		$stream = "STDERR";
+		printf(STDERR "[%s][STDERR] %s\n", $timestamp, $_);
+	    }
+	}
+
+	if ($logit) {
+	    printf({$log_fh} "%f %s %s\n", $ts, $stream, $_);
+	}
+    }
+}
+
+close($log_fh);
