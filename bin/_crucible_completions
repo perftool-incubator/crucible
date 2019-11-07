@@ -33,7 +33,7 @@ _crucible_completions() {
         if [ -e "$bench_params_file" ]; then
             params="$params $(cat $bench_params_file)"
         fi
-        if [ -e "$geni_params_file" ]; then
+        if [ -e "$multiplex_params_file" ]; then
             params="$params $(cat $multiplex_params_file)"
         fi
         COMPREPLY=($(compgen -W "$params" -- "${COMP_WORDS[$num_index]}"))
