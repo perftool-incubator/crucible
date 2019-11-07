@@ -79,6 +79,7 @@ function help() {
     echo "The following commands are supported"
     echo ""
     echo "help            |  Show this help message"
+    echo "update          |  Update the repositories that comprise crucible"
     echo "gen-iterations  |  Show the iterations generated for a benchmark"
     echo ""
     echo "For more detailed help for each command, try:"
@@ -91,6 +92,9 @@ if [ "$1" == "help" ]; then
     if [ -z "$1" ]; then
         help
         exit
+    elif [ "$1" == "update" ]; then
+	$CRUCIBLE_HOME/bin/update help
+	exit
     elif [ "$1" == "gen-iterations" ]; then
         shift
         if [ -z "$1" ]; then
@@ -102,6 +106,13 @@ if [ "$1" == "help" ]; then
             $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help || \
             echo "No help found"
         fi
+    fi
+elif [ "$1" == "update" ]; then
+    shift
+    if [ -z "$1" ]; then
+	$CRUCIBLE_HOME/bin/update all
+    else
+	$CRUCIBLE_HOME/bin/update $1
     fi
 elif [ "$1" == "gen-iterations" ]; then
     shift

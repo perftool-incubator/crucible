@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+# <Need emacs setup here>
+
+# repo updating infrastructure
+
+if [ ! -e $CRUCIBLE_HOME ]; then
+    echo "Could not find $CRUCIBLE_HOME, exiting."
+    exit 1
+fi
+
+function help() {
+    echo "Usage:"
+    echo "  update <repository>"
+    echo ""
+    echo "The following repositories are supported"
+    echo ""
+    echo "all             |  Update all repositories (default)"
+    echo "crucible        |  Update the main crucible repository"
+    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+	for repo in $(find . -type l | sed 'sX./XX'); do
+	    printf "%-15s |  Update the %s repository\n" "${repo}" "${repo}"
+	done
+
+	popd > /dev/null
+    fi
+    echo ""
+}
+
+if [ "$1" == "help" ]; then
+    shift
+    if [ -z "$1" ]; then
+        help
+        exit
+    fi
+elif [ -z "$1" ]; then
+    repo="all"
+else
+    repo="$1"
+fi
+
+
+case "${repo}" in
+    "all"|"crucible")
+	# nothing to do here yet
+	foo=1
+	;;
+    *)
+	if pushd $CRUCIBLE_HOME/subprojects/${repo} > /dev/null; then
+	    $CRUCIBLE_HOME/bin/_update-git
+	    
+	    popd > /dev/null
+	else
+	    echo "Invalid repo '${repo}'."
+	    exit 1
+	fi
+	;;
+esac
+
+if [ "${repo}" == "all" ]; then
+    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+	for tmp_repo in $(find . -type l | sed 'sX./XX'); do
+	    if pushd ${tmp_repo} > /dev/null; then
+		$CRUCIBLE_HOME/bin/_update-git
+		
+		popd > /dev/null
+	    fi
+	done
+	
+	popd > /dev/null
+    fi
+fi
+
+if [ "${repo}" != "all" -a "${repo}" != "crucible" ]; then
+    exit
+fi
+
+pushd $CRUCIBLE_HOME > /dev/null
+
+TMP_SCRIPT=$(mktemp)
+cp -a $CRUCIBLE_HOME/bin/_update-git ${TMP_SCRIPT}
+echo "rm ${TMP_SCRIPT}" >> ${TMP_SCRIPT}
+exec ${TMP_SCRIPT}

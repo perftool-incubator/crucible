@@ -16,12 +16,15 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help gen-iterations" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help update gen-iterations" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "gen-iterations" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "update gen-iterations" -- "${COMP_WORDS[2]}"))
                 ;;
+	    update)
+		COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
+		;;
             gen-iterations)
                 COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/benchmarks/; find . -mindepth 1 -maxdepth 1 -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
                 ;;
