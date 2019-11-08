@@ -72,6 +72,12 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     exit 1
 fi
 
+# make sure the user has a .crucible directory for storing things
+USER_STORE=$HOME/.crucible
+if [ ! -d ${USER_STORE} ]; then
+    mkdir -v ${USER_STORE}
+fi
+
 function help() {
     echo "Usage:"
     echo "  crucible <command> [command-specific-options]"
@@ -79,6 +85,7 @@ function help() {
     echo "The following commands are supported"
     echo ""
     echo "help            |  Show this help message"
+    echo "log             |  Work with the crucible log"
     echo "update          |  Update the repositories that comprise crucible"
     echo "gen-iterations  |  Show the iterations generated for a benchmark"
     echo ""
@@ -87,26 +94,82 @@ function help() {
     echo ""
 }
 
-if [ "$1" == "help" ]; then
-    shift
-    if [ -z "$1" ]; then
-        help
-        exit
-    elif [ "$1" == "update" ]; then
-	$CRUCIBLE_HOME/bin/update help
-	exit
-    elif [ "$1" == "gen-iterations" ]; then
-        shift
-        if [ -z "$1" ]; then
-            test -e $CRUCIBLE_HOME/subprojects/core/multiplex/print_help && \
-            $CRUCIBLE_HOME/subprojects/core/multiplex/print_help || \
-            echo "No help found"
-        else
-            test -e $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help && \
-            $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help || \
-            echo "No help found"
-        fi
+function setup_pipe() {
+    local PIPE=${1}
+
+    rm ${PIPE}
+    mknod ${PIPE} p
+}
+
+# special case some log operations so they don't happen under log
+# redirection
+if [ "$1" == "log" ]; then
+    if [ ! -e ${USER_STORE}/log ]; then
+	touch ${USER_STORE}/log
     fi
+
+    if [ "$2" == "view" -o -z "$2" ]; then
+	$CRUCIBLE_HOME/bin/log view ${USER_STORE}/log | less -S -F
+	exit
+    elif [ "$2" == "clear" ]; then
+	$CRUCIBLE_HOME/bin/log clear ${USER_STORE}/log
+	exit
+    fi
+elif [ "$1" == "help" ]; then
+    # print all help output outside of the logger context to avoid
+    # filling the log with generic help information
+
+    shift
+    {
+	if [ "$1" == "log" ]; then
+	    $CRUCIBLE_HOME/bin/log help
+	elif [ "$1" == "update" ]; then
+	    $CRUCIBLE_HOME/bin/update help
+	elif [ "$1" == "gen-iterations" ]; then
+            shift
+            if [ -z "$1" ]; then
+		test -e $CRUCIBLE_HOME/subprojects/core/multiplex/print_help && \
+		    $CRUCIBLE_HOME/subprojects/core/multiplex/print_help || \
+			echo "No help found"
+            else
+		test -e $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help && \
+		    $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help || \
+			echo "No help found"
+            fi
+	else
+	    help
+	fi
+    } | less -S -F
+
+    exit
+fi
+
+# disable CTRL-C killing this script while we are logging to a remote
+# process the CTRL-C should kill any subprocess other than the logger
+# and we should gracefully exit
+trap "echo 'Crucible caught CTRL-C'" INT
+
+# initialize the logger pipes
+STDOUT_PIPE=$(mktemp)
+STDERR_PIPE=$(mktemp)
+setup_pipe ${STDOUT_PIPE}
+setup_pipe ${STDERR_PIPE}
+
+# launch the logger into the background
+$CRUCIBLE_HOME/bin/_logger ${USER_STORE}/log ${STDOUT_PIPE} ${STDERR_PIPE} &
+LOGGER_PID=$!
+
+# redirect the output to the pipes
+exec > ${STDOUT_PIPE} 2> ${STDERR_PIPE}
+
+# log a command separator that is only written to the log and not to the screen
+echo "CRUCIBLE_INTERNAL======================================================================"
+# log the command being invoked
+echo -e "command: $(basename $0) $@\n"
+
+if [ "$1" == "log" ]; then
+    shift
+    $CRUCIBLE_HOME/bin/log $1 $CRUCIBLE_HOME/foo.log
 elif [ "$1" == "update" ]; then
     shift
     if [ -z "$1" ]; then
@@ -123,3 +186,17 @@ elif [ "$1" == "gen-iterations" ]; then
 else
     echo "This function has not been implemented"
 fi
+
+# signal the logger that all output has been processed from each of
+# the pipes
+echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
+echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
+
+# flush stdout to make sure all output gets processed by the logger
+stdbuf --output=0 echo
+
+# wait for the logger to exit
+wait ${LOGGER_PID}
+
+# clean up the pipes
+rm -v ${STDOUT_PIPE} ${STDERR_PIPE}

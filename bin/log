@@ -1,0 +1,70 @@
+#!/usr/bin/perl
+# -*- mode: perl; indent-tabs-mode: t; perl-indent-level: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=perl
+#
+
+use strict;
+use warnings;
+
+# disable output buffering
+$|++;
+
+my $mode = $ARGV[0];
+my $filename = $ARGV[1];
+
+sub help() {
+    print("Usage:\n");
+    print("  log <command>\n");
+    print("\n");
+    print("The following commands are supported\n");
+    print("\n");
+    print("help            |  Show this help message\n");
+    print("view            |  View the crucible log (default)\n");
+    print("clear           |  Clear the crucible log\n");
+    print("\n");
+}
+
+if ((!($mode eq "view") &&
+     !($mode eq "clear")) ||
+    ($mode eq "help")) {
+    help();
+    exit();
+}
+
+if ($filename eq "") {
+    if (! -e $filename) {
+	printf("ERROR: Log could not find the specified logfile '%s'!\n", $filename);
+	exit(1);
+    }
+}
+
+if ($mode eq "view") {
+    if (open(LOG, "<", $filename)) {
+	while(<LOG>) {
+	    chomp($_);
+	    my @array = split(/\s/, $_, 3);
+
+	    my @var = localtime(int($array[0]));
+	    my $subsec = ($array[0] - int($array[0]))*1000;
+	    my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
+	    if ($array[1] eq "STDOUT") {
+		printf("[%s] %s\n", $timestamp, $array[2]);
+	    } elsif ($array[1] eq "STDERR") {
+		printf("[%s][STDERR] %s\n", $timestamp, $array[2]);
+	    }
+	}
+
+	close(LOG);
+    } else {
+	printf("ERROR: Could not open logfile '%s' for reading!\n", $filename);
+	exit(1);
+    }
+} elsif ($mode eq "clear") {
+    if (open(LOG, ">", $filename)) {
+	print(LOG "");
+	close(LOG);
+    } else {
+	printf("ERROR: Could not open logfile '%s' for clearing!\n", $filename);
+	exit(1);
+    }
+}
