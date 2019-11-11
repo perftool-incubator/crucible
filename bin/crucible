@@ -171,7 +171,7 @@ echo -e "command: $(basename $0) $@\n"
 
 if [ "$1" == "log" ]; then
     shift
-    $CRUCIBLE_HOME/bin/log $1 $CRUCIBLE_HOME/foo.log
+    $CRUCIBLE_HOME/bin/log $1 ${USER_STORE}/log
 elif [ "$1" == "repo" ]; then
     shift
     if [ -z "$1" ]; then
