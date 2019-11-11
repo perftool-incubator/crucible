@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+# <Need emacs setup here>
+
+# repo management infrastructure
+
+if [ ! -e $CRUCIBLE_HOME ]; then
+    echo "Could not find $CRUCIBLE_HOME, exiting."
+    exit 1
+fi
+
+function help() {
+    echo "Usage:"
+    echo "  repo <command> [command-specific-options]"
+    echo ""
+    echo "The following commands are supported"
+    echo ""
+    echo "status          |  Give high level status of the active repositories (default)"
+    echo ""
+}
+
+if [ "$1" == "help" ]; then
+    help
+    exit
+elif [ -z "$1" ]; then
+    command="status"
+else
+    command=$1
+    shift
+fi
+
+fmt_line="%-15s %-15s %-45s %-15s %-15s"
+
+function process_repo() {
+    local repo=$1
+    local alt_dir=$2
+    
+    type=$(echo "${repo}" | awk -F'/' '{ print $1 }')
+    name=$(echo "${repo}" | awk -F'/' '{ print $2 }')
+
+    if [ -z "${alt_dir}" ]; then
+	dir=$(readlink -e ${repo})
+    else
+	dir=${alt_dir}
+    fi
+
+    if pushd ${dir} > /dev/null; then
+	git_status=$(git status --porcelain=2 --branch)
+	git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
+	git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
+	git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
+	git_remote_url=$(git remote get-url ${git_remote_name})
+
+	popd > /dev/null
+    else
+	# something fishy is going on...
+	foo=1
+    fi
+
+    printf "${fmt_line}\n" "${name}" "${type}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}"
+}
+
+case "${command}" in
+    status)
+	printf "${fmt_line}\n" "Project Name" "Project Type" "Git URL" "Git Branch" "Git Remote Name"
+	
+	if [ -z "$1" -o "$1" == "crucible" -o "$1" == "all" ]; then
+	    if pushd $CRUCIBLE_HOME > /dev/null; then
+		process_repo "/crucible" $CRUCIBLE_HOME
+
+		popd > /dev/null
+	    fi
+	fi
+
+	if [ -z "$1" -o "$1" == "all" ]; then
+	    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+		for tmp_repo in $(find . -type l | sed 'sX./XX'); do
+		    process_repo ${tmp_repo}
+		done
+
+		popd > /dev/null
+	    fi
+	else
+	    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+		process_repo $1
+
+		popd > /dev/null
+	    else
+		echo "ERROR: repo '$1' could not be found!"
+		exit 1
+	    fi
+	fi
+	;;
+esac

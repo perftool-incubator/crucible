@@ -123,6 +123,8 @@ elif [ "$1" == "help" ]; then
     {
 	if [ "$1" == "log" ]; then
 	    $CRUCIBLE_HOME/bin/log help
+	elif [ "$1" == "repo" ]; then
+	    $CRUCIBLE_HOME/bin/repo help
 	elif [ "$1" == "update" ]; then
 	    $CRUCIBLE_HOME/bin/update help
 	elif [ "$1" == "gen-iterations" ]; then
@@ -170,6 +172,13 @@ echo -e "command: $(basename $0) $@\n"
 if [ "$1" == "log" ]; then
     shift
     $CRUCIBLE_HOME/bin/log $1 $CRUCIBLE_HOME/foo.log
+elif [ "$1" == "repo" ]; then
+    shift
+    if [ -z "$1" ]; then
+	$CRUCIBLE_HOME/bin/repo status
+    else
+	$CRUCIBLE_HOME/bin/repo "$@"
+    fi
 elif [ "$1" == "update" ]; then
     shift
     if [ -z "$1" ]; then

@@ -16,14 +16,17 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log update gen-iterations" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help log repo update gen-iterations" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "log update gen-iterations" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "log repo update gen-iterations" -- "${COMP_WORDS[2]}"))
                 ;;
 	    log)
 		COMPREPLY=($(compgen -W "view clear" -- "${COMP_WORDS[2]}"))
+		;;
+	    repo)
+		COMPREPLY=($(compgen -W "status" -- "${COMP_WORDS[2]}"))
 		;;
 	    update)
 		COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
@@ -32,6 +35,12 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/benchmarks/; find . -mindepth 1 -maxdepth 1 -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
                 ;;
         esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "repo" ]; then
+	case "${COMP_WORDS[2]}" in
+	    status)
+		COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[3]}"))
+		;;
+	esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "gen-iterations" ]; then
         params=""
         bench_params_file="$CRUCIBLE_HOME/subprojects/benchmarks/${COMP_WORDS[2]}/params"
