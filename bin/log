@@ -12,20 +12,32 @@ $|++;
 my $mode = $ARGV[0];
 my $filename = $ARGV[1];
 
-sub help() {
+sub help {
     print("Usage:\n");
     print("  log <command>\n");
     print("\n");
     print("The following commands are supported\n");
     print("\n");
     print("help            |  Show this help message\n");
-    print("view            |  View the crucible log (default)\n");
     print("clear           |  Clear the crucible log\n");
+    print("info            |  Display information about the log\n");
+    print("view            |  View the crucible log (default)\n");
     print("\n");
 }
 
+sub format_ts {
+    my $ts = $_[0];
+
+    my @var = localtime(int($ts));
+    my $subsec = ($ts - int($ts))*1000;
+    my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
+
+    return($timestamp);
+}
+
 if ((!($mode eq "view") &&
-     !($mode eq "clear")) ||
+     !($mode eq "clear") &&
+     !($mode eq "info")) ||
     ($mode eq "help")) {
     help();
     exit();
@@ -44,9 +56,8 @@ if ($mode eq "view") {
 	    chomp($_);
 	    my @array = split(/\s/, $_, 3);
 
-	    my @var = localtime(int($array[0]));
-	    my $subsec = ($array[0] - int($array[0]))*1000;
-	    my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
+	    my $timestamp = format_ts($array[0]);
+
 	    if ($array[1] eq "STDOUT") {
 		printf("[%s] %s\n", $timestamp, $array[2]);
 	    } elsif ($array[1] eq "STDERR") {
@@ -67,4 +78,26 @@ if ($mode eq "view") {
 	printf("ERROR: Could not open logfile '%s' for clearing!\n", $filename);
 	exit(1);
     }
+} elsif ($mode eq "info") {
+    print("Crucible log information:\n\n");
+
+    my $fmt_line = "%-25s %s\n";
+
+    printf($fmt_line, "Current Log:", $filename);
+
+    my @log_size = split(/\s+/, `du -hsc --apparent-size $filename`);
+    printf($fmt_line, "Log Size:", $log_size[0]);
+
+    if (open(LOG, "<", $filename)) {
+	my $head = <LOG>;
+	my @array = split(/\s/, $head);
+	printf($fmt_line, "First entry:", format_ts($array[0]));
+
+	close(LOG);
+    } else {
+	printf("ERROR: Could not open '%s' for reading!\n", $filename);
+	exit(1)
+    }
+
+    print("\n");
 }
