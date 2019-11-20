@@ -28,11 +28,8 @@ function help() {
 }
 
 if [ "$1" == "help" ]; then
-    shift
-    if [ -z "$1" ]; then
-        help
-        exit
-    fi
+    help
+    exit
 elif [ -z "$1" ]; then
     repo="all"
 else
