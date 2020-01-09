@@ -2,4 +2,5 @@
 multiplex            core           /multiplex                                      master                
 roadblock            core           /roadblock                                      master
 workshop             core           /workshop                                       master
-fio                  benchmark      /fio                                            master                
+fio                  benchmark      /bench-fio                                      master
+mpstat               tool           /tool-mpstat                                    master
