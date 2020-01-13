@@ -29,7 +29,7 @@ else
     shift
 fi
 
-fmt_line="%-15s %-15s %-45s %-15s %-15s"
+fmt_line="%-15s %-15s %-20s %-45s %-20s %-15s"
 
 function process_repo() {
     local repo=$1
@@ -47,9 +47,18 @@ function process_repo() {
     if pushd ${dir} > /dev/null; then
 	git_status=$(git status --porcelain=2 --branch)
 	git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
-	git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
-	git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
-	git_remote_url=$(git remote get-url ${git_remote_name})
+	git_local_branch=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+	if [ -n "${git_tracking}" ]; then
+	    git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
+	    git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
+	    git_remote_url=$(git remote get-url ${git_remote_name})
+	else
+	    # this likely means the branch is not tracking any
+	    # upstream repository branch (yet)
+	    git_remote_name="N/A"
+	    git_remote_branch="N/A"
+	    git_remote_url="N/A"
+	fi
 
 	popd > /dev/null
     else
@@ -57,12 +66,12 @@ function process_repo() {
 	foo=1
     fi
 
-    printf "${fmt_line}\n" "${name}" "${type}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}"
+    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}"
 }
 
 case "${command}" in
     status)
-	printf "${fmt_line}\n" "Project Name" "Project Type" "Git URL" "Git Branch" "Git Remote Name"
+	printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name"
 	
 	if [ -z "$1" -o "$1" == "crucible" -o "$1" == "all" ]; then
 	    if pushd $CRUCIBLE_HOME > /dev/null; then
