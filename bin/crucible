@@ -86,6 +86,7 @@ function help() {
     echo ""
     echo "help            |  Show this help message"
     echo "log             |  Work with the crucible log"
+    echo "repo            |  Crucible repository management"
     echo "update          |  Update the repositories that comprise crucible"
     echo "gen-iterations  |  Show the iterations generated for a benchmark"
     echo ""
