@@ -78,6 +78,8 @@ if [ ! -d ${USER_STORE} ]; then
     mkdir -v ${USER_STORE}
 fi
 
+LOG_DB=${USER_STORE}/log.db
+
 function help() {
     echo "Usage:"
     echo "  crucible <command> [command-specific-options]"
@@ -105,16 +107,34 @@ function setup_pipe() {
 # special case some log operations so they don't happen under log
 # redirection
 if [ "$1" == "log" ]; then
-    if [ ! -e ${USER_STORE}/log ]; then
-	touch ${USER_STORE}/log
+    if [ ! -e ${LOG_DB} -o "$2" == "init" ]; then
+	$CRUCIBLE_HOME/bin/log init ${LOG_DB}
     fi
 
     if [ "$2" == "view" -o -z "$2" ]; then
-	$CRUCIBLE_HOME/bin/log view ${USER_STORE}/log | less -S -F
+	$CRUCIBLE_HOME/bin/log view ${LOG_DB} | less -S -F
 	exit
     elif [ "$2" == "clear" ]; then
-	$CRUCIBLE_HOME/bin/log clear ${USER_STORE}/log
+	$CRUCIBLE_HOME/bin/log clear ${LOG_DB}
 	exit
+    elif [ "$2" == "init" ]; then
+	exit
+    elif [ "$2" == "insert" ]; then
+	shift
+	shift
+	${CRUCIBLE_HOME}/bin/log insert ${LOG_DB} "$@"
+	exit
+    elif [ "$2" == "debug" ]; then
+	    sqlite3 /home/krister/.crucible/log.db ".headers on" \
+		    ".echo on" \
+		    "select * from db_state;" ".print" \
+		    "select * from streams;" ".print" \
+		    "select * from sources;" ".print" \
+		    "select * from commands;" ".print" \
+		    "select * from sessions;" ".print" \
+		    "select * from lines;" \
+		| less -S -F
+	    exit
     fi
 elif [ "$1" == "help" ]; then
     # print all help output outside of the logger context to avoid
@@ -158,21 +178,18 @@ STDERR_PIPE=$(mktemp)
 setup_pipe ${STDOUT_PIPE}
 setup_pipe ${STDERR_PIPE}
 
+COMMAND="$(basename $0) $@"
+
 # launch the logger into the background
-$CRUCIBLE_HOME/bin/_logger ${USER_STORE}/log ${STDOUT_PIPE} ${STDERR_PIPE} &
+${CRUCIBLE_HOME}/bin/_logger console "${COMMAND}" ${USER_STORE}/log.db ${STDOUT_PIPE} ${STDERR_PIPE} &
 LOGGER_PID=$!
 
 # redirect the output to the pipes
 exec > ${STDOUT_PIPE} 2> ${STDERR_PIPE}
 
-# log a command separator that is only written to the log and not to the screen
-echo "CRUCIBLE_INTERNAL======================================================================"
-# log the command being invoked
-echo -e "command: $(basename $0) $@\n"
-
 if [ "$1" == "log" ]; then
     shift
-    $CRUCIBLE_HOME/bin/log $1 ${USER_STORE}/log
+    ${CRUCIBLE_HOME}/bin/log $1 ${LOG_DB}
 elif [ "$1" == "repo" ]; then
     shift
     if [ -z "$1" ]; then
@@ -203,10 +220,7 @@ echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
 echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
 
 # flush stdout to make sure all output gets processed by the logger
-stdbuf --output=0 echo
+printf "%4194304s\n" "sending a large (4KB) padded string to STDOUT to flush the buffer"
 
 # wait for the logger to exit
 wait ${LOGGER_PID}
-
-# clean up the pipes
-rm -v ${STDOUT_PIPE} ${STDERR_PIPE}
