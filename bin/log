@@ -6,11 +6,15 @@
 use strict;
 use warnings;
 
+use Time::HiRes qw(time);
+use DBI;
+use Data::Dumper;
+
 # disable output buffering
 $|++;
 
 my $mode = $ARGV[0];
-my $filename = $ARGV[1];
+my $log_filename = $ARGV[1];
 
 sub help {
     print("Usage:\n");
@@ -21,6 +25,8 @@ sub help {
     print("help            |  Show this help message\n");
     print("clear           |  Clear the crucible log\n");
     print("info            |  Display information about the log\n");
+    print("init            |  Initialize the log\n");
+    print("insert          |  Insert a message into the log\n");
     print("view            |  View the crucible log (default)\n");
     print("\n");
 }
@@ -37,45 +43,145 @@ sub format_ts {
 
 if ((!($mode eq "view") &&
      !($mode eq "clear") &&
-     !($mode eq "info")) ||
+     !($mode eq "info") &&
+     !($mode eq "init") &&
+     !($mode eq "insert")) ||
     ($mode eq "help")) {
     help();
     exit();
 }
 
-if ($filename eq "") {
-    if (! -e $filename) {
-	printf("ERROR: Log could not find the specified logfile '%s'!\n", $filename);
+my $do_init = 0;
+if (! -e $log_filename) {
+    $do_init = 1;
+} else {
+    if (($mode eq "init") && (! -z $log_filename)) {
+	print("Removing existing long and re-initializing\n");
+	unlink $log_filename;
+    }
+}
+
+my $log_dbh = DBI->connect("dbi:SQLite:dbname=" . $log_filename, "", "", { PrintError => 0 });
+if (! $log_dbh) {
+    printf("ERROR: Logger could not open SQLite DB '%s'!\n", $log_filename);
+    exit(1);
+}
+
+if (($mode eq "init") || $do_init) {
+    my $start_timestamp = time();
+
+    my $rv = $log_dbh->do("CREATE TABLE streams (id INTEGER PRIMARY KEY NOT NULL, stream TEXT UNIQUE NOT NULL);");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("CREATE TABLE sources (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, source TEXT UNIQUE NOT NULL);");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("CREATE TABLE commands (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, command TEXT UNIQUE NOT NULL);");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, timestamp REAL NOT NULL, source INTEGER NOT NULL REFERENCES sources (id), command INTEGER NOT NULL REFERENCES commands (id));");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("CREATE TABLE lines (id INTEGER PRIMARY KEY AUTOINCREMENT, session INTEGER NOT NULL REFERENCES sessions (id), timestamp REAL NOT NULL, stream INTEGER NOT NULL REFERENCES streams (id), line TEXT);");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("CREATE TABLE db_state (timestamp REAL PRIMARY KEY NOT NULL);");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("INSERT INTO db_state (timestamp) VALUES ($start_timestamp);");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("INSERT INTO streams (id, stream) VALUES (1, 'STDOUT');");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("INSERT INTO streams (id, stream) VALUES (2, 'STDERR');");
+    if ($rv < 0) {
+	print $DBI::errstr;
 	exit(1);
     }
 }
 
 if ($mode eq "view") {
-    if (open(LOG, "<", $filename)) {
-	while(<LOG>) {
-	    chomp($_);
-	    my @array = split(/\s/, $_, 3);
-
-	    my $timestamp = format_ts($array[0]);
-
-	    if ($array[1] eq "STDOUT") {
-		printf("[%s] %s\n", $timestamp, $array[2]);
-	    } elsif ($array[1] eq "STDERR") {
-		printf("[%s][STDERR] %s\n", $timestamp, $array[2]);
-	    }
-	}
-
-	close(LOG);
-    } else {
-	printf("ERROR: Could not open logfile '%s' for reading!\n", $filename);
+    my $sth = $log_dbh->prepare("SELECT ".
+				"sessions.timestamp AS session_timestamp, " .
+				"commands.command AS session_command, " .
+				"sources.source AS session_source, " .
+				"lines.timestamp AS line_timestamp, " .
+				"lines.line AS line, " .
+				"streams.stream AS line_stream " .
+				"FROM sessions " .
+				"JOIN lines ON sessions.id=lines.session " .
+				"JOIN streams ON streams.id=lines.stream " .
+				"JOIN sources ON sources.id=sessions.source " .
+				"JOIN commands ON commands.id=sessions.command " .
+				"ORDER BY sessions.timestamp;");
+    my $rv = $sth->execute() or die $DBI::errstr;
+    if ($rv < 0) {
+	print $DBI::errstr;
 	exit(1);
     }
+
+    my $last_session_timestamp = -1;
+    while (my $row = $sth->fetchrow_hashref()) {
+	$row->{'session_timestamp_fmt'} = format_ts($row->{'session_timestamp'});
+	$row->{'line_timestamp_fmt'} = format_ts($row->{'line_timestamp'});
+
+	if ($last_session_timestamp != $row->{'session_timestamp'}) {
+	    printf("==============================================================================================\n");
+	    printf("[%s][%s][%s] command: %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_command'});
+	    printf("[%s][%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'});
+
+	    $last_session_timestamp = $row->{'session_timestamp'};
+	}
+
+	printf("[%s][%s][%s] %s\n", $row->{'line_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'line'});
+    }
 } elsif ($mode eq "clear") {
-    if (open(LOG, ">", $filename)) {
-	print(LOG "");
-	close(LOG);
-    } else {
-	printf("ERROR: Could not open logfile '%s' for clearing!\n", $filename);
+    my $rv = $log_dbh->do("DELETE FROM lines");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("DELETE FROM sessions");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("DELETE FROM sources");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $rv = $log_dbh->do("DELETE FROM commands");
+    if ($rv < 0) {
+	print $DBI::errstr;
 	exit(1);
     }
 } elsif ($mode eq "info") {
@@ -83,21 +189,133 @@ if ($mode eq "view") {
 
     my $fmt_line = "%-25s %s\n";
 
-    printf($fmt_line, "Current Log:", $filename);
+    printf($fmt_line, "Current Log:", $log_filename);
 
-    my @log_size = split(/\s+/, `du -hsc --apparent-size $filename`);
+    my @log_size = split(/\s+/, `du -hsc --apparent-size $log_filename`);
     printf($fmt_line, "Log Size:", $log_size[0]);
 
-    if (open(LOG, "<", $filename)) {
-	my $head = <LOG>;
-	my @array = split(/\s/, $head);
-	printf($fmt_line, "First entry:", format_ts($array[0]));
-
-	close(LOG);
-    } else {
-	printf("ERROR: Could not open '%s' for reading!\n", $filename);
-	exit(1)
+    my $sth = $log_dbh->prepare("SELECT timestamp FROM sessions ORDER BY timestamp ASC LIMIT 1;");
+    my $rv = $sth->execute() or die $DBI::errstr;
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
     }
 
+    my $row = $sth->fetchrow_hashref();
+    printf($fmt_line, "First session:", format_ts($row->{'timestamp'}));
+
+
+    $sth = $log_dbh->prepare("SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT 1;");
+    $rv = $sth->execute() or die $DBI::errstr;
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $row = $sth->fetchrow_hashref();
+    printf($fmt_line, "Last session:", format_ts($row->{'timestamp'}));
+
+
+    $sth = $log_dbh->prepare("SELECT count(timestamp) AS sessions FROM sessions;");
+    $rv = $sth->execute() or die $DBI::errstr;
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    $row = $sth->fetchrow_hashref();
+    printf($fmt_line, "Total sessions:", $row->{'sessions'});
+
+
     print("\n");
+} elsif ($mode eq "insert") {
+    my $source = $ARGV[2];
+    my $stream = $ARGV[3];
+    my $msg = $ARGV[4];
+    my $start_timestamp = time();
+
+    if ($source eq "") {
+	printf(STDERR "ERROR: You must provide a message source!\n");
+	exit(1);
+    }
+
+    if (!($stream eq "STDOUT") && !($stream eq "STDERR")) {
+	printf(STDERR "ERROR: You must provid a valid stream (either STDOUT or STDERR)!\n");
+	exit(1);
+    }
+
+    if ($msg eq "") {
+	printf(STDERR "ERROR: You must provide a message!\n");
+	exit(1);
+    }
+
+    my $rv = $log_dbh->do("UPDATE db_state SET timestamp=$start_timestamp;");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    my $sth = $log_dbh->prepare("SELECT id FROM sources WHERE source=" . $log_dbh->quote($source) . ";");
+    $rv = $sth->execute() or die $DBI::errstr;
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    my $source_id;
+    my $rows = 0;
+    while (my $row = $sth->fetchrow_hashref()) {
+	$source_id = $row->{'id'};
+	$rows += 1;
+    }
+
+    if ($rows == 0) {
+	$rv = $log_dbh->do("INSERT INTO sources (source) VALUES (" . $log_dbh->quote($source) . ");");
+	if ($rv < 0) {
+	    print $DBI::errstr;
+	    exit(1);
+	}
+	$source_id = $log_dbh->last_insert_id("", "", "sources", "");
+    }
+
+    my $command = "crucible log insert";
+
+    $sth = $log_dbh->prepare("SELECT id FROM commands WHERE command=" . $log_dbh->quote($command) . ";");
+    $rv = $sth->execute() or die $DBI::errstr;
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
+    my $command_id;
+    $rows = 0;
+    while (my $row = $sth->fetchrow_hashref()) {
+	$command_id = $row->{'id'};
+	$rows += 1;
+    }
+
+    if ($rows == 0) {
+	$rv = $log_dbh->do("INSERT INTO commands (command) VALUES (" . $log_dbh->quote($command) . ");");
+	if ($rv < 0) {
+	    print $DBI::errstr;
+	    exit(1);
+	}
+	$command_id = $log_dbh->last_insert_id("", "", "commands", "");
+    }
+
+    $rv = $log_dbh->do("INSERT INTO sessions (timestamp, source, command) VALUES ($start_timestamp, $source_id, $command_id);");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+    my $session_id = $log_dbh->last_insert_id("", "", "sessions", "");
+
+    $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) SELECT $session_id, $start_timestamp, id, " . $log_dbh->quote($msg) . " FROM streams WHERE stream=" . $log_dbh->quote($stream) . ";");
+    if ($rv < 0) {
+	print $DBI::errstr;
+	exit(1);
+    }
+
 }
+
+$log_dbh->disconnect();
