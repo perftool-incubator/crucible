@@ -104,13 +104,15 @@ function setup_pipe() {
     mknod ${PIPE} p
 }
 
+# make sure that the log is initialized if it has not been done
+# previously
+if [ ! -e ${LOG_DB} ]; then
+    $CRUCIBLE_HOME/bin/log init ${LOG_DB}
+fi
+
 # special case some log operations so they don't happen under log
 # redirection
 if [ "$1" == "log" ]; then
-    if [ ! -e ${LOG_DB} -o "$2" == "init" ]; then
-	$CRUCIBLE_HOME/bin/log init ${LOG_DB}
-    fi
-
     if [ "$2" == "view" -o -z "$2" ]; then
 	$CRUCIBLE_HOME/bin/log view ${LOG_DB} | less -S -F
 	exit
@@ -118,6 +120,7 @@ if [ "$1" == "log" ]; then
 	$CRUCIBLE_HOME/bin/log clear ${LOG_DB}
 	exit
     elif [ "$2" == "init" ]; then
+	$CRUCIBLE_HOME/bin/log init ${LOG_DB}
 	exit
     elif [ "$2" == "insert" ]; then
 	shift
