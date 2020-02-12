@@ -17,11 +17,8 @@ if [ ! -z "$missing_bins" ]; then
 fi
 
 # Find the git repo base directory
-this_pwd="`/bin/pwd`"
-this_dirname="/`/bin/dirname $0 | /bin/sed -e 'sX^\./XX' -e 'sX^.$XX'`"
-crucible_repo_bin_dir="` echo $this_pwd$this_dirname | sed -e 'sX/$XX'`"
-echo "$crucible_repo_bin_dir" | /bin/grep -q '/bin$' || exit_error "Expected \"bin\" in path immediately preceeding \"install\""
-crucible_repo_dir="`echo $crucible_repo_bin_dir | sed -e 'sX/binXX'`"
+crucible_repo_bin_dir=$(dirname `readlink -e $0`)
+crucible_repo_dir=$(echo $crucible_repo_bin_dir | sed -e 'sX/binXX')
 
 # The three sections below use sudo to install files and links as root.
 # This script could be run by root (in which the sudo does not matter),
