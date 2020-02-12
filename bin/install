@@ -13,15 +13,12 @@ for bin in sed git; do
     which $bin >/dev/null 2>&1 || missing_bins="$missing_bins $bin"
 done
 if [ ! -z "$missing_bins" ]; then
-    exit_error "Could not find the following, lease install and try again: $missing_bins"
+    exit_error "Could not find the following, please install and try again: $missing_bins"
 fi
 
 # Find the git repo base directory
-this_pwd="`/bin/pwd`"
-this_dirname="/`/bin/dirname $0 | /bin/sed -e 'sX^\./XX' -e 'sX^.$XX'`"
-crucible_repo_bin_dir="` echo $this_pwd$this_dirname | sed -e 'sX/$XX'`"
-echo "$crucible_repo_bin_dir" | /bin/grep -q '/bin$' || exit_error "Expected \"bin\" in path immediately preceeding \"install\""
-crucible_repo_dir="`echo $crucible_repo_bin_dir | sed -e 'sX/binXX'`"
+crucible_repo_bin_dir=$(dirname `readlink -e $0`)
+crucible_repo_dir=$(echo $crucible_repo_bin_dir | sed -e 'sX/binXX')
 
 # The three sections below use sudo to install files and links as root.
 # This script could be run by root (in which the sudo does not matter),
@@ -40,14 +37,14 @@ if [ -d /etc/profile.d ]; then
         sudo ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
         . "$crucible_repo_bin_dir/_crucible_completions"
     else
-        echo "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
+        exit_error "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
     fi
 fi
 # Install the only bin we need for crucible in /usr/bin
 if [ -e "$crucible_repo_bin_dir/crucible" ]; then
     sudo ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
 else
-    echo "file $crucible_repo_bin_dir/crucible was not found, exiting"
+    exit_error "file $crucible_repo_bin_dir/crucible was not found, exiting"
 fi
 
 # Load the subprojects from ./config/default_subprojects, then from $HOME/.crucible/subprojects to get local overrides
@@ -65,7 +62,7 @@ for conf_file in "$crucible_repo_dir/config/default_subprojects" "$HOME/.crucibl
 done
 
 no_clone=""
-pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change direcotry to $crucible_repo_dir"
+pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change directory to $crucible_repo_dir"
 /bin/mkdir -p subprojects/benchmarks subprojects/tools subprojects/core
 for subproject in "${!subprojects[@]}"; do
     sp_type=`echo ${subprojects[$subproject]} | awk '{print $2}'`
