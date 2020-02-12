@@ -5,6 +5,9 @@
 # update a git repository from the current working directory
 
 if [ -d "./.git" ]; then
+    # pull updates from remote(s)
+    git remote update
+
     # store any local changes
     stash_output=$(git stash)
     echo -e ${stash_output}
