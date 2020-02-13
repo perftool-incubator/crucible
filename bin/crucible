@@ -115,7 +115,9 @@ fi
 # redirection
 if [ "$1" == "log" ]; then
     if [ "$2" == "view" -o -z "$2" ]; then
-	$CRUCIBLE_HOME/bin/log view ${LOG_DB} | less -S -F
+	shift
+	shift
+	$CRUCIBLE_HOME/bin/log view ${LOG_DB} "$@" | less -S -F
 	exit
     elif [ "$2" == "clear" ]; then
 	$CRUCIBLE_HOME/bin/log clear ${LOG_DB}
