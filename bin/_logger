@@ -9,6 +9,9 @@ use warnings;
 use Time::HiRes qw(time);
 use IO::Select;
 use DBI;
+use threads;
+use threads::shared;
+use Thread::Semaphore;
 
 # disable STDOUT output buffering
 $|++;
@@ -127,8 +130,18 @@ my $pipe_flush_str = "CRUCIBLE_PIPE_FLUSH";
 my $stdout_pipe_flush_str = sprintf("STDOUT->%s\n", $pipe_flush_str);
 my $stderr_pipe_flush_str = sprintf("STDERR->%s\n", $pipe_flush_str);
 
-my $select_on_stdout = 1;
-my $select_on_stderr = 1;
+my $select_on_stdout : shared = 1;
+my $select_on_stderr : shared = 1;
+
+my $stdout_flush_lock = new Thread::Semaphore(1);
+my $stderr_flush_lock = new Thread::Semaphore(1);
+
+$stdout_flush_lock->down();
+$stderr_flush_lock->down();
+
+my $stdout_flusher_thread = threads->create('flusher_thread', 'stdout', $stdout_pipe, $stdout_pipe_flush_str, \$select_on_stdout, $stdout_flush_lock);
+my $stderr_flusher_thread = threads->create('flusher_thread', 'stderr', $stderr_pipe, $stderr_pipe_flush_str, \$select_on_stderr, $stderr_flush_lock);
+
 
 while($s->count()) {
     my @ready = $s->can_read(0.5);
@@ -142,10 +155,12 @@ while($s->count()) {
     # synchronous writes would cause a deadlock
     if (scalar(@ready) == 0) {
 	if ($select_on_stdout) {
-	    system("printf \"$stdout_pipe_flush_str\" > $stdout_pipe &");
+	    #print "signaling flush on 'stdout'\n";
+	    $stdout_flush_lock->up();
 	}
 	if ($select_on_stderr) {
-	    system("printf \"$stderr_pipe_flush_str\" > $stderr_pipe &");
+	    #print "signaling flush on 'stderr'\n";
+	    $stderr_flush_lock->up();
 	}
 	next;
     }
@@ -176,6 +191,7 @@ while($s->count()) {
 	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
 		$s->remove($stdout_fh);
 		$select_on_stdout = 0;
+		$stdout_flush_lock->up();
 		close($stdout_fh);
 		#print("Closed STDOUT pipe\n");
 		#$logit = 1;
@@ -189,6 +205,7 @@ while($s->count()) {
 	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
 		$s->remove($stderr_fh);
 		$select_on_stderr = 0;
+		$stderr_flush_lock->up();
 		close($stderr_fh);
 		#print("Closed STDERR pipe\n");
 		#$logit = 1;
@@ -208,6 +225,29 @@ while($s->count()) {
     }
 }
 
+$stdout_flusher_thread->join();
+$stderr_flusher_thread->join();
+
 $log_dbh->disconnect();
 
 unlink $stdout_pipe, $stderr_pipe;
+
+exit;
+
+sub flusher_thread {
+    my ($type, $pipe_file, $flush_str, $loop, $lock) = @_;
+
+    my $pipe_fh;
+
+    while ($$loop) {
+	if ($lock->down_timed(1)) {
+	    if ($$loop) {
+		if (open($pipe_fh, ">", $pipe_file)) {
+		    #print "flushing '" . $type . "'\n";
+		    printf { $pipe_fh } "%s", $flush_str;
+		    close($pipe_fh);
+		}
+	    }
+	}
+    }
+}
