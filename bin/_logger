@@ -123,12 +123,41 @@ my $s = IO::Select->new();
 $s->add($stdout_fh);
 $s->add($stderr_fh);
 
+my $pipe_flush_str = "CRUCIBLE_PIPE_FLUSH";
+my $stdout_pipe_flush_str = sprintf("STDOUT->%s\n", $pipe_flush_str);
+my $stderr_pipe_flush_str = sprintf("STDERR->%s\n", $pipe_flush_str);
+
+my $select_on_stdout = 1;
+my $select_on_stderr = 1;
+
 while($s->count()) {
-    my @ready = $s->can_read(1);
+    my @ready = $s->can_read(0.5);
+
+    # if no file handles are ready let's flush the pipes to make sure
+    # buffering is not getting in the way -- only do this if we are
+    # still polling on the individual file handles
+    #
+    # we do this via background system calls so that they can be
+    # performed asynchronously to our own reading from the pipes --
+    # synchronous writes would cause a deadlock
+    if (scalar(@ready) == 0) {
+	if ($select_on_stdout) {
+	    system("printf \"$stdout_pipe_flush_str\" > $stdout_pipe &");
+	}
+	if ($select_on_stderr) {
+	    system("printf \"$stderr_pipe_flush_str\" > $stderr_pipe &");
+	}
+	next;
+    }
 
     foreach my $fh (@ready) {
 	$_ = readline($fh);
 	if (!defined($_)) {
+	    next;
+	}
+
+	# if a pipe flush is encountered then skip processing it
+	if ($_ =~ /$pipe_flush_str/) {
 	    next;
 	}
 
@@ -146,6 +175,7 @@ while($s->count()) {
 
 	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
 		$s->remove($stdout_fh);
+		$select_on_stdout = 0;
 		close($stdout_fh);
 		#print("Closed STDOUT pipe\n");
 		#$logit = 1;
@@ -158,6 +188,7 @@ while($s->count()) {
 
 	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
 		$s->remove($stderr_fh);
+		$select_on_stderr = 0;
 		close($stderr_fh);
 		#print("Closed STDERR pipe\n");
 		#$logit = 1;

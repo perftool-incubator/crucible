@@ -230,8 +230,5 @@ fi
 echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
 echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
 
-# flush stdout to make sure all output gets processed by the logger
-printf "%4194304s\n" "sending a large (4KB) padded string to STDOUT to flush the buffer"
-
 # wait for the logger to exit
 wait ${LOGGER_PID}
