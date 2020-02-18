@@ -13,7 +13,8 @@
 	    "git",
 	    "perl",
 	    "perl-DBD-SQLite",
-	    "perl-Time-HiRes"
+	    "perl-Time-HiRes",
+	    "perl-Thread-Queue"
 	],
 	"groups": []
     }
