@@ -131,7 +131,7 @@ if [ "$1" == "log" ]; then
 	${CRUCIBLE_HOME}/bin/log insert ${LOG_DB} "$@"
 	exit
     elif [ "$2" == "debug" ]; then
-	    sqlite3 /home/krister/.crucible/log.db ".headers on" \
+	    sqlite3 ${LOG_DB} ".headers on" \
 		    ".echo on" \
 		    "select * from db_state;" ".print" \
 		    "select * from streams;" ".print" \
