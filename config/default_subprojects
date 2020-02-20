@@ -3,5 +3,6 @@ rickshaw             core           /rickshaw                                   
 multiplex            core           /multiplex                                      master
 roadblock            core           /roadblock                                      master
 workshop             core           /workshop                                       master
+junk-drawer          core           /junk-drawer                                    master
 fio                  benchmark      /bench-fio                                      master
 mpstat               tool           /tool-mpstat                                    master
