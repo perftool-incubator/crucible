@@ -29,7 +29,7 @@
 #                                   and/or containers) and
 #                                   this controller
 #
-# Workshop          <TBD>           Image management for      Under Development
+# Workshop          workshop        Image management for      Under Development
 #                                   endpoint execution
 #
 # <tools-project>   register-tool   Integrate various tools   Not implemented
@@ -90,6 +90,7 @@ function help() {
     echo "log             |  Work with the crucible log"
     echo "repo            |  Crucible repository management"
     echo "update          |  Update the repositories that comprise crucible"
+    echo "workshop        |  Build container images"
     echo "gen-iterations  |  Show the iterations generated for a benchmark"
     echo ""
     echo "For more detailed help for each command, try:"
@@ -114,7 +115,9 @@ fi
 # redirection
 if [ "$1" == "log" ]; then
     if [ "$2" == "view" -o -z "$2" ]; then
-	$CRUCIBLE_HOME/bin/log view ${LOG_DB} | less -S -F
+	shift
+	shift
+	$CRUCIBLE_HOME/bin/log view ${LOG_DB} "$@" | less -S -F
 	exit
     elif [ "$2" == "clear" ]; then
 	$CRUCIBLE_HOME/bin/log clear ${LOG_DB}
@@ -128,7 +131,7 @@ if [ "$1" == "log" ]; then
 	${CRUCIBLE_HOME}/bin/log insert ${LOG_DB} "$@"
 	exit
     elif [ "$2" == "debug" ]; then
-	    sqlite3 /home/krister/.crucible/log.db ".headers on" \
+	    sqlite3 ${LOG_DB} ".headers on" \
 		    ".echo on" \
 		    "select * from db_state;" ".print" \
 		    "select * from streams;" ".print" \
@@ -151,6 +154,8 @@ elif [ "$1" == "help" ]; then
 	    $CRUCIBLE_HOME/bin/repo help
 	elif [ "$1" == "update" ]; then
 	    $CRUCIBLE_HOME/bin/update help
+	elif [ "$1" == "workshop" ]; then
+	    $CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --help
 	elif [ "$1" == "gen-iterations" ]; then
             shift
             if [ -z "$1" ]; then
@@ -207,6 +212,9 @@ elif [ "$1" == "update" ]; then
     else
 	$CRUCIBLE_HOME/bin/update $1
     fi
+elif [ "$1" == "workshop" ]; then
+    shift
+    $CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl "$@"
 elif [ "$1" == "gen-iterations" ]; then
     shift
     benchmark=$1
@@ -221,9 +229,6 @@ fi
 # the pipes
 echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
 echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
-
-# flush stdout to make sure all output gets processed by the logger
-printf "%4194304s\n" "sending a large (4KB) padded string to STDOUT to flush the buffer"
 
 # wait for the logger to exit
 wait ${LOGGER_PID}

@@ -1,0 +1,27 @@
+{
+    "targets": {
+	"fedora31-crucible-controller": {
+	    "packages": [
+		"git",
+		"crucible"
+	    ]
+	}
+    },
+    "packages": {
+	"git": {
+	    "type": "distro",
+	    "distro_info": {
+		"pkg_name": "git"
+	    }
+	},
+	"crucible": {
+	    "type": "manual",
+	    "manual_info": {
+		"commands": [
+		    "git clone https://github.com/perftool-incubator/crucible.git /opt/crucible",
+		    "/opt/crucible/bin/install"
+		]
+	    }
+	}
+    }
+}

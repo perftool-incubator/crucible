@@ -126,6 +126,21 @@ if (($mode eq "init") || $do_init) {
 }
 
 if ($mode eq "view") {
+    my $filter_cmd = "";
+    if (defined($ARGV[2])) {
+	$filter_cmd = $ARGV[2];
+    }
+    my $filter_query = "";
+    if ($filter_cmd eq 'first') {
+	$filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp ASC LIMIT 1)";
+    } elsif ($filter_cmd eq 'last') {
+	$filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp DESC LIMIT 1)";
+    } elsif ($filter_cmd eq 'sessionid') {
+	if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is' && $ARGV[4] =~ /[0-9]+\.[0-9]+/) {
+	    $filter_query = "WHERE sessions.timestamp = $ARGV[4]";
+	}
+    }
+
     my $sth = $log_dbh->prepare("SELECT ".
 				"sessions.timestamp AS session_timestamp, " .
 				"commands.command AS session_command, " .
@@ -138,6 +153,7 @@ if ($mode eq "view") {
 				"JOIN streams ON streams.id=lines.stream " .
 				"JOIN sources ON sources.id=sessions.source " .
 				"JOIN commands ON commands.id=sessions.command " .
+				"$filter_query " .
 				"ORDER BY sessions.timestamp;");
     my $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
@@ -152,7 +168,8 @@ if ($mode eq "view") {
 
 	if ($last_session_timestamp != $row->{'session_timestamp'}) {
 	    printf("==============================================================================================\n");
-	    printf("[%s][%s][%s] command: %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_command'});
+	    printf("[%s][%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_timestamp'});
+	    printf("[%s][%s][%s] command:    %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_command'});
 	    printf("[%s][%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'});
 
 	    $last_session_timestamp = $row->{'session_timestamp'};

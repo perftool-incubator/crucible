@@ -6,9 +6,13 @@
 use strict;
 use warnings;
 
-use Time::HiRes qw(time);
+use Time::HiRes qw(time sleep);
 use IO::Select;
 use DBI;
+use threads qw(yield);
+use threads::shared qw(share);
+use Thread::Semaphore;
+use Thread::Queue;
 
 # disable STDOUT output buffering
 $|++;
@@ -23,8 +27,6 @@ my $start_timestamp = time();
 my $session_id;
 
 my $log_dbh;
-my $stdout_fh;
-my $stderr_fh;
 
 # prevent CTRL-C from tearing down the logger while it is processing
 # the logger should gracefully exit on it's own
@@ -107,76 +109,219 @@ if (! $log_dbh) {
 	exit(1);
     }
     $session_id = $log_dbh->last_insert_id("", "", "sessions", "");
+
+    $log_dbh->disconnect();
 }
 
-if (!open($stdout_fh, "<", $stdout_pipe)) {
-    printf("ERROR: Logger could not open the stdout pipe '%s'!\n", $stdout_pipe);
-    exit(1);
-}
+my $pipe_flush_str = "CRUCIBLE_PIPE_FLUSH";
+my $stdout_pipe_flush_str = sprintf("STDOUT->%s\n", $pipe_flush_str);
+my $stderr_pipe_flush_str = sprintf("STDERR->%s\n", $pipe_flush_str);
 
-if (!open($stderr_fh, "<", $stderr_pipe)) {
-    printf("ERROR: Logger could not open the stderr pipe '%s'!\n", $stderr_pipe);
-    exit(1);
-}
+my $select_on_stdout : shared = 1;
+my $select_on_stderr : shared = 1;
 
-my $s = IO::Select->new();
-$s->add($stdout_fh);
-$s->add($stderr_fh);
+my $stdout_flush_lock = new Thread::Semaphore(1);
+my $stderr_flush_lock = new Thread::Semaphore(1);
 
-while($s->count()) {
-    my @ready = $s->can_read(1);
+my $log_queue = new Thread::Queue;
 
-    foreach my $fh (@ready) {
-	$_ = readline($fh);
-	if (!defined($_)) {
-	    next;
-	}
+$stdout_flush_lock->down();
+$stderr_flush_lock->down();
 
-	my $ts = time();
-	chomp($_);
+# start the threads
+my $log_consumer_thread = threads->create('pipe_processor', $stdout_pipe, $stderr_pipe, \$select_on_stdout, \$select_on_stderr, $stdout_flush_lock, $stderr_flush_lock, $log_queue);
+my $db_logger_thread = threads->create('db_logger', $log_filename, $log_queue, \$select_on_stdout, \$select_on_stderr);
+my $stdout_flusher_thread = threads->create('flusher_thread', 'stdout', $stdout_pipe, $stdout_pipe_flush_str, \$select_on_stdout, $stdout_flush_lock);
+my $stderr_flusher_thread = threads->create('flusher_thread', 'stderr', $stderr_pipe, $stderr_pipe_flush_str, \$select_on_stderr, $stderr_flush_lock);
 
-	my @var = localtime(int($ts));
-	my $subsec = ($ts - int($ts))*1000;
-	my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
+# wait for the threads to exit
+$log_consumer_thread->join();
+$db_logger_thread->join();
+$stdout_flusher_thread->join();
+$stderr_flusher_thread->join();
 
-	my $stream = "0";
-	my $logit = 0;
-	if ($fh == $stdout_fh) {
-	    $stream = "STDOUT";
+unlink $stdout_pipe, $stderr_pipe;
 
-	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
-		$s->remove($stdout_fh);
-		close($stdout_fh);
-		#print("Closed STDOUT pipe\n");
-		#$logit = 1;
-	    } else {
-		$logit = 1;
-		printf("[%s][%s][STDOUT] %s\n", $timestamp, $source, $_);
-	    }
-	} elsif ($fh == $stderr_fh) {
-	    $stream = "STDERR";
+exit;
 
-	    if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
-		$s->remove($stderr_fh);
-		close($stderr_fh);
-		#print("Closed STDERR pipe\n");
-		#$logit = 1;
-	    } else {
-		$logit = 1;
-		printf(STDERR "[%s][%s][STDERR] %s\n", $timestamp, $source, $_);
-	    }
-	}
+sub flusher_thread {
+    my ($type, $pipe_file, $flush_str, $loop, $lock) = @_;
 
-	if ($logit) {
-	    my $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) SELECT $session_id, $ts, id, " . $log_dbh->quote($_) . " FROM streams WHERE stream=" . $log_dbh->quote($stream) . ";");
-	    if ($rv < 0) {
-		print $DBI::errstr;
-		exit(1);
+    my $pipe_fh;
+
+    while ($$loop) {
+	if ($lock->down_timed(1)) {
+	    if ($$loop) {
+		if (open($pipe_fh, ">", $pipe_file)) {
+		    #print "flushing '" . $type . "'\n";
+		    printf { $pipe_fh } "%s", $flush_str;
+		    close($pipe_fh);
+		}
 	    }
 	}
     }
 }
 
-$log_dbh->disconnect();
+sub pipe_processor {
+    my ($stdout_pipe, $stderr_pipe,
+	$select_on_stdout, $select_on_stderr,
+	$stdout_flush_lock, $stderr_flush_lock,
+	$queue) = @_;
 
-unlink $stdout_pipe, $stderr_pipe;
+    my $stdout_fh;
+    my $stderr_fh;
+
+    if (!open($stdout_fh, "<", $stdout_pipe)) {
+	printf("ERROR: Logger could not open the stdout pipe '%s'!\n", $stdout_pipe);
+	exit(1);
+    }
+
+    if (!open($stderr_fh, "<", $stderr_pipe)) {
+	printf("ERROR: Logger could not open the stderr pipe '%s'!\n", $stderr_pipe);
+	exit(1);
+    }
+
+    my $s = IO::Select->new();
+    $s->add($stdout_fh);
+    $s->add($stderr_fh);
+
+    while($s->count()) {
+	my @ready = $s->can_read(0.5);
+
+	# if no file handles are ready let's flush the pipes to make sure
+	# buffering is not getting in the way -- only do this if we are
+	# still polling on the individual file handles
+	#
+	# we do this via background system calls so that they can be
+	# performed asynchronously to our own reading from the pipes --
+	# synchronous writes would cause a deadlock
+	if (scalar(@ready) == 0) {
+	    if ($$select_on_stdout) {
+		#print "signaling flush on 'stdout'\n";
+		$stdout_flush_lock->up();
+	    }
+	    if ($$select_on_stderr) {
+		#print "signaling flush on 'stderr'\n";
+		$stderr_flush_lock->up();
+	    }
+	    next;
+	}
+
+	foreach my $fh (@ready) {
+	    my $ts = time();
+	    $_ = readline($fh);
+
+	    if (!defined($_)) {
+		next;
+	    }
+
+	    # if a pipe flush is encountered then skip processing it
+	    if ($_ =~ /$pipe_flush_str/) {
+		next;
+	    }
+
+	    chomp($_);
+
+	    my $stream = "0";
+	    my $stream_id = -1;
+	    my $logit = 0;
+	    if ($fh == $stdout_fh) {
+		$stream = "STDOUT";
+		$stream_id = 0;
+
+		if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
+		    $s->remove($stdout_fh);
+		    $$select_on_stdout = 0;
+		    $stdout_flush_lock->up();
+		    close($stdout_fh);
+		    #print("Closed STDOUT pipe\n");
+		    #$logit = 1;
+		} else {
+		    $logit = 1;
+		}
+	    } elsif ($fh == $stderr_fh) {
+		$stream = "STDERR";
+		$stream_id = 1;
+
+		if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
+		    $s->remove($stderr_fh);
+		    $$select_on_stderr = 0;
+		    $stderr_flush_lock->up();
+		    close($stderr_fh);
+		    #print("Closed STDERR pipe\n");
+		    #$logit = 1;
+		} else {
+		    $logit = 1;
+		}
+	    }
+
+	    if ($logit) {
+		my $obj : shared = shared_clone({});
+		bless($obj, 'log_message_in');
+
+		$obj->{'session_id'} = $session_id;
+		$obj->{'ts'} = $ts;
+		$obj->{'message'} = $_;
+		$obj->{'stream'} = $stream;
+		$obj->{'source'} = $source;
+		$obj->{'stream_id'} = $stream_id;
+
+		$queue->enqueue($obj);
+	    }
+	}
+    }
+}
+
+sub db_logger {
+    my ($log_filename, $queue, $select_on_stdout, $select_on_stderr) = @_;
+
+    my $log_entry;
+    my $db_connected = 0;
+
+    my $log_dbh = DBI->connect("dbi:SQLite:dbname=" . $log_filename, "", "", { PrintError => 0 });
+
+    # if we cannot log the messages to the database due to some
+    # unforseen problem, we should at least log them to the terminal
+    # so we do not exit
+    if (! $log_dbh) {
+	printf("ERROR: Logger thread could not open SQLite DB '%s'!\n", $log_filename);
+    } else {
+	$db_connected = 1;
+    }
+
+    while($$select_on_stdout || $$select_on_stderr || $queue->pending()) {
+	undef($log_entry);
+
+	$log_entry = $queue->dequeue_nb();
+
+	if (defined($log_entry)) {
+	    my @var = localtime(int($log_entry->{'ts'}));
+	    my $subsec = ($log_entry->{'ts'} - int($log_entry->{'ts'}))*1000;
+	    my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
+
+	    if ($log_entry->{'stream_id'} == 0) {
+		printf("[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
+	    } elsif ($log_entry->{'stream_id'} == 1) {
+		printf(STDERR "[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
+	    }
+
+	    if ($db_connected) {
+		my $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) " .
+				      "SELECT " . $log_entry->{'session_id'} . ", " . $log_entry->{'ts'} . ", id, " . $log_dbh->quote($log_entry->{'message'}) . " " .
+				      "FROM streams WHERE stream=" . $log_dbh->quote($log_entry->{'stream'}) . ";");
+
+		if ($rv < 0) {
+		    print $DBI::errstr;
+		    $db_connected = 0;
+		    $log_dbh->disconnect();
+		}
+	    }
+	} else {
+	    sleep(0.25);
+	}
+    }
+
+    if ($db_connected) {
+	$log_dbh->disconnect();
+    }
+}
