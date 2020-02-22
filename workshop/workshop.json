@@ -1,20 +1,25 @@
 {
-    "targets": {
-	"fedora31-crucible-controller": {
-	    "packages": [
+    "userenvs": [
+	{
+	    "name": "fedora31-crucible-controller",
+	    "requirements": [
 		"git",
 		"crucible"
 	    ]
 	}
-    },
-    "packages": {
-	"git": {
+    ],
+    "requirements": [
+	{
+	    "name": "git",
 	    "type": "distro",
 	    "distro_info": {
-		"pkg_name": "git"
+		"packages": [
+		    "git"
+		]
 	    }
 	},
-	"crucible": {
+	{
+	    "name": "crucible",
 	    "type": "manual",
 	    "manual_info": {
 		"commands": [
@@ -23,5 +28,5 @@
 		]
 	    }
 	}
-    }
+    ]
 }
