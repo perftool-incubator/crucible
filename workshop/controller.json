@@ -2,7 +2,7 @@
     "userenv": {
 	"name": "fedora31-crucible-controller",
 	"label": "Fedora 31 Crucible Controller",
-	"source": {
+	"origin": {
 	    "image": "docker.io/library/fedora",
 	    "tag": "31"
 	},
