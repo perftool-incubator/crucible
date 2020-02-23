@@ -1,4 +1,9 @@
 {
+    "workshop": {
+        "schema": {
+            "version": "2020.02.23"
+        }
+    },
     "userenv": {
 	"name": "fedora31-crucible-controller",
 	"label": "Fedora 31 Crucible Controller",
