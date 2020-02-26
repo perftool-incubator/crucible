@@ -92,6 +92,7 @@ function help() {
     echo "update          |  Update the repositories that comprise crucible"
     echo "workshop        |  Build container images"
     echo "gen-iterations  |  Show the iterations generated for a benchmark"
+    echo "wrapper         |  Run user supplied programs inside a crucible wrapper for logging purposes"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
@@ -227,6 +228,10 @@ elif [ "$1" == "gen-iterations" ]; then
     shift
     "$CRUCIBLE_HOME"/subprojects/core/multiplex/multiplex \
         "$CRUCIBLE_HOME/subprojects/benchmarks/$benchmark/params.json" "$@"
+    RET_VAL=$?
+elif [ "$1" == "wrapper" ]; then
+    shift
+    "$@"
     RET_VAL=$?
 else
     echo "This function has not been implemented"
