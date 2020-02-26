@@ -118,18 +118,18 @@ if [ "$1" == "log" ]; then
 	shift
 	shift
 	$CRUCIBLE_HOME/bin/log view ${LOG_DB} "$@" | less -S -F
-	exit
+	exit $?
     elif [ "$2" == "clear" ]; then
 	$CRUCIBLE_HOME/bin/log clear ${LOG_DB}
-	exit
+	exit $?
     elif [ "$2" == "init" ]; then
 	$CRUCIBLE_HOME/bin/log init ${LOG_DB}
-	exit
+	exit $?
     elif [ "$2" == "insert" ]; then
 	shift
 	shift
 	${CRUCIBLE_HOME}/bin/log insert ${LOG_DB} "$@"
-	exit
+	exit $?
     elif [ "$2" == "debug" ]; then
 	    sqlite3 ${LOG_DB} ".headers on" \
 		    ".echo on" \
@@ -140,7 +140,7 @@ if [ "$1" == "log" ]; then
 		    "select * from sessions;" ".print" \
 		    "select * from lines;" \
 		| less -S -F
-	    exit
+	    exit $?
     fi
 elif [ "$1" == "help" ]; then
     # print all help output outside of the logger context to avoid
@@ -198,29 +198,36 @@ exec > ${STDOUT_PIPE} 2> ${STDERR_PIPE}
 if [ "$1" == "log" ]; then
     shift
     ${CRUCIBLE_HOME}/bin/log $1 ${LOG_DB}
+    RET_VAL=$?
 elif [ "$1" == "repo" ]; then
     shift
     if [ -z "$1" ]; then
 	$CRUCIBLE_HOME/bin/repo status
+	RET_VAL=$?
     else
 	$CRUCIBLE_HOME/bin/repo "$@"
+	RET_VAL=$?
     fi
 elif [ "$1" == "update" ]; then
     shift
     if [ -z "$1" ]; then
 	$CRUCIBLE_HOME/bin/update all
+	RET_VAL=$?
     else
 	$CRUCIBLE_HOME/bin/update $1
+	RET_VAL=$?
     fi
 elif [ "$1" == "workshop" ]; then
     shift
     $CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl "$@"
+    RET_VAL=$?
 elif [ "$1" == "gen-iterations" ]; then
     shift
     benchmark=$1
     shift
     "$CRUCIBLE_HOME"/subprojects/core/multiplex/multiplex \
         "$CRUCIBLE_HOME/subprojects/benchmarks/$benchmark/params.json" "$@"
+    RET_VAL=$?
 else
     echo "This function has not been implemented"
 fi
@@ -232,3 +239,5 @@ echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
 
 # wait for the logger to exit
 wait ${LOGGER_PID}
+
+exit ${RET_VAL}
