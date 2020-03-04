@@ -1,21 +1,45 @@
 {
-    "name": "Fedora 31 Crucible Controller",
-    "label": "fedora31-crucible-controller",
-    "source": {
-	"image": "docker.io/library/fedora",
-	"tag": "31"
+    "workshop": {
+        "schema": {
+            "version": "2020.03.02"
+        }
     },
-    "install": {
-	"type": "rpm",
-	"manager": "dnf",
-	"packages": [
-	    "which",
-	    "git",
-	    "perl",
-	    "perl-DBD-SQLite",
-	    "perl-Time-HiRes",
-	    "perl-Thread-Queue"
-	],
-	"groups": []
-    }
+    "userenv": {
+	"name": "fedora31-crucible-controller",
+	"label": "Fedora 31 Crucible Controller",
+	"origin": {
+	    "image": "docker.io/library/fedora",
+	    "tag": "31"
+	},
+	"properties": {
+	    "packages": {
+		"type": "rpm",
+		"manager": "dnf"
+	    }
+	}
+    },
+    "requirements": [
+	{
+	    "name": "tools",
+	    "type": "distro",
+	    "distro_info": {
+		"packages": [
+		    "which",
+		    "git",
+		    "perl"
+		]
+	    }
+	},
+	{
+	    "name": "perl-libraries",
+	    "type": "distro",
+	    "distro_info": {
+		"packages": [
+		    "perl-DBD-SQLite",
+		    "perl-Time-HiRes",
+		    "perl-Thread-Queue"
+		]
+	    }
+	}
+    ]
 }

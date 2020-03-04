@@ -29,7 +29,7 @@ else
     shift
 fi
 
-fmt_line="%-15s %-15s %-20s %-45s %-20s %-15s"
+fmt_line="%-15s %-15s %-20s %-45s %-20s %-20s %-15s"
 
 function process_repo() {
     local repo=$1
@@ -45,7 +45,13 @@ function process_repo() {
     fi
 
     if pushd ${dir} > /dev/null; then
-	git_status=$(git status --porcelain=2 --branch)
+	git_status=$(git status --porcelain=2 --untracked-files=no --branch)
+	git_tracked_entries=$(echo "${git_status}" | grep -v "^#" | wc -l)
+	if [ "${git_tracked_entries}" == "0" ]; then
+	    local_changes="N"
+	else
+	    local_changes="Y"
+	fi
 	git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
 	git_local_branch=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
 	if [ -n "${git_tracking}" ]; then
@@ -66,12 +72,12 @@ function process_repo() {
 	foo=1
     fi
 
-    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}"
+    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}"
 }
 
 case "${command}" in
     status)
-	printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name"
+	printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes"
 	
 	if [ -z "$1" -o "$1" == "crucible" -o "$1" == "all" ]; then
 	    if pushd $CRUCIBLE_HOME > /dev/null; then
