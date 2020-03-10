@@ -10,7 +10,7 @@ function exit_error() {
 # Check for dependencies
 missing_bins=""
 for bin in sed git; do
-    which $bin >/dev/null 2>&1 || missing_bins="$missing_bins $bin"
+    $bin --version >/dev/null 2>&1 || missing_bins="$missing_bins $bin"
 done
 if [ ! -z "$missing_bins" ]; then
     exit_error "Could not find the following, please install and try again: $missing_bins"
@@ -26,15 +26,20 @@ crucible_repo_dir=$(echo $crucible_repo_bin_dir | sed -e 'sX/binXX')
 # If you "sudo ./install" or use root, you will pick up /root/.crucible
 # and not your user's .crucible, so don't do that unless you never use
 # a non-root user to install crucible.
+if [ `id -u` -eq 0 ]; then
+    sudo_cmd=""
+else
+    sudo_cmd="sudo"
+fi
 
 # Create a new /etc/sysconfig/crucible
-sudo /bin/bash -c "echo \"CRUCIBLE_HOME=$crucible_repo_dir\" >/etc/sysconfig/crucible"
+$sudo_cmd /bin/bash -c "echo \"CRUCIBLE_HOME=$crucible_repo_dir\" >/etc/sysconfig/crucible"
 export CRUCIBLE_HOME="$crucible_repo_dir"
 
 # Install the tab completions for crucible
 if [ -d /etc/profile.d ]; then
     if [ -e "$crucible_repo_bin_dir/_crucible_completions" ]; then
-        sudo ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
+        $sudo_cmd ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
         . "$crucible_repo_bin_dir/_crucible_completions"
     else
         exit_error "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
@@ -42,7 +47,7 @@ if [ -d /etc/profile.d ]; then
 fi
 # Install the only bin we need for crucible in /usr/bin
 if [ -e "$crucible_repo_bin_dir/crucible" ]; then
-    sudo ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
+    $sudo_cmd ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
 else
     exit_error "file $crucible_repo_bin_dir/crucible was not found, exiting"
 fi
