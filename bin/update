@@ -4,6 +4,11 @@
 
 # repo updating infrastructure
 
+if [ -z "$CRUCIBLE_HOME" ]; then
+    echo "CRUCIBLE_HOME not defined, exiting."
+    exit 1
+fi
+
 if [ ! -e $CRUCIBLE_HOME ]; then
     echo "Could not find $CRUCIBLE_HOME, exiting."
     exit 1
