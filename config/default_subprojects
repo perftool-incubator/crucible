@@ -6,4 +6,4 @@ workshop             core           /workshop                                   
 junk-drawer          core           /junk-drawer                                    master
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
-systat               tool           /tool-sysstat                                   master
+sysstat              tool           /tool-sysstat                                   master
