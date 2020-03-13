@@ -227,7 +227,7 @@ elif [ "$1" == "gen-iterations" ]; then
     benchmark=$1
     shift
     "$CRUCIBLE_HOME"/subprojects/core/multiplex/multiplex \
-        "$CRUCIBLE_HOME/subprojects/benchmarks/$benchmark/params.json" "$@"
+        "$CRUCIBLE_HOME/subprojects/benchmarks/$benchmark/multiplex.json" "$@"
     RET_VAL=$?
 elif [ "$1" == "wrapper" ]; then
     shift
