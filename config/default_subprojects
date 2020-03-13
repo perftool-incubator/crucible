@@ -5,4 +5,5 @@ roadblock            core           /roadblock                                  
 workshop             core           /workshop                                       master
 junk-drawer          core           /junk-drawer                                    master
 fio                  benchmark      /bench-fio                                      master
+uperf                benchmark      /bench-uperf                                    master
 mpstat               tool           /tool-mpstat                                    master
