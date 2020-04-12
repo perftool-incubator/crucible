@@ -7,3 +7,4 @@ junk-drawer          core           /junk-drawer                                
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
 systat               tool           /tool-sysstat                                   master
+procstat             tool           /tool-procstat                                  master
