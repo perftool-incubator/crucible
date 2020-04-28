@@ -42,71 +42,71 @@ if (! $log_dbh) {
     my $rv = $log_dbh->do("SELECT timestamp FROM db_state;") or $log_open_error = 1;
 
     if ($log_open_error) {
-	printf("ERROR: The SQLite log DB '%s' does not appear to be initialized!\n", $log_filename);
-	exit(1);
+        printf("ERROR: The SQLite log DB '%s' does not appear to be initialized!\n", $log_filename);
+        exit(1);
     } else {
-	if ($rv < 0) {
-	    print $DBI::errstr;
-	    exit(1);
-	}
+        if ($rv < 0) {
+            print $DBI::errstr;
+            exit(1);
+        }
 
-	$rv = $log_dbh->do("UPDATE db_state SET timestamp=$start_timestamp;");
-	if ($rv < 0) {
-	    print $DBI::errstr;
-	    exit(1);
-	}
+        $rv = $log_dbh->do("UPDATE db_state SET timestamp=$start_timestamp;");
+        if ($rv < 0) {
+            print $DBI::errstr;
+            exit(1);
+        }
     }
 
     my $sth = $log_dbh->prepare("SELECT id FROM sources WHERE source=" . $log_dbh->quote($source) . ";");
     $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     my $source_id;
     my $rows = 0;
     while (my $row = $sth->fetchrow_hashref()) {
-	$source_id = $row->{'id'};
-	$rows += 1;
+        $source_id = $row->{'id'};
+        $rows += 1;
     }
 
     if ($rows == 0) {
-	$rv = $log_dbh->do("INSERT INTO sources (source) VALUES (" . $log_dbh->quote($source) . ");");
-	if ($rv < 0) {
-	    print $DBI::errstr;
-	    exit(1);
-	}
-	$source_id = $log_dbh->last_insert_id("", "", "sources", "");
+        $rv = $log_dbh->do("INSERT INTO sources (source) VALUES (" . $log_dbh->quote($source) . ");");
+        if ($rv < 0) {
+            print $DBI::errstr;
+            exit(1);
+        }
+        $source_id = $log_dbh->last_insert_id("", "", "sources", "");
     }
 
     $sth = $log_dbh->prepare("SELECT id FROM commands WHERE command=" . $log_dbh->quote($command) . ";");
     $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     my $command_id;
     $rows = 0;
     while (my $row = $sth->fetchrow_hashref()) {
-	$command_id = $row->{'id'};
-	$rows += 1;
+        $command_id = $row->{'id'};
+        $rows += 1;
     }
 
     if ($rows == 0) {
-	$rv = $log_dbh->do("INSERT INTO commands (command) VALUES (" . $log_dbh->quote($command) . ");");
-	if ($rv < 0) {
-	    print $DBI::errstr;
-	    exit(1);
-	}
-	$command_id = $log_dbh->last_insert_id("", "", "commands", "");
+        $rv = $log_dbh->do("INSERT INTO commands (command) VALUES (" . $log_dbh->quote($command) . ");");
+        if ($rv < 0) {
+            print $DBI::errstr;
+            exit(1);
+        }
+        $command_id = $log_dbh->last_insert_id("", "", "commands", "");
     }
 
     $rv = $log_dbh->do("INSERT INTO sessions (timestamp, source, command) VALUES ($start_timestamp, $source_id, $command_id);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
     $session_id = $log_dbh->last_insert_id("", "", "sessions", "");
 
@@ -150,35 +150,35 @@ sub flusher_thread {
     my $pipe_fh;
 
     while ($$loop) {
-	if ($lock->down_timed(1)) {
-	    if ($$loop) {
-		if (open($pipe_fh, ">", $pipe_file)) {
-		    #print "flushing '" . $type . "'\n";
-		    printf { $pipe_fh } "%s", $flush_str;
-		    close($pipe_fh);
-		}
-	    }
-	}
+        if ($lock->down_timed(1)) {
+            if ($$loop) {
+                if (open($pipe_fh, ">", $pipe_file)) {
+                    #print "flushing '" . $type . "'\n";
+                    printf { $pipe_fh } "%s", $flush_str;
+                    close($pipe_fh);
+                }
+            }
+        }
     }
 }
 
 sub pipe_processor {
     my ($stdout_pipe, $stderr_pipe,
-	$select_on_stdout, $select_on_stderr,
-	$stdout_flush_lock, $stderr_flush_lock,
-	$queue) = @_;
+        $select_on_stdout, $select_on_stderr,
+        $stdout_flush_lock, $stderr_flush_lock,
+        $queue) = @_;
 
     my $stdout_fh;
     my $stderr_fh;
 
     if (!open($stdout_fh, "<", $stdout_pipe)) {
-	printf("ERROR: Logger could not open the stdout pipe '%s'!\n", $stdout_pipe);
-	exit(1);
+        printf("ERROR: Logger could not open the stdout pipe '%s'!\n", $stdout_pipe);
+        exit(1);
     }
 
     if (!open($stderr_fh, "<", $stderr_pipe)) {
-	printf("ERROR: Logger could not open the stderr pipe '%s'!\n", $stderr_pipe);
-	exit(1);
+        printf("ERROR: Logger could not open the stderr pipe '%s'!\n", $stderr_pipe);
+        exit(1);
     }
 
     my $s = IO::Select->new();
@@ -186,89 +186,89 @@ sub pipe_processor {
     $s->add($stderr_fh);
 
     while($s->count()) {
-	my @ready = $s->can_read(0.5);
+        my @ready = $s->can_read(0.5);
 
-	# if no file handles are ready let's flush the pipes to make sure
-	# buffering is not getting in the way -- only do this if we are
-	# still polling on the individual file handles
-	#
-	# we do this via background system calls so that they can be
-	# performed asynchronously to our own reading from the pipes --
-	# synchronous writes would cause a deadlock
-	if (scalar(@ready) == 0) {
-	    if ($$select_on_stdout) {
-		#print "signaling flush on 'stdout'\n";
-		$stdout_flush_lock->up();
-	    }
-	    if ($$select_on_stderr) {
-		#print "signaling flush on 'stderr'\n";
-		$stderr_flush_lock->up();
-	    }
-	    next;
-	}
+        # if no file handles are ready let's flush the pipes to make sure
+        # buffering is not getting in the way -- only do this if we are
+        # still polling on the individual file handles
+        #
+        # we do this via background system calls so that they can be
+        # performed asynchronously to our own reading from the pipes --
+        # synchronous writes would cause a deadlock
+        if (scalar(@ready) == 0) {
+            if ($$select_on_stdout) {
+                #print "signaling flush on 'stdout'\n";
+                $stdout_flush_lock->up();
+            }
+            if ($$select_on_stderr) {
+                #print "signaling flush on 'stderr'\n";
+                $stderr_flush_lock->up();
+            }
+            next;
+        }
 
-	foreach my $fh (@ready) {
-	    my $ts = time();
-	    $_ = readline($fh);
+        foreach my $fh (@ready) {
+            my $ts = time();
+            $_ = readline($fh);
 
-	    if (!defined($_)) {
-		next;
-	    }
+            if (!defined($_)) {
+                next;
+            }
 
-	    # if a pipe flush is encountered then skip processing it
-	    if ($_ =~ /$pipe_flush_str/) {
-		next;
-	    }
+            # if a pipe flush is encountered then skip processing it
+            if ($_ =~ /$pipe_flush_str/) {
+                next;
+            }
 
-	    chomp($_);
+            chomp($_);
 
-	    my $stream = "0";
-	    my $stream_id = -1;
-	    my $logit = 0;
-	    if ($fh == $stdout_fh) {
-		$stream = "STDOUT";
-		$stream_id = 0;
+            my $stream = "0";
+            my $stream_id = -1;
+            my $logit = 0;
+            if ($fh == $stdout_fh) {
+                $stream = "STDOUT";
+                $stream_id = 0;
 
-		if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
-		    $s->remove($stdout_fh);
-		    $$select_on_stdout = 0;
-		    $stdout_flush_lock->up();
-		    close($stdout_fh);
-		    #print("Closed STDOUT pipe\n");
-		    #$logit = 1;
-		} else {
-		    $logit = 1;
-		}
-	    } elsif ($fh == $stderr_fh) {
-		$stream = "STDERR";
-		$stream_id = 1;
+                if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
+                    $s->remove($stdout_fh);
+                    $$select_on_stdout = 0;
+                    $stdout_flush_lock->up();
+                    close($stdout_fh);
+                    #print("Closed STDOUT pipe\n");
+                    #$logit = 1;
+                } else {
+                    $logit = 1;
+                }
+            } elsif ($fh == $stderr_fh) {
+                $stream = "STDERR";
+                $stream_id = 1;
 
-		if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
-		    $s->remove($stderr_fh);
-		    $$select_on_stderr = 0;
-		    $stderr_flush_lock->up();
-		    close($stderr_fh);
-		    #print("Closed STDERR pipe\n");
-		    #$logit = 1;
-		} else {
-		    $logit = 1;
-		}
-	    }
+                if ($_ =~ /CRUCIBLE_CLOSE_LOG_PIPE/) {
+                    $s->remove($stderr_fh);
+                    $$select_on_stderr = 0;
+                    $stderr_flush_lock->up();
+                    close($stderr_fh);
+                    #print("Closed STDERR pipe\n");
+                    #$logit = 1;
+                } else {
+                    $logit = 1;
+                }
+            }
 
-	    if ($logit) {
-		my $obj : shared = shared_clone({});
-		bless($obj, 'log_message_in');
+            if ($logit) {
+                my $obj : shared = shared_clone({});
+                bless($obj, 'log_message_in');
 
-		$obj->{'session_id'} = $session_id;
-		$obj->{'ts'} = $ts;
-		$obj->{'message'} = $_;
-		$obj->{'stream'} = $stream;
-		$obj->{'source'} = $source;
-		$obj->{'stream_id'} = $stream_id;
+                $obj->{'session_id'} = $session_id;
+                $obj->{'ts'} = $ts;
+                $obj->{'message'} = $_;
+                $obj->{'stream'} = $stream;
+                $obj->{'source'} = $source;
+                $obj->{'stream_id'} = $stream_id;
 
-		$queue->enqueue($obj);
-	    }
-	}
+                $queue->enqueue($obj);
+            }
+        }
     }
 }
 
@@ -284,44 +284,44 @@ sub db_logger {
     # unforseen problem, we should at least log them to the terminal
     # so we do not exit
     if (! $log_dbh) {
-	printf("ERROR: Logger thread could not open SQLite DB '%s'!\n", $log_filename);
+        printf("ERROR: Logger thread could not open SQLite DB '%s'!\n", $log_filename);
     } else {
-	$db_connected = 1;
+        $db_connected = 1;
     }
 
     while($$select_on_stdout || $$select_on_stderr || $queue->pending()) {
-	undef($log_entry);
+        undef($log_entry);
 
-	$log_entry = $queue->dequeue_nb();
+        $log_entry = $queue->dequeue_nb();
 
-	if (defined($log_entry)) {
-	    my @var = localtime(int($log_entry->{'ts'}));
-	    my $subsec = ($log_entry->{'ts'} - int($log_entry->{'ts'}))*1000;
-	    my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
+        if (defined($log_entry)) {
+            my @var = localtime(int($log_entry->{'ts'}));
+            my $subsec = ($log_entry->{'ts'} - int($log_entry->{'ts'}))*1000;
+            my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
 
-	    if ($log_entry->{'stream_id'} == 0) {
-		printf("[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
-	    } elsif ($log_entry->{'stream_id'} == 1) {
-		printf(STDERR "[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
-	    }
+            if ($log_entry->{'stream_id'} == 0) {
+                printf("[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
+            } elsif ($log_entry->{'stream_id'} == 1) {
+                printf(STDERR "[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
+            }
 
-	    if ($db_connected) {
-		my $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) " .
-				      "SELECT " . $log_entry->{'session_id'} . ", " . $log_entry->{'ts'} . ", id, " . $log_dbh->quote($log_entry->{'message'}) . " " .
-				      "FROM streams WHERE stream=" . $log_dbh->quote($log_entry->{'stream'}) . ";");
+            if ($db_connected) {
+                my $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) " .
+                                      "SELECT " . $log_entry->{'session_id'} . ", " . $log_entry->{'ts'} . ", id, " . $log_dbh->quote($log_entry->{'message'}) . " " .
+                                      "FROM streams WHERE stream=" . $log_dbh->quote($log_entry->{'stream'}) . ";");
 
-		if ($rv < 0) {
-		    print $DBI::errstr;
-		    $db_connected = 0;
-		    $log_dbh->disconnect();
-		}
-	    }
-	} else {
-	    sleep(0.25);
-	}
+                if ($rv < 0) {
+                    print $DBI::errstr;
+                    $db_connected = 0;
+                    $log_dbh->disconnect();
+                }
+            }
+        } else {
+            sleep(0.25);
+        }
     }
 
     if ($db_connected) {
-	$log_dbh->disconnect();
+        $log_dbh->disconnect();
     }
 }
