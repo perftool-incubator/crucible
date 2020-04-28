@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
-# <Need emacs setup here>
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 _crucible_completions() {
     if [ -z "$CRUCIBLE_HOME" ]; then
@@ -18,36 +18,36 @@ _crucible_completions() {
     if [ $num_words -eq 2 ]; then
         COMPREPLY=($(compgen -W "help log repo update workshop gen-iterations wrapper" -- "${COMP_WORDS[1]}"))
     elif [ ${COMP_WORDS[1]} == "workshop" ]; then
-	if [ "$(expr $num_words % 2)" -eq 1 ]; then
-	    COMPREPLY=($(compgen -W "$($CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --completions all)" -- "${COMP_WORDS[$num_index]}"))
-	else
-	    let arg_index=$num_index-1
-	    COMPREPLY=($(compgen -W "$($CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --completions ${COMP_WORDS[$arg_index]})" -- "${COMP_WORDS[$num_index]}"))
-	fi
+        if [ "$(expr $num_words % 2)" -eq 1 ]; then
+            COMPREPLY=($(compgen -W "$($CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --completions all)" -- "${COMP_WORDS[$num_index]}"))
+        else
+            let arg_index=$num_index-1
+            COMPREPLY=($(compgen -W "$($CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --completions ${COMP_WORDS[$arg_index]})" -- "${COMP_WORDS[$num_index]}"))
+        fi
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
                 COMPREPLY=($(compgen -W "log repo update gen-iterations" -- "${COMP_WORDS[2]}"))
                 ;;
-	    log)
-		COMPREPLY=($(compgen -W "clear info init insert view" -- "${COMP_WORDS[2]}"))
-		;;
-	    repo)
-		COMPREPLY=($(compgen -W "status" -- "${COMP_WORDS[2]}"))
-		;;
-	    update)
-		COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
-		;;
+            log)
+                COMPREPLY=($(compgen -W "clear info init insert view" -- "${COMP_WORDS[2]}"))
+                ;;
+            repo)
+                COMPREPLY=($(compgen -W "status" -- "${COMP_WORDS[2]}"))
+                ;;
+            update)
+                COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
+                ;;
             gen-iterations)
                 COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/benchmarks/; find . -mindepth 1 -maxdepth 1 -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "repo" ]; then
-	case "${COMP_WORDS[2]}" in
-	    status)
-		COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[3]}"))
-		;;
-	esac
+        case "${COMP_WORDS[2]}" in
+            status)
+                COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[3]}"))
+                ;;
+        esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "gen-iterations" ]; then
         params=""
         bench_params_file="$CRUCIBLE_HOME/subprojects/benchmarks/${COMP_WORDS[2]}/params"

@@ -1,7 +1,6 @@
 #!/usr/bin/perl
-# -*- mode: perl; indent-tabs-mode: t; perl-indent-level: 4 -*-
+# -*- mode: perl; indent-tabs-mode: nil; perl-indent-level: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=perl
-#
 
 use strict;
 use warnings;
@@ -56,8 +55,8 @@ if (! -e $log_filename) {
     $do_init = 1;
 } else {
     if (($mode eq "init") && (! -z $log_filename)) {
-	print("Removing existing long and re-initializing\n");
-	unlink $log_filename;
+        print("Removing existing long and re-initializing\n");
+        unlink $log_filename;
     }
 }
 
@@ -72,134 +71,134 @@ if (($mode eq "init") || $do_init) {
 
     my $rv = $log_dbh->do("CREATE TABLE streams (id INTEGER PRIMARY KEY NOT NULL, stream TEXT UNIQUE NOT NULL);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("CREATE TABLE sources (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, source TEXT UNIQUE NOT NULL);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("CREATE TABLE commands (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, command TEXT UNIQUE NOT NULL);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, timestamp REAL NOT NULL, source INTEGER NOT NULL REFERENCES sources (id), command INTEGER NOT NULL REFERENCES commands (id));");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("CREATE TABLE lines (id INTEGER PRIMARY KEY AUTOINCREMENT, session INTEGER NOT NULL REFERENCES sessions (id), timestamp REAL NOT NULL, stream INTEGER NOT NULL REFERENCES streams (id), line TEXT);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("CREATE TABLE db_state (timestamp REAL PRIMARY KEY NOT NULL);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("INSERT INTO db_state (timestamp) VALUES ($start_timestamp);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("INSERT INTO streams (id, stream) VALUES (1, 'STDOUT');");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("INSERT INTO streams (id, stream) VALUES (2, 'STDERR');");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 }
 
 if ($mode eq "view") {
     my $filter_cmd = "";
     if (defined($ARGV[2])) {
-	$filter_cmd = $ARGV[2];
+        $filter_cmd = $ARGV[2];
     }
     my $filter_query = "";
     if ($filter_cmd eq 'first') {
-	$filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp ASC LIMIT 1)";
+        $filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp ASC LIMIT 1)";
     } elsif ($filter_cmd eq 'last') {
-	$filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp DESC LIMIT 1)";
+        $filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp DESC LIMIT 1)";
     } elsif ($filter_cmd eq 'sessionid') {
-	if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is' && $ARGV[4] =~ /[0-9]+\.[0-9]+/) {
-	    $filter_query = "WHERE sessions.timestamp = $ARGV[4]";
-	}
+        if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is' && $ARGV[4] =~ /[0-9]+\.[0-9]+/) {
+            $filter_query = "WHERE sessions.timestamp = $ARGV[4]";
+        }
     }
 
     my $sth = $log_dbh->prepare("SELECT ".
-				"sessions.timestamp AS session_timestamp, " .
-				"commands.command AS session_command, " .
-				"sources.source AS session_source, " .
-				"lines.timestamp AS line_timestamp, " .
-				"lines.line AS line, " .
-				"streams.stream AS line_stream " .
-				"FROM sessions " .
-				"JOIN lines ON sessions.id=lines.session " .
-				"JOIN streams ON streams.id=lines.stream " .
-				"JOIN sources ON sources.id=sessions.source " .
-				"JOIN commands ON commands.id=sessions.command " .
-				"$filter_query " .
-				"ORDER BY sessions.timestamp;");
+                                "sessions.timestamp AS session_timestamp, " .
+                                "commands.command AS session_command, " .
+                                "sources.source AS session_source, " .
+                                "lines.timestamp AS line_timestamp, " .
+                                "lines.line AS line, " .
+                                "streams.stream AS line_stream " .
+                                "FROM sessions " .
+                                "JOIN lines ON sessions.id=lines.session " .
+                                "JOIN streams ON streams.id=lines.stream " .
+                                "JOIN sources ON sources.id=sessions.source " .
+                                "JOIN commands ON commands.id=sessions.command " .
+                                "$filter_query " .
+                                "ORDER BY sessions.timestamp;");
     my $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     my $last_session_timestamp = -1;
     while (my $row = $sth->fetchrow_hashref()) {
-	$row->{'session_timestamp_fmt'} = format_ts($row->{'session_timestamp'});
-	$row->{'line_timestamp_fmt'} = format_ts($row->{'line_timestamp'});
+        $row->{'session_timestamp_fmt'} = format_ts($row->{'session_timestamp'});
+        $row->{'line_timestamp_fmt'} = format_ts($row->{'line_timestamp'});
 
-	if ($last_session_timestamp != $row->{'session_timestamp'}) {
-	    printf("==============================================================================================\n");
-	    printf("[%s][%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_timestamp'});
-	    printf("[%s][%s][%s] command:    %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_command'});
-	    printf("[%s][%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'});
+        if ($last_session_timestamp != $row->{'session_timestamp'}) {
+            printf("==============================================================================================\n");
+            printf("[%s][%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_timestamp'});
+            printf("[%s][%s][%s] command:    %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_command'});
+            printf("[%s][%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'});
 
-	    $last_session_timestamp = $row->{'session_timestamp'};
-	}
+            $last_session_timestamp = $row->{'session_timestamp'};
+        }
 
-	printf("[%s][%s][%s] %s\n", $row->{'line_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'line'});
+        printf("[%s][%s][%s] %s\n", $row->{'line_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'line'});
     }
 } elsif ($mode eq "clear") {
     my $rv = $log_dbh->do("DELETE FROM lines");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("DELETE FROM sessions");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("DELETE FROM sources");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $rv = $log_dbh->do("DELETE FROM commands");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 } elsif ($mode eq "info") {
     print("Crucible log information:\n\n");
@@ -214,8 +213,8 @@ if ($mode eq "view") {
     my $sth = $log_dbh->prepare("SELECT timestamp FROM sessions ORDER BY timestamp ASC LIMIT 1;");
     my $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     my $row = $sth->fetchrow_hashref();
@@ -225,8 +224,8 @@ if ($mode eq "view") {
     $sth = $log_dbh->prepare("SELECT timestamp FROM sessions ORDER BY timestamp DESC LIMIT 1;");
     $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $row = $sth->fetchrow_hashref();
@@ -236,8 +235,8 @@ if ($mode eq "view") {
     $sth = $log_dbh->prepare("SELECT count(timestamp) AS sessions FROM sessions;");
     $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     $row = $sth->fetchrow_hashref();
@@ -252,47 +251,47 @@ if ($mode eq "view") {
     my $start_timestamp = time();
 
     if ($source eq "") {
-	printf(STDERR "ERROR: You must provide a message source!\n");
-	exit(1);
+        printf(STDERR "ERROR: You must provide a message source!\n");
+        exit(1);
     }
 
     if (!($stream eq "STDOUT") && !($stream eq "STDERR")) {
-	printf(STDERR "ERROR: You must provid a valid stream (either STDOUT or STDERR)!\n");
-	exit(1);
+        printf(STDERR "ERROR: You must provid a valid stream (either STDOUT or STDERR)!\n");
+        exit(1);
     }
 
     if ($msg eq "") {
-	printf(STDERR "ERROR: You must provide a message!\n");
-	exit(1);
+        printf(STDERR "ERROR: You must provide a message!\n");
+        exit(1);
     }
 
     my $rv = $log_dbh->do("UPDATE db_state SET timestamp=$start_timestamp;");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     my $sth = $log_dbh->prepare("SELECT id FROM sources WHERE source=" . $log_dbh->quote($source) . ";");
     $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     my $source_id;
     my $rows = 0;
     while (my $row = $sth->fetchrow_hashref()) {
-	$source_id = $row->{'id'};
-	$rows += 1;
+        $source_id = $row->{'id'};
+        $rows += 1;
     }
 
     if ($rows == 0) {
-	$rv = $log_dbh->do("INSERT INTO sources (source) VALUES (" . $log_dbh->quote($source) . ");");
-	if ($rv < 0) {
-	    print $DBI::errstr;
-	    exit(1);
-	}
-	$source_id = $log_dbh->last_insert_id("", "", "sources", "");
+        $rv = $log_dbh->do("INSERT INTO sources (source) VALUES (" . $log_dbh->quote($source) . ");");
+        if ($rv < 0) {
+            print $DBI::errstr;
+            exit(1);
+        }
+        $source_id = $log_dbh->last_insert_id("", "", "sources", "");
     }
 
     my $command = "crucible log insert";
@@ -300,37 +299,37 @@ if ($mode eq "view") {
     $sth = $log_dbh->prepare("SELECT id FROM commands WHERE command=" . $log_dbh->quote($command) . ";");
     $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
     my $command_id;
     $rows = 0;
     while (my $row = $sth->fetchrow_hashref()) {
-	$command_id = $row->{'id'};
-	$rows += 1;
+        $command_id = $row->{'id'};
+        $rows += 1;
     }
 
     if ($rows == 0) {
-	$rv = $log_dbh->do("INSERT INTO commands (command) VALUES (" . $log_dbh->quote($command) . ");");
-	if ($rv < 0) {
-	    print $DBI::errstr;
-	    exit(1);
-	}
-	$command_id = $log_dbh->last_insert_id("", "", "commands", "");
+        $rv = $log_dbh->do("INSERT INTO commands (command) VALUES (" . $log_dbh->quote($command) . ");");
+        if ($rv < 0) {
+            print $DBI::errstr;
+            exit(1);
+        }
+        $command_id = $log_dbh->last_insert_id("", "", "commands", "");
     }
 
     $rv = $log_dbh->do("INSERT INTO sessions (timestamp, source, command) VALUES ($start_timestamp, $source_id, $command_id);");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
     my $session_id = $log_dbh->last_insert_id("", "", "sessions", "");
 
     $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) SELECT $session_id, $start_timestamp, id, " . $log_dbh->quote($msg) . " FROM streams WHERE stream=" . $log_dbh->quote($stream) . ";");
     if ($rv < 0) {
-	print $DBI::errstr;
-	exit(1);
+        print $DBI::errstr;
+        exit(1);
     }
 
 }

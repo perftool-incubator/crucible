@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
-# <Need emacs setup here>
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 # Crucible's purpose is to provide a single interface
 # for all of these subprojects for a seamless performance
@@ -116,32 +116,32 @@ fi
 # redirection
 if [ "$1" == "log" ]; then
     if [ "$2" == "view" -o -z "$2" ]; then
-	shift
-	shift
-	$CRUCIBLE_HOME/bin/log view ${LOG_DB} "$@" | less -S -F
-	exit $?
+        shift
+        shift
+        $CRUCIBLE_HOME/bin/log view ${LOG_DB} "$@" | less -S -F
+        exit $?
     elif [ "$2" == "clear" ]; then
-	$CRUCIBLE_HOME/bin/log clear ${LOG_DB}
-	exit $?
+        $CRUCIBLE_HOME/bin/log clear ${LOG_DB}
+        exit $?
     elif [ "$2" == "init" ]; then
-	$CRUCIBLE_HOME/bin/log init ${LOG_DB}
-	exit $?
+        $CRUCIBLE_HOME/bin/log init ${LOG_DB}
+        exit $?
     elif [ "$2" == "insert" ]; then
-	shift
-	shift
-	${CRUCIBLE_HOME}/bin/log insert ${LOG_DB} "$@"
-	exit $?
+        shift
+        shift
+        ${CRUCIBLE_HOME}/bin/log insert ${LOG_DB} "$@"
+        exit $?
     elif [ "$2" == "debug" ]; then
-	    sqlite3 ${LOG_DB} ".headers on" \
-		    ".echo on" \
-		    "select * from db_state;" ".print" \
-		    "select * from streams;" ".print" \
-		    "select * from sources;" ".print" \
-		    "select * from commands;" ".print" \
-		    "select * from sessions;" ".print" \
-		    "select * from lines;" \
-		| less -S -F
-	    exit $?
+            sqlite3 ${LOG_DB} ".headers on" \
+                    ".echo on" \
+                    "select * from db_state;" ".print" \
+                    "select * from streams;" ".print" \
+                    "select * from sources;" ".print" \
+                    "select * from commands;" ".print" \
+                    "select * from sessions;" ".print" \
+                    "select * from lines;" \
+                | less -S -F
+            exit $?
     fi
 elif [ "$1" == "help" ]; then
     # print all help output outside of the logger context to avoid
@@ -149,28 +149,28 @@ elif [ "$1" == "help" ]; then
 
     shift
     {
-	if [ "$1" == "log" ]; then
-	    $CRUCIBLE_HOME/bin/log help
-	elif [ "$1" == "repo" ]; then
-	    $CRUCIBLE_HOME/bin/repo help
-	elif [ "$1" == "update" ]; then
-	    $CRUCIBLE_HOME/bin/update help
-	elif [ "$1" == "workshop" ]; then
-	    $CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --help
-	elif [ "$1" == "gen-iterations" ]; then
+        if [ "$1" == "log" ]; then
+            $CRUCIBLE_HOME/bin/log help
+        elif [ "$1" == "repo" ]; then
+            $CRUCIBLE_HOME/bin/repo help
+        elif [ "$1" == "update" ]; then
+            $CRUCIBLE_HOME/bin/update help
+        elif [ "$1" == "workshop" ]; then
+            $CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --help
+        elif [ "$1" == "gen-iterations" ]; then
             shift
             if [ -z "$1" ]; then
-		test -e $CRUCIBLE_HOME/subprojects/core/multiplex/print_help && \
-		    $CRUCIBLE_HOME/subprojects/core/multiplex/print_help || \
-			echo "No help found"
+                test -e $CRUCIBLE_HOME/subprojects/core/multiplex/print_help && \
+                    $CRUCIBLE_HOME/subprojects/core/multiplex/print_help || \
+                        echo "No help found"
             else
-		test -e $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help && \
-		    $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help || \
-			echo "No help found"
+                test -e $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help && \
+                    $CRUCIBLE_HOME/subprojects/benchmarks/$1/print_help || \
+                        echo "No help found"
             fi
-	else
-	    help
-	fi
+        else
+            help
+        fi
     } | less -S -F
 
     exit
@@ -203,20 +203,20 @@ if [ "$1" == "log" ]; then
 elif [ "$1" == "repo" ]; then
     shift
     if [ -z "$1" ]; then
-	$CRUCIBLE_HOME/bin/repo status
-	RET_VAL=$?
+        $CRUCIBLE_HOME/bin/repo status
+        RET_VAL=$?
     else
-	$CRUCIBLE_HOME/bin/repo "$@"
-	RET_VAL=$?
+        $CRUCIBLE_HOME/bin/repo "$@"
+        RET_VAL=$?
     fi
 elif [ "$1" == "update" ]; then
     shift
     if [ -z "$1" ]; then
-	$CRUCIBLE_HOME/bin/update all
-	RET_VAL=$?
+        $CRUCIBLE_HOME/bin/update all
+        RET_VAL=$?
     else
-	$CRUCIBLE_HOME/bin/update $1
-	RET_VAL=$?
+        $CRUCIBLE_HOME/bin/update $1
+        RET_VAL=$?
     fi
 elif [ "$1" == "workshop" ]; then
     shift

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
-# <Need emacs setup here>
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 # update a git repository from the current working directory
 
@@ -16,7 +16,7 @@ if [ -d "./.git" ]; then
     git pull --verbose
 
     if ! echo "${stash_output}" | grep -q "No local changes to save"; then
-	# reapply local changes
-	git stash pop
+        # reapply local changes
+        git stash pop
     fi
 fi
