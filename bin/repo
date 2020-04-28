@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
-# <Need emacs setup here>
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 # repo management infrastructure
 
@@ -34,42 +34,42 @@ fmt_line="%-15s %-15s %-20s %-45s %-20s %-20s %-15s"
 function process_repo() {
     local repo=$1
     local alt_dir=$2
-    
+
     type=$(echo "${repo}" | awk -F'/' '{ print $1 }')
     name=$(echo "${repo}" | awk -F'/' '{ print $2 }')
 
     if [ -z "${alt_dir}" ]; then
-	dir=$(readlink -e ${repo})
+        dir=$(readlink -e ${repo})
     else
-	dir=${alt_dir}
+        dir=${alt_dir}
     fi
 
     if pushd ${dir} > /dev/null; then
-	git_status=$(git status --porcelain=2 --untracked-files=no --branch)
-	git_tracked_entries=$(echo "${git_status}" | grep -v "^#" | wc -l)
-	if [ "${git_tracked_entries}" == "0" ]; then
-	    local_changes="N"
-	else
-	    local_changes="Y"
-	fi
-	git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
-	git_local_branch=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
-	if [ -n "${git_tracking}" ]; then
-	    git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
-	    git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
-	    git_remote_url=$(git remote get-url ${git_remote_name})
-	else
-	    # this likely means the branch is not tracking any
-	    # upstream repository branch (yet)
-	    git_remote_name="N/A"
-	    git_remote_branch="N/A"
-	    git_remote_url="N/A"
-	fi
+        git_status=$(git status --porcelain=2 --untracked-files=no --branch)
+        git_tracked_entries=$(echo "${git_status}" | grep -v "^#" | wc -l)
+        if [ "${git_tracked_entries}" == "0" ]; then
+            local_changes="N"
+        else
+            local_changes="Y"
+        fi
+        git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
+        git_local_branch=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+        if [ -n "${git_tracking}" ]; then
+            git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
+            git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
+            git_remote_url=$(git remote get-url ${git_remote_name})
+        else
+            # this likely means the branch is not tracking any
+            # upstream repository branch (yet)
+            git_remote_name="N/A"
+            git_remote_branch="N/A"
+            git_remote_url="N/A"
+        fi
 
-	popd > /dev/null
+        popd > /dev/null
     else
-	# something fishy is going on...
-	foo=1
+        # something fishy is going on...
+        foo=1
     fi
 
     printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}"
@@ -77,33 +77,33 @@ function process_repo() {
 
 case "${command}" in
     status)
-	printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes"
-	
-	if [ -z "$1" -o "$1" == "crucible" -o "$1" == "all" ]; then
-	    if pushd $CRUCIBLE_HOME > /dev/null; then
-		process_repo "/crucible" $CRUCIBLE_HOME
+        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes"
+ 
+        if [ -z "$1" -o "$1" == "crucible" -o "$1" == "all" ]; then
+            if pushd $CRUCIBLE_HOME > /dev/null; then
+                process_repo "/crucible" $CRUCIBLE_HOME
 
-		popd > /dev/null
-	    fi
-	fi
+                popd > /dev/null
+            fi
+        fi
 
-	if [ -z "$1" -o "$1" == "all" ]; then
-	    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-		for tmp_repo in $(find . -type l | sed 'sX./XX'); do
-		    process_repo ${tmp_repo}
-		done
+        if [ -z "$1" -o "$1" == "all" ]; then
+            if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+                for tmp_repo in $(find . -type l | sed 'sX./XX'); do
+                    process_repo ${tmp_repo}
+                done
 
-		popd > /dev/null
-	    fi
-	else
-	    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-		process_repo $1
+                popd > /dev/null
+            fi
+        else
+            if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+                process_repo $1
 
-		popd > /dev/null
-	    else
-		echo "ERROR: repo '$1' could not be found!"
-		exit 1
-	    fi
-	fi
-	;;
+                popd > /dev/null
+            else
+                echo "ERROR: repo '$1' could not be found!"
+                exit 1
+            fi
+        fi
+        ;;
 esac

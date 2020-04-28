@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
-# <Need emacs setup here>
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 function exit_error() {
     echo $1
@@ -82,8 +82,8 @@ for subproject in "${!subprojects[@]}"; do
         pushd $crucible_repo_dir >/dev/null
         cru_git_user_host_org_proj=`git remote -v | grep origin | grep fetch | head -1 | awk '{print $2}'`
         cru_git_proj=`echo $cru_git_user_host_org_proj | awk -F/ '{print $NF}'`
-	    sp_git_user_host_org=`echo $cru_git_user_host_org_proj | sed -e s/$cru_git_proj$// -e s,/$,,`
-	    popd >/dev/null
+            sp_git_user_host_org=`echo $cru_git_user_host_org_proj | sed -e s/$cru_git_proj$// -e s,/$,,`
+            popd >/dev/null
     fi
     sp_git_host_org=`echo $sp_git_user_host_org | sed -e 'sXhttps://XX' -e 'sXhttp://XX' -e 's/.*@//'`
     sp_git_user=`echo $sp_git_user_host_org | sed -e s,$sp_git_host_org,, -e 'sX://X:X'`

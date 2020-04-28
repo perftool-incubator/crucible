@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
-# <Need emacs setup here>
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 # repo updating infrastructure
 
@@ -23,11 +23,10 @@ function help() {
     echo "all             |  Update all repositories (default)"
     echo "crucible        |  Update the main crucible repository"
     if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-	for repo in $(find . -type l | sed 'sX./XX'); do
-	    printf "%-15s |  Update the %s repository\n" "${repo}" "${repo}"
-	done
-
-	popd > /dev/null
+        for repo in $(find . -type l | sed 'sX./XX'); do
+            printf "%-15s |  Update the %s repository\n" "${repo}" "${repo}"
+        done
+        popd > /dev/null
     fi
     echo ""
 }
@@ -44,32 +43,29 @@ fi
 
 case "${repo}" in
     "all"|"crucible")
-	# nothing to do here yet
-	foo=1
-	;;
+        # nothing to do here yet
+        foo=1
+        ;;
     *)
-	if pushd $CRUCIBLE_HOME/subprojects/${repo} > /dev/null; then
-	    $CRUCIBLE_HOME/bin/_update-git
-	    
-	    popd > /dev/null
-	else
-	    echo "Invalid repo '${repo}'."
-	    exit 1
-	fi
-	;;
+        if pushd $CRUCIBLE_HOME/subprojects/${repo} > /dev/null; then
+            $CRUCIBLE_HOME/bin/_update-git
+            popd > /dev/null
+        else
+            echo "Invalid repo '${repo}'."
+            exit 1
+        fi
+        ;;
 esac
 
 if [ "${repo}" == "all" ]; then
     if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-	for tmp_repo in $(find . -type l | sed 'sX./XX'); do
-	    if pushd ${tmp_repo} > /dev/null; then
-		$CRUCIBLE_HOME/bin/_update-git
-		
-		popd > /dev/null
-	    fi
-	done
-	
-	popd > /dev/null
+        for tmp_repo in $(find . -type l | sed 'sX./XX'); do
+            if pushd ${tmp_repo} > /dev/null; then
+                $CRUCIBLE_HOME/bin/_update-git
+                popd > /dev/null
+            fi
+        done
+        popd > /dev/null
     fi
 fi
 
