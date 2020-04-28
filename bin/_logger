@@ -310,7 +310,7 @@ sub db_logger {
                                       "SELECT " . $log_entry->{'session_id'} . ", " . $log_entry->{'ts'} . ", id, " . $log_dbh->quote($log_entry->{'message'}) . " " .
                                       "FROM streams WHERE stream=" . $log_dbh->quote($log_entry->{'stream'}) . ";");
 
-                if ($rv < 0) {
+                if (defined $rv and $rv < 0) {
                     print $DBI::errstr;
                     $db_connected = 0;
                     $log_dbh->disconnect();
