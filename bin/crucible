@@ -229,6 +229,50 @@ elif [ "$1" == "gen-iterations" ]; then
     "$CRUCIBLE_HOME"/subprojects/core/multiplex/multiplex \
         "$CRUCIBLE_HOME/subprojects/benchmarks/$benchmark/multiplex.json" "$@"
     RET_VAL=$?
+elif [ "$1" == "run" ]; then
+    shift
+    benchmark=$1
+    shift
+    benchmark_subproj_dir="$CRUCIBLE_HOME"/subprojects/benchmarks/$benchmark
+    rs_dir="$CRUCIBLE_HOME"/subprojects/core/rickshaw
+    if [ ! -e bench-params.json ]; then
+        echo "Make sure you have defined the benchmark parameters and put in a file \"bench-params.json\""
+        echo "You can generate these parameters with \"crucible gen-iterations <benchmark> <options>"
+        echo "Here are some examples:"
+        echo "crucible gen-iterations fio --defaults basic"
+        echo "crucible gen-iterations fio --defaults basic --rw randread,randwrite --bs 4k,64k"
+        echo ""
+        echo "Once you have run this, you should have a file, \"bench-params.json\" in your current directory"
+        exit 1
+    fi
+
+    if [ ! -e tool-params.json ]; then
+        echo "You do not have a \"tool-params.json\" in the current directory.  Crucible will use"
+        echo "the default tools found in $rs_dir/config/tool-params.json.  If you wish to use"
+        echo "different tools, create a tool-params.json which adheres to this schema: $rs_dir/schema/tools/json"
+        tool_params_file=$rs_dir/config/tool-params.json
+    else
+        tool_params_file=`/bin/pwd`/tool-params.json
+    fi
+
+    if [ ! -e "$benchmark_subproj_dir" ]; then
+        echo "Running benchmark $benchmark requires that subproject"
+        echo "located in "$CRUCIBLE_HOME"/subprojects/bench/$benchmark"
+        ehco "This directory could not be found.  Here are the benchmark"
+        echo "subproject directories:"
+        /bin/ls "$CRUCIBLE_HOME"/subprojects/bench/$benchmark
+        exit 1
+    fi
+
+    $rs_dir/rickshaw-run\
+    --tool-params "$tool_params_file"\
+    --bench-params bench-params.json\
+    --bench-dir "$benchmark_subproj_dir"\
+    --roadblock-dir="$CRUCIBLE_HOME/subprojects/core/roadblock"\
+    --workshop-dir="$CRUCIBLE_HOME/subprojects/core/workshop"\
+    --tools-dir="$CRUCIBLE_HOME/subprojects/tools"\
+    "$@"
+    RET_VAL=$?
 elif [ "$1" == "wrapper" ]; then
     shift
     "$@"
