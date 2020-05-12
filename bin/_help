@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+
+function help() {
+    echo "Usage:"
+    echo "  crucible <command> [command-specific-options]"
+    echo ""
+    echo "The following commands are supported"
+    echo ""
+    echo "help            |  Show this help message"
+    echo "log             |  Work with the crucible log"
+    echo "repo            |  Crucible repository management"
+    echo "update          |  Update the repositories that comprise crucible"
+    echo "workshop        |  Build container images"
+    echo "gen-iterations  |  Show the iterations generated for a benchmark"
+    echo "wrapper         |  Run user supplied programs inside a crucible wrapper for logging purposes"
+    echo ""
+    echo "For more detailed help for each command, try:"
+    echo "  crucible help <command>"
+    echo ""
+}
+
+{
+    CRUCIBLE_HOME="${1}"
+    shift
+
+    if [ -z "${CRUCIBLE_HOME}" -o ! -e "${CRUCIBLE_HOME}" ]; then
+	echo "ERROR: Could not find ${CRUCIBLE_HOME}, exiting."
+	exit 1
+    fi
+
+    if [ "${1}" == "log" ]; then
+        ${CRUCIBLE_HOME}/bin/log help
+    elif [ "${1}" == "repo" ]; then
+        ${CRUCIBLE_HOME}/bin/repo help
+    elif [ "${1}" == "update" ]; then
+        ${CRUCIBLE_HOME}/bin/update help
+    elif [ "${1}" == "workshop" ]; then
+        ${CRUCIBLE_HOME}/subprojects/core/workshop/workshop.pl --help
+    elif [ "${1}" == "gen-iterations" ]; then
+        shift
+        if [ -z "${1}" ]; then
+            test -e ${CRUCIBLE_HOME}/subprojects/core/multiplex/print_help && \
+                ${CRUCIBLE_HOME}/subprojects/core/multiplex/print_help || \
+                echo "No help found"
+        else
+            test -e ${CRUCIBLE_HOME}/subprojects/benchmarks/${1}/print_help && \
+                ${CRUCIBLE_HOME}/subprojects/benchmarks/${1}/print_help || \
+                echo "No help found"
+        fi
+    else
+        help
+    fi
+} | less -S -F
