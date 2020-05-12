@@ -78,6 +78,7 @@ if [ ! -d ${USER_STORE} ]; then
     mkdir -v ${USER_STORE}
 fi
 
+CRUCIBLE_USE_CONTAINERS=1 # Anything crucible runs that needs SW beyond the basics should run in a container
 LOG_DB=${USER_STORE}/log.db
 
 function help() {
@@ -233,6 +234,23 @@ elif [ "$1" == "run" ]; then
     shift
     benchmark=$1
     shift
+    container_run_cmd="podman run\
+      -i -t --rm\
+      --mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers\
+      --mount=type=bind,source=/root,destination=/root\
+      --mount=type=bind,source=/home,destination=/home\
+      --mount=type=bind,source=/var/opt/crucible,destination=/var/opt/crucible\
+      --mount=type=bind,source=/var/run/crucible,destination=/var/run/crucible\
+      --mount=type=bind,source=$CRUCIBLE_HOME,destination=$CRUCIBLE_HOME\
+      --privileged --ipc=host --pid=host --net=host --cap-add=all --env-host\
+      --security-opt label=disable\
+      --workdir=`/bin/pwd`\
+      localhost/workshop/fedora31_crucible-controller"
+      #--mount=type=bind,source=`/bin/pwd`,destination=`/bin/pwd`\
+
+    datetime=`date +%Y-%m-%d_%H:%M:%S`
+    base_run_dir="/var/run/crucible/$benchmark-$datetime"
+    mkdir -p "$base_run_dir"
     benchmark_subproj_dir="$CRUCIBLE_HOME"/subprojects/benchmarks/$benchmark
     rs_dir="$CRUCIBLE_HOME"/subprojects/core/rickshaw
     if [ ! -e bench-params.json ]; then
@@ -250,29 +268,42 @@ elif [ "$1" == "run" ]; then
         echo "You do not have a \"tool-params.json\" in the current directory.  Crucible will use"
         echo "the default tools found in $rs_dir/config/tool-params.json.  If you wish to use"
         echo "different tools, create a tool-params.json which adheres to this schema: $rs_dir/schema/tools/json"
-        tool_params_file=$rs_dir/config/tool-params.json
+        tool_params_file="$rs_dir/config/tool-params.json"
     else
-        tool_params_file=`/bin/pwd`/tool-params.json
+        tool_params_file=tool-params.json
     fi
 
     if [ ! -e "$benchmark_subproj_dir" ]; then
         echo "Running benchmark $benchmark requires that subproject"
         echo "located in "$CRUCIBLE_HOME"/subprojects/bench/$benchmark"
-        ehco "This directory could not be found.  Here are the benchmark"
+        echo "This directory could not be found.  Here are the benchmark"
         echo "subproject directories:"
         /bin/ls "$CRUCIBLE_HOME"/subprojects/bench/$benchmark
         exit 1
     fi
-
-    $rs_dir/rickshaw-run\
-    --tool-params "$tool_params_file"\
-    --bench-params bench-params.json\
-    --bench-dir "$benchmark_subproj_dir"\
-    --roadblock-dir="$CRUCIBLE_HOME/subprojects/core/roadblock"\
-    --workshop-dir="$CRUCIBLE_HOME/subprojects/core/workshop"\
-    --tools-dir="$CRUCIBLE_HOME/subprojects/tools"\
-    "$@"
+    run_cmd="$CRUCIBLE_HOME/subprojects/core/rickshaw/rickshaw-run\
+      --tool-params $tool_params_file\
+      --bench-params bench-params.json\
+      --bench-dir $benchmark_subproj_dir\
+      --roadblock-dir=$CRUCIBLE_HOME/subprojects/core/roadblock\
+      --workshop-dir=$CRUCIBLE_HOME/subprojects/core/workshop\
+      --tools-dir=$CRUCIBLE_HOME/subprojects/tools\
+      --base-run-dir=$base_run_dir\
+      $@"
+    pp_cmd="$CRUCIBLE_HOME/subprojects/core/rickshaw/rickshaw-post-process\
+      --base-run-dir=$base_run_dir"
+    if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
+        run_cmd="$container_run_cmd $run_cmd"
+        pp_cmd="$container_run_cmd $pp_cmd"
+    fi
+    echo "run cmd: $run_cmd"
+    $run_cmd
     RET_VAL=$?
+    if [ $RET_VAL -eq 0 ]; then
+        echo "post-process cmd: $pp_cmd"
+        $pp_cmd
+        RET_VAL=$?
+    fi
 elif [ "$1" == "wrapper" ]; then
     shift
     "$@"
@@ -288,5 +319,4 @@ echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
 
 # wait for the logger to exit
 wait ${LOGGER_PID}
-
 exit ${RET_VAL}
