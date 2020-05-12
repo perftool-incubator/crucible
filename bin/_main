@@ -126,7 +126,7 @@ elif [ "${1}" == "run" ]; then
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-    "$@"
+    $@
     RET_VAL=$?
 else
     echo "This function has not been implemented"
