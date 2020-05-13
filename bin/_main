@@ -17,6 +17,9 @@ if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" ]; then
     exit 2
 fi
 
+. /etc/sysconfig/crucible
+. $CRUCIBLE_HOME/bin/base
+
 if [ "${1}" == "log" ]; then
     shift
     ${CRUCIBLE_HOME}/bin/log ${1} ${LOG_DB}
@@ -54,22 +57,10 @@ elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
     shift
-    container_run_cmd="podman run\
-      -i -t --rm\
-      --mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers\
-      --mount=type=bind,source=/root,destination=/root\
-      --mount=type=bind,source=/home,destination=/home\
-      --mount=type=bind,source=/var/opt/crucible,destination=/var/opt/crucible\
-      --mount=type=bind,source=/var/run/crucible,destination=/var/run/crucible\
-      --mount=type=bind,source=${CRUCIBLE_HOME},destination=${CRUCIBLE_HOME}\
-      --privileged --ipc=host --pid=host --net=host --cap-add=all --env-host\
-      --security-opt label=disable\
-      --workdir=`/bin/pwd`\
-      localhost/workshop/fedora31_crucible-controller"
-      #--mount=type=bind,source=`/bin/pwd`,destination=`/bin/pwd`\
-
-    datetime=`date +%Y-%m-%d_%H:%M:%S`
-    base_run_dir="/var/run/crucible/$benchmark-$datetime"
+    if [ "$CRUCIBLE_USE_CONTAINERS" == "1" -a -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
+        echo "Switching to not using container because CRUCIBLE_CONTAINER_IMAGE is not defined"
+        CRUCIBLE_USE_CONTAINERS="0"
+    fi
     mkdir -p "$base_run_dir"
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
@@ -101,6 +92,7 @@ elif [ "${1}" == "run" ]; then
         /bin/ls "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark
         exit 1
     fi
+    redis_cmd="/usr/bin/redis-server /etc/redis.conf"
     run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       --tool-params $tool_params_file\
       --bench-params bench-params.json\
@@ -113,8 +105,17 @@ elif [ "${1}" == "run" ]; then
     pp_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process\
       --base-run-dir=$base_run_dir"
     if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
+        redis_cmd="$container_redis_cmd $redis_cmd"
         run_cmd="$container_run_cmd $run_cmd"
         pp_cmd="$container_run_cmd $pp_cmd"
+        echo "Checking for Redis"
+        if podman ps | grep -q crucible-redis; then
+            echo "...appears to be running"
+        else
+            echo "...not present, starting a container for it:"
+            echo $redis_cmd
+            $redis_cmd
+        fi
     fi
     echo "run cmd: $run_cmd"
     $run_cmd
