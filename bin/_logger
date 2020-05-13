@@ -299,9 +299,9 @@ sub db_logger {
             my $timestamp = sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", $var[5]+1900, $var[4]+1, $var[3], $var[2], $var[1], $var[0], $subsec);
 
             if ($log_entry->{'stream_id'} == 0) {
-                printf("[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
+                printf("%s\n", $log_entry->{'message'});
             } elsif ($log_entry->{'stream_id'} == 1) {
-                printf(STDERR "[%s][%s][%s] %s\n", $timestamp, $log_entry->{'source'}, $log_entry->{'stream'}, $log_entry->{'message'});
+                printf(STDERR "%s\n", $log_entry->{'message'});
             }
 
             if ($db_connected) {
