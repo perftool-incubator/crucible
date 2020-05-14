@@ -286,6 +286,13 @@ sub db_logger {
         printf("ERROR: Logger thread could not open SQLite DB '%s'!\n", $log_filename);
     } else {
         $db_connected = 1;
+
+        my $rv = $log_dbh->do("BEGIN;");
+        if ($rv < 0) {
+            print $DBI::errstr;
+            $db_connected = 0;
+            $log_dbh->disconnect();
+        }
     }
 
     while($$select_on_stdout || $$select_on_stderr || $queue->pending()) {
@@ -321,6 +328,13 @@ sub db_logger {
     }
 
     if ($db_connected) {
+        my $rv = $log_dbh->do("COMMIT;");
+        if ($rv < 0) {
+            print $DBI::errstr;
+            $db_connected = 0;
+            $log_dbh->disconnect();
+        }
+
         $log_dbh->disconnect();
     }
 }
