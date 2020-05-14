@@ -52,19 +52,20 @@
 # Crucible is meant to be run from a single command, 'crucible'
 # and provide all the functionality from these projects.
 
-if [ -z "$CRUCIBLE_HOME" ]; then
-    if [ -e /etc/sysconfig/crucible ]; then
-        . /etc/sysconfig/crucible
-        if [ -z "$CRUCIBLE_HOME" ]; then
-            echo "\$CRUCIBLE_HOME does not appear to be defined in /etc/sysconfig/crucible, exiting"
-            exit 1
-        else
-            export CRUCIBLE_HOME=$CRUCIBLE_HOME
-        fi
-    else
-        echo "Could not find /etc/sysconfig/crucible.  Please ensure crucible is installed first."
+if [ -e /etc/sysconfig/crucible ]; then
+    . /etc/sysconfig/crucible
+    if [ -z "$CRUCIBLE_HOME" ]; then
+        echo "\$CRUCIBLE_HOME does not appear to be defined in /etc/sysconfig/crucible, exiting"
         exit 1
     fi
+else
+    echo "Could not find /etc/sysconfig/crucible.  Please ensure crucible is installed first."
+    exit 1
+fi
+
+if [ -z "$CRUCIBLE_HOME" ]; then
+    echo "CRUCIBLE_HOME not set, exiting."
+    exit 1
 fi
 
 if [ ! -e $CRUCIBLE_HOME ]; then
@@ -72,6 +73,8 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     exit 1
 fi
 . $CRUCIBLE_HOME/bin/base
+
+check_id
 
 if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
     podman -v >/dev/null
@@ -82,6 +85,9 @@ if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
 else
     echo ""
 fi
+
+/bin/mkdir -p /var/opt/crucible
+/bin/mkdir -p /var/run/crucible
 
 # make sure the user has a .crucible directory for storing things
 USER_STORE=$HOME/.crucible
@@ -98,14 +104,6 @@ function setup_pipe() {
     mknod ${PIPE} p
 }
 
-if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-    # make sure that the log is initialized if it has not been done
-    # previously
-    if [ ! -e ${LOG_DB} ]; then
-        $CRUCIBLE_HOME/bin/log init ${LOG_DB}
-    fi
-fi
-
 # special case some log operations so they don't happen under log
 # redirection
 log_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${USER_STORE}/log.db ${STDOUT_PIPE} ${STDERR_PIPE}"
@@ -114,29 +112,36 @@ container_log_opts="-i --name crucible-log\
     --mount=type=bind,source=/tmp,destination=/tmp"
 container_log_cmd="podman run $container_logger_opts $container_common_opts"
 log_cmd="$CRUCIBLE_HOME/bin/log"
+
 if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
     log_cmd="$container_log_cmd $log_cmd"
 fi
+
+if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
+    # make sure that the log is initialized if it has not been done
+    # previously
+    if [ ! -e ${LOG_DB} ]; then
+        $log_cmd init ${LOG_DB}
+    fi
+fi
+
 if [ "$1" == "log" ]; then
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
         if [ "$2" == "view" -o -z "$2" ]; then
             shift
             shift
-            #$CRUCIBLE_HOME/bin/log view ${LOG_DB} "$@" | less -S -F
+	    exit
             $log_cmd view ${LOG_DB} "$@" | less -S -F
             exit $?
         elif [ "$2" == "clear" ]; then
-            #$CRUCIBLE_HOME/bin/log clear ${LOG_DB}
             $log_cmd clear ${LOG_DB}
             exit $?
         elif [ "$2" == "init" ]; then
-            #$CRUCIBLE_HOME/bin/log init ${LOG_DB}
             $log_cmd init ${LOG_DB}
             exit $?
         elif [ "$2" == "insert" ]; then
             shift
             shift
-            #${CRUCIBLE_HOME}/bin/log insert ${LOG_DB} "$@"
             $log_cmd insert ${LOG_DB} "$@"
             exit $?
         elif [ "$2" == "debug" ]; then

@@ -14,9 +14,22 @@ container_common_opts="\
     --security-opt label=disable\
     --workdir=`/bin/pwd`\
     $CRUCIBLE_CONTAINER_IMAGE"
-container_run_opts="-i --name crucible-run"
-container_redis_opts="-d --name crucible-redis --mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf"
-container_run_cmd="podman run $container_run_opts $container_common_opts"
-container_redis_cmd="podman run $container_redis_opts $container_common_opts"
 datetime=`date +%Y-%m-%d_%H:%M:%S`
 base_run_dir="/var/run/crucible/$benchmark-$datetime"
+
+function check_id {
+    echo "checking for $HOME/.crucible/identity"
+    if [ -e $HOME/.crucible/identity ]; then
+        . $HOME/.crucible/identity
+    fi
+    export CRUCIBLE_NAME
+    export CRUCIBLE_EMAIL
+    if [ -z "$CRUCIBLE_NAME" ]; then
+        echo "Please consider adding \"CRUCIBLE_NAME=<your full name>\" to $HOME/.crucible/identity"
+        sleep 1
+    fi
+    if [ -z "$CRUCIBLE_EMAIL" ]; then
+        echo "Please consider adding \"CRUCIBLE_EMAIL=<your email address>\" to $HOME/.crucible/identity"
+        sleep 1
+    fi
+}

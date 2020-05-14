@@ -57,6 +57,15 @@ elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
     shift
+    export RS_NAME="$CRUCIBLE_NAME"
+    export RS_EMAIL="$CRUCIBLE_EMAIL"
+    export RS_REG_REPO="$CRUCIBLE_CLIENT_SERVER_REPO"
+    export RS_REG_AUTH="$CRUCIBLE_CLIENT_SERVER_AUTH"
+    container_run_opts="-i --name crucible-run"
+    container_redis_opts="-d --name crucible-redis\
+        --mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf"
+    container_run_cmd="podman run $container_run_opts $container_common_opts"
+    container_redis_cmd="podman run $container_redis_opts $container_common_opts"
     if [ "$CRUCIBLE_USE_CONTAINERS" == "1" -a -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
         echo "Switching to not using container because CRUCIBLE_CONTAINER_IMAGE is not defined"
         CRUCIBLE_USE_CONTAINERS="0"
@@ -113,15 +122,13 @@ elif [ "${1}" == "run" ]; then
             echo "...appears to be running"
         else
             echo "...not present, starting a container for it:"
-            echo $redis_cmd
             $redis_cmd
+	    firewall-cmd --zone=public --add-port=6379/tcp
         fi
     fi
-    echo "run cmd: $run_cmd"
     $run_cmd
     RET_VAL=$?
     if [ $RET_VAL -eq 0 ]; then
-        echo "post-process cmd: $pp_cmd"
         $pp_cmd
         RET_VAL=$?
     fi
