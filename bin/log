@@ -55,7 +55,7 @@ if (! -e $log_filename) {
     $do_init = 1;
 } else {
     if (($mode eq "init") && (! -z $log_filename)) {
-        print("Removing existing long and re-initializing\n");
+        print("Removing existing log and re-initializing\n");
         unlink $log_filename;
     }
 }

@@ -130,7 +130,6 @@ if [ "$1" == "log" ]; then
         if [ "$2" == "view" -o -z "$2" ]; then
             shift
             shift
-	    exit
             $log_cmd view ${LOG_DB} "$@" | less -S -F
             exit $?
         elif [ "$2" == "clear" ]; then
