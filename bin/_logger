@@ -276,6 +276,7 @@ sub db_logger {
 
     my $log_entry;
     my $db_connected = 0;
+    my $rv;
 
     my $log_dbh = DBI->connect("dbi:SQLite:dbname=" . $log_filename, "", "", { PrintError => 0 });
 
@@ -287,13 +288,15 @@ sub db_logger {
     } else {
         $db_connected = 1;
 
-        my $rv = $log_dbh->do("BEGIN;");
+        $rv = $log_dbh->do("BEGIN;");
         if ($rv < 0) {
             print $DBI::errstr;
             $db_connected = 0;
             $log_dbh->disconnect();
         }
     }
+
+    my $inserts = 0;
 
     while($$select_on_stdout || $$select_on_stderr || $queue->pending()) {
         undef($log_entry);
@@ -312,9 +315,11 @@ sub db_logger {
             }
 
             if ($db_connected) {
-                my $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) " .
-                                      "SELECT " . $log_entry->{'session_id'} . ", " . $log_entry->{'ts'} . ", id, " . $log_dbh->quote($log_entry->{'message'}) . " " .
-                                      "FROM streams WHERE stream=" . $log_dbh->quote($log_entry->{'stream'}) . ";");
+                $inserts = 1;
+
+                $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) " .
+                                   "SELECT " . $log_entry->{'session_id'} . ", " . $log_entry->{'ts'} . ", id, " . $log_dbh->quote($log_entry->{'message'}) . " " .
+                                   "FROM streams WHERE stream=" . $log_dbh->quote($log_entry->{'stream'}) . ";");
 
                 if ($rv < 0) {
                     print $DBI::errstr;
@@ -323,12 +328,35 @@ sub db_logger {
                 }
             }
         } else {
-            sleep(0.25);
+            if ($inserts) {
+                $inserts = 0;
+
+                $rv = $log_dbh->do("COMMIT;");
+                if ($rv < 0) {
+                    print $DBI::errstr;
+                    $db_connected = 0;
+                    $log_dbh->disconnect();
+                }
+
+                $rv = $log_dbh->do("BEGIN;");
+                if ($rv < 0) {
+                    print $DBI::errstr;
+                    $db_connected = 0;
+                    $log_dbh->disconnect();
+                }
+            } else {
+                sleep(0.25);
+            }
         }
     }
 
     if ($db_connected) {
-        my $rv = $log_dbh->do("COMMIT;");
+        if ($inserts) {
+            $rv = $log_dbh->do("COMMIT;");
+        } else {
+            $rv = $log_dbh->do("ROLLBACK;");
+        }
+
         if ($rv < 0) {
             print $DBI::errstr;
             $db_connected = 0;
