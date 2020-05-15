@@ -15,7 +15,6 @@ container_common_opts="\
     --workdir=`/bin/pwd`\
     $CRUCIBLE_CONTAINER_IMAGE"
 datetime=`date +%Y-%m-%d_%H:%M:%S`
-base_run_dir="/var/run/crucible/$benchmark-$datetime"
 
 function check_id {
     echo "checking for $HOME/.crucible/identity"
