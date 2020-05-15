@@ -167,14 +167,15 @@ if ($mode eq "view") {
 
         if ($last_session_timestamp != $row->{'session_timestamp'}) {
             printf("==============================================================================================\n");
-            printf("[%s][%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_timestamp'});
-            printf("[%s][%s][%s] command:    %s\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'session_command'});
-            printf("[%s][%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'});
+            printf("[%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_timestamp'});
+            printf("[%s][%s] command:    %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_command'});
+            printf("[%s][%s] source:     %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_source'});
+            printf("[%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'});
 
             $last_session_timestamp = $row->{'session_timestamp'};
         }
 
-        printf("[%s][%s][%s] %s\n", $row->{'line_timestamp_fmt'}, $row->{'session_source'}, $row->{'line_stream'}, $row->{'line'});
+        printf("[%s][%s] %s\n", $row->{'line_timestamp_fmt'}, $row->{'line_stream'}, $row->{'line'});
     }
 } elsif ($mode eq "clear") {
     my $rv = $log_dbh->do("DELETE FROM lines");
