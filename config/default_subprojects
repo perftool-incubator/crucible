@@ -4,6 +4,7 @@ multiplex            core           /multiplex                                  
 roadblock            core           /roadblock                                      master
 workshop             core           /workshop                                       master
 junk-drawer          core           /junk-drawer                                    master
+CommonDataModel      core           /CommonDataModel                                master
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
 oslat                benchmark      /bench-oslat                                    master
@@ -11,3 +12,4 @@ sysstat              tool           /tool-sysstat                               
 procstat             tool           /tool-procstat                                  master
 ftrace               tool           /tool-ftrace                                    master
 kerneltools          tool           /tool-kerneltools                               master
+ovs                  tool           /tool-ovs                                       master
