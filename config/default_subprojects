@@ -11,5 +11,5 @@ oslat                benchmark      /bench-oslat                                
 sysstat              tool           /tool-sysstat                                   master
 procstat             tool           /tool-procstat                                  master
 ftrace               tool           /tool-ftrace                                    master
-kerneltools          tool           /tool-kerneltools                               master
+kernel               tool           /tool-kernel                                    master
 ovs                  tool           /tool-ovs                                       master
