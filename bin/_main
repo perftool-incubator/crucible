@@ -56,7 +56,7 @@ elif [ "${1}" == "gen-iterations" ]; then
 elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
-    base_run_dir="/var/run/crucible/$benchmark-$datetime"
+    base_run_dir="/var/lib/crucible/$benchmark-$datetime"
     shift
     export RS_NAME="$CRUCIBLE_NAME"
     export RS_EMAIL="$CRUCIBLE_EMAIL"

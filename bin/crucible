@@ -87,7 +87,7 @@ else
 fi
 
 /bin/mkdir -p /var/opt/crucible
-/bin/mkdir -p /var/run/crucible
+/bin/mkdir -p /var/lib/crucible
 
 # make sure the user has a .crucible directory for storing things
 USER_STORE=$HOME/.crucible
