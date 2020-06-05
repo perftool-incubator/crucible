@@ -8,7 +8,7 @@ container_common_opts="\
     --mount=type=bind,source=/root,destination=/root\
     --mount=type=bind,source=/home,destination=/home\
     --mount=type=bind,source=/var/opt/crucible,destination=/var/opt/crucible\
-    --mount=type=bind,source=/var/run/crucible,destination=/var/run/crucible\
+    --mount=type=bind,source=/var/lib/crucible,destination=/var/lib/crucible\
     --mount=type=bind,source=${CRUCIBLE_HOME},destination=${CRUCIBLE_HOME}\
     --privileged --ipc=host --pid=host --net=host --cap-add=all --env-host\
     --security-opt label=disable\
