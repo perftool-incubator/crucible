@@ -12,13 +12,24 @@ if [ -z "${CRUCIBLE_HOME}" -o ! -e "${CRUCIBLE_HOME}" ]; then
     exit 1
 fi
 
-if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" ]; then
+if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     echo "ERROR: Could not find \${LOG_DB} [${LOG_DB}], exiting."
     exit 2
 fi
 
 . /etc/sysconfig/crucible
 . $CRUCIBLE_HOME/bin/base
+
+container_redis_args=()
+container_redis_args+=("-d")
+container_redis_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf")
+
+container_rs_args=()
+container_rs_args+=("-i")
+container_rs_args+=("-e RS_REG_REPO=$CRUCIBLE_CLIENT_SERVER_REPO")
+container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
+container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
+container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 
 if [ "${1}" == "log" ]; then
     shift
@@ -58,15 +69,14 @@ elif [ "${1}" == "run" ]; then
     benchmark=${1}
     base_run_dir="/var/lib/crucible/$benchmark-$datetime"
     shift
-    export RS_NAME="$CRUCIBLE_NAME"
-    export RS_EMAIL="$CRUCIBLE_EMAIL"
-    export RS_REG_REPO="$CRUCIBLE_CLIENT_SERVER_REPO"
-    export RS_REG_AUTH="$CRUCIBLE_CLIENT_SERVER_AUTH"
-    container_run_opts="-i --name crucible-run"
-    container_redis_opts="-d --name crucible-redis\
-        --mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf"
-    container_run_cmd="podman run $container_run_opts $container_common_opts"
-    container_redis_cmd="podman run $container_redis_opts $container_common_opts"
+    if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
+        exit_error "CRUCIBLE_CLIENT_SERVER_REPO is not defined"
+    fi
+    if [ -z "$CRUCIBLE_CLIENT_SERVER_AUTH" ]; then
+        exit_error "CRUCIBLE_CLIENT_SERVER_AUTH is not defined"
+    fi
+
+    container_redis_cmd="podman run $container_redis_opts ${container_common_args[@]}"
     if [ "$CRUCIBLE_USE_CONTAINERS" == "1" -a -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
         echo "Switching to not using container because CRUCIBLE_CONTAINER_IMAGE is not defined"
         CRUCIBLE_USE_CONTAINERS="0"
@@ -103,7 +113,7 @@ elif [ "${1}" == "run" ]; then
         exit 1
     fi
     redis_cmd="/usr/bin/redis-server /etc/redis.conf"
-    run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
+    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       --tool-params $tool_params_file\
       --bench-params bench-params.json\
       --bench-dir $benchmark_subproj_dir\
@@ -112,31 +122,38 @@ elif [ "${1}" == "run" ]; then
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --base-run-dir=$base_run_dir\
       $@"
-    pp_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process\
+    rs_pp_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process\
       --base-run-dir=$base_run_dir"
     if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
-        redis_cmd="$container_redis_cmd $redis_cmd"
-        run_cmd="$container_run_cmd $run_cmd"
-        pp_cmd="$container_run_cmd $pp_cmd"
         echo "Checking for Redis"
         if podman ps | grep -q crucible-redis; then
             echo "...appears to be running"
         else
             echo "...not present, starting a container for it:"
-            $redis_cmd
 	    firewall-cmd --zone=public --add-port=6379/tcp
+            echo "podman run --name crucible-redis ${container_common_args[@]} ${container_redis_args[@]} $CRUCIBLE_CONTAINER_IMAGE $redis_cmd"
+            podman run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
         fi
+        echo "podman run --name crucible-run ${container_common_args[@]} ${container_rs_args[@]} $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd"
+        podman run --name crucible-run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
     fi
-    $run_cmd
     RET_VAL=$?
     if [ $RET_VAL -eq 0 ]; then
-        $pp_cmd
-        RET_VAL=$?
+        if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
+            podman run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_cmd
+            RET_VAL=$?
+	fi
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-    $@
-    RET_VAL=$?
+    if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
+        echo "Running: podman run --name crucible-wrapper "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@"
+        podman run --name crucible-wrapper "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
+        RET_VAL=$?
+    else
+        $@
+        RET_VAL=$?
+    fi
 else
     echo "This function has not been implemented"
 fi

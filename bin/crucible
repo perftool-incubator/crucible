@@ -74,10 +74,13 @@ if [ ! -e $CRUCIBLE_HOME ]; then
 fi
 . $CRUCIBLE_HOME/bin/base
 
-check_id
+if [ "$CRUCIBLE_USE_CONTAINERS" == "1" -a -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
+    echo "Switching to not using container because CRUCIBLE_CONTAINER_IMAGE is not defined"
+    CRUCIBLE_USE_CONTAINERS="0"
+fi
 
 if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
-    podman -v >/dev/null
+    podman --version >/dev/null
     if [ $? -gt 0 ]; then
         echo "You must have podman to use the crucible controller with containers.  Please install and run again"
         exit 1
@@ -86,20 +89,37 @@ else
     echo ""
 fi
 
-/bin/mkdir -p /var/opt/crucible
-/bin/mkdir -p /var/lib/crucible
-
 # make sure the user has a .crucible directory for storing things
 USER_STORE=$HOME/.crucible
 if [ ! -d ${USER_STORE} ]; then
     mkdir -v ${USER_STORE}
 fi
-
 LOG_DB=${USER_STORE}/log.db
+
+check_id
+
+container_log_args=()
+container_log_args+=("-i")
+container_log_args+=("--name crucible-log")
+container_log_args+=("--mount=type=bind,source=$LOG_DB,destination=$LOG_DB")
+container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
+
+/bin/mkdir -p /var/opt/crucible
+/bin/mkdir -p /var/lib/crucible
+
+
+function crucible_log() {
+    if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
+        echo podman run ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
+        podman run ${container_log_args[@]} ${container_common_args[@]}\
+            $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
+    else
+        $CRUCIBLE_HOME/bin/log $@
+    fi
+}
 
 function setup_pipe() {
     local PIPE=${1}
-
     rm ${PIPE}
     mknod ${PIPE} p
 }
@@ -107,22 +127,9 @@ function setup_pipe() {
 # special case some log operations so they don't happen under log
 # redirection
 log_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${USER_STORE}/log.db ${STDOUT_PIPE} ${STDERR_PIPE}"
-container_log_opts="-i --name crucible-log\
-    --mount=type=bind,source=$LOG_DB,destination=$LOG_DB\
-    --mount=type=bind,source=/tmp,destination=/tmp"
-container_log_cmd="podman run $container_logger_opts $container_common_opts"
-log_cmd="$CRUCIBLE_HOME/bin/log"
 
-if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
-    log_cmd="$container_log_cmd $log_cmd"
-fi
-
-if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-    # make sure that the log is initialized if it has not been done
-    # previously
-    if [ ! -e ${LOG_DB} ]; then
-        $log_cmd init ${LOG_DB}
-    fi
+if [ ! -e ${LOG_DB} -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
+    crucible_log init ${LOG_DB}
 fi
 
 if [ "$1" == "log" ]; then
@@ -130,18 +137,18 @@ if [ "$1" == "log" ]; then
         if [ "$2" == "view" -o -z "$2" ]; then
             shift
             shift
-            $log_cmd view ${LOG_DB} "$@" | less -S -F
+            crucible_log view ${LOG_DB} "$@" | less -S -F
             exit $?
         elif [ "$2" == "clear" ]; then
-            $log_cmd clear ${LOG_DB}
+            crucible_log clear ${LOG_DB}
             exit $?
         elif [ "$2" == "init" ]; then
-            $log_cmd init ${LOG_DB}
+            crucible_log init ${LOG_DB}
             exit $?
         elif [ "$2" == "insert" ]; then
             shift
             shift
-            $log_cmd insert ${LOG_DB} "$@"
+            crucible_log insert ${LOG_DB} "$@"
             exit $?
         elif [ "$2" == "debug" ]; then
                 sqlite3 ${LOG_DB} ".headers on" \
@@ -182,21 +189,23 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     COMMAND="$(basename $0) $@"
     COMMAND="`echo $COMMAND | sed -e 's/ /_/g'`"
     logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${USER_STORE}/log.db ${STDOUT_PIPE} ${STDERR_PIPE}"
-    container_logger_opts="-i --name crucible-log\
-        --mount=type=bind,source=$LOG_DB,destination=$LOG_DB\
-        --mount=type=bind,source=/tmp,destination=/tmp"
-    container_logger_cmd="podman run $container_logger_opts $container_common_opts"
-    if [ "$CRUCIBLE_USE_CONTAINERS" == "1" -a -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
-        echo "Switching to not using container because CRUCIBLE_CONTAINER_IMAGE is not defined"
-        CRUCIBLE_USE_CONTAINERS="0"
-    fi
+
+    container_logger_args=()
+    container_logger_args+=("-i")
+    container_logger_args+=("-d")
+    container_logger_args+=("--name crucible-log")
+    container_logger_args+=("--mount=type=bind,source=$LOG_DB,destination=$LOG_DB")
+    container_logger_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
+
     if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
-        logger_cmd="$container_logger_cmd $logger_cmd"
+        podman run ${container_logger_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $logger_cmd
+    else
+        $logger_cmd &
     fi
-    $logger_cmd &
     LOGGER_PID=$!
 
     # redirect the output to the pipes
+    # TODO: only redirct if logger is confirmed to be working
     exec > ${STDOUT_PIPE} 2> ${STDERR_PIPE}
 fi
 
