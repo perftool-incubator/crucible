@@ -26,8 +26,11 @@
                 "podman",
                 "skopeo",
                 "container-storage-fuse",
-                "nginx",
+                "httpd",
                 "elasticsearch",
+                "elasticsearch_post",
+                "java",
+                "nodejs",
                 "motd"
 	        ]
 	    },
@@ -52,8 +55,11 @@
                 "podman",
                 "skopeo",
                 "container-storage-fuse",
-                "nginx",
+                "httpd",
                 "elasticsearch",
+                "elasticsearch_post",
+                "java",
+                "nodejs",
                 "motd"
 	        ]
 	    },
@@ -78,8 +84,11 @@
                 "podman",
                 "skopeo",
                 "container-storage-fuse",
-                "nginx",
+                "httpd",
                 "elasticsearch",
+                "elasticsearch_post",
+                "java",
+                "nodejs",
                 "motd"
 	        ]
 	    },
@@ -104,8 +113,11 @@
                 "podman",
                 "skopeo",
                 "container-storage-fuse",
-                "nginx",
+                "httpd",
                 "elasticsearch",
+                "elasticsearch_post",
+                "java",
+                "nodejs",
                 "motd"
 	        ]
 	    }
@@ -266,11 +278,11 @@
 	        }
 	    },
 	    {
-	        "name": "nginx",
+	        "name": "httpd",
 	        "type": "distro",
 	        "distro_info": {
 		        "packages": [
-		            "nginx"
+		            "httpd"
 		        ]
 	        }
 	    },
@@ -280,6 +292,34 @@
             "distro_info": {
                 "packages": [
                     "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.6.2-x86_64.rpm"
+                ]
+            }
+        },
+        {
+            "name": "elasticsearch_post",
+            "type": "manual",
+            "manual_info": {
+                "commands": [
+                    "usermod -s /bin/bash elasticsearch",
+                    "chown -R elasticsearch:elasticsearch /etc/elasticsearch/"
+                ]
+            }
+        },
+        {
+            "name": "java",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "java"
+                ]
+            }
+        },
+        {
+            "name": "nodejs",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "nodejs"
                 ]
             }
         },
