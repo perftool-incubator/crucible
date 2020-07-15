@@ -104,8 +104,7 @@ container_log_args+=("--name crucible-log")
 container_log_args+=("--mount=type=bind,source=$LOG_DB,destination=$LOG_DB")
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
-/bin/mkdir -p /var/opt/crucible
-/bin/mkdir -p /var/lib/crucible
+/bin/mkdir -p $var_crucible
 
 
 function crucible_log() {
