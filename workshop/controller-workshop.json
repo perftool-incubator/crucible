@@ -5,11 +5,11 @@
         }
     },
     "userenvs": [
-	    {
-	        "name": "default",
-	        "requirements": [
+        {
+            "name": "default",
+            "requirements": [
                 "hostname",
-		        "procps-ng",
+                "procps-ng",
                 "jq",
                 "gcc",
                 "make",
@@ -32,13 +32,13 @@
                 "java",
                 "nodejs",
                 "motd"
-	        ]
-	    },
-	    {
-	        "name": "fedora31",
-	        "requirements": [
+            ]
+        },
+        {
+            "name": "fedora31",
+            "requirements": [
                 "hostname",
-		        "procps-ng",
+                "procps-ng",
                 "jq",
                 "gcc",
                 "make",
@@ -61,13 +61,13 @@
                 "java",
                 "nodejs",
                 "motd"
-	        ]
-	    },
-	    {
-	        "name": "fedora32",
-	        "requirements": [
+            ]
+        },
+        {
+            "name": "fedora32",
+            "requirements": [
                 "hostname",
-		        "procps-ng",
+                "procps-ng",
                 "jq",
                 "gcc",
                 "make",
@@ -90,13 +90,13 @@
                 "java",
                 "nodejs",
                 "motd"
-	        ]
-	    },
-	    {
-	        "name": "centos8",
-	        "requirements": [
+            ]
+        },
+        {
+            "name": "centos8",
+            "requirements": [
                 "hostname",
-		        "procps-ng",
+                "procps-ng",
                 "jq",
                 "gcc",
                 "make",
@@ -119,101 +119,101 @@
                 "java",
                 "nodejs",
                 "motd"
-	        ]
-	    }
+            ]
+        }
     ],
     "requirements": [
-	    {
-	        "name": "hostname",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "hostname"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "jq",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "jq"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "procps-ng",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "procps-ng"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "gcc",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "gcc"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "make",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "make"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "glibc-langpack-en",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "glibc-langpack-en"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "perl-App-cpanminus",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "perl-App-cpanminus"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "git",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "git"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "python3",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "python3",
+        {
+            "name": "hostname",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "hostname"
+                ]
+            }
+        },
+        {
+            "name": "jq",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "jq"
+                ]
+            }
+        },
+        {
+            "name": "procps-ng",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "procps-ng"
+                ]
+            }
+        },
+        {
+            "name": "gcc",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "gcc"
+                ]
+            }
+        },
+        {
+            "name": "make",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "make"
+                ]
+            }
+        },
+        {
+            "name": "glibc-langpack-en",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "glibc-langpack-en"
+                ]
+            }
+        },
+        {
+            "name": "perl-App-cpanminus",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "perl-App-cpanminus"
+                ]
+            }
+        },
+        {
+            "name": "git",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "git"
+                ]
+            }
+        },
+        {
+            "name": "python3",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "python3",
                     "python3-pip"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "redis",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "redis"
-		        ]
-	        }
-	    },
+                ]
+            }
+        },
+        {
+            "name": "redis",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "redis"
+                ]
+            }
+        },
         {
             "name": "pip-redis",
             "type": "manual",
@@ -221,7 +221,7 @@
                 "commands": [
                     "pip3 install redis"
                 ]
-	        }
+            }
         },
         {
             "name": "pip-jsonschema",
@@ -230,17 +230,17 @@
                 "commands": [
                     "pip3 install jsonschema"
                 ]
-	        }
+            }
         },
-	    {
-	        "name": "cpan-perl-modules",
-	        "type": "manual",
-	        "manual_info": {
-		        "commands": [
-		            "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes"
-		        ]
-	        }
-	    },
+        {
+            "name": "cpan-perl-modules",
+            "type": "manual",
+            "manual_info": {
+                "commands": [
+                    "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client"
+                ]
+            }
+        },
         {
             "name": "container-storage-fuse",
             "type": "manual",
@@ -250,42 +250,42 @@
                 ]
             }
         },
-	    {
-	        "name": "buildah",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "buildah"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "podman",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "podman"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "skopeo",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "skopeo"
-		        ]
-	        }
-	    },
-	    {
-	        "name": "httpd",
-	        "type": "distro",
-	        "distro_info": {
-		        "packages": [
-		            "httpd"
-		        ]
-	        }
-	    },
+        {
+            "name": "buildah",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "buildah"
+                ]
+            }
+        },
+        {
+            "name": "podman",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "podman"
+                ]
+            }
+        },
+        {
+            "name": "skopeo",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "skopeo"
+                ]
+            }
+        },
+        {
+            "name": "httpd",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "httpd"
+                ]
+            }
+        },
         {
             "name": "elasticsearch",
             "type": "distro",

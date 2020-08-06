@@ -75,8 +75,22 @@ elif [ "${1}" == "gen-iterations" ]; then
 elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
-    base_run_dir="$var_crucible/run/$benchmark-$datetime"
     shift
+    # If --tags is used, embedd this in the $base_run_dir
+    # (Don't modify $@ to do this)
+    base_run_dir=""
+    args=("$@")
+    arg_num=0
+    while [ $arg_num -lt ${#args[@]} ]; do
+        echo "arg $arg_num: ${args[$arg_num]}"
+	if [ ${args[$arg_num]} == "--tags" ]; then
+            ((arg_num++))
+            base_run_dir="--${args[$arg_num]}"
+	    break
+        fi
+        ((arg_num++))
+    done
+    base_run_dir="$var_crucible/run/$benchmark-$datetime$base_run_dir"
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
         exit_error "CRUCIBLE_CLIENT_SERVER_REPO is not defined"
     fi
@@ -122,7 +136,6 @@ elif [ "${1}" == "run" ]; then
     fi
     redis_cmd="/usr/bin/redis-server /etc/redis.conf"
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
-    #es_cmd="su -c \"chown -R elasticsearch:elasticsearch $var_crucible/es; /usr/share/elasticsearch/bin/elasticsearch -Epath.data=$var_crucible/es\" elasticsearch"
     es_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       --tool-params $tool_params_file\
@@ -133,7 +146,13 @@ elif [ "${1}" == "run" ]; then
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --base-run-dir=$base_run_dir\
       $@"
-    rs_pp_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process\
+    rs_pp_b_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-bench\
+      --base-run-dir=$base_run_dir"
+    rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools\
+      --base-run-dir=$base_run_dir"
+    rs_pp_c_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-consolidate\
+      --base-run-dir=$base_run_dir"
+    rs_export_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-export\
       --base-run-dir=$base_run_dir"
     if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
         echo "Checking for redis"
@@ -176,15 +195,19 @@ elif [ "${1}" == "run" ]; then
         if [ $RET_VAL -gt 0 ]; then
             exit_error "Could not start elasticseach"
         fi
-        exit
 
         echo "podman run --name crucible-run ${container_common_args[@]} ${container_rs_args[@]} $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd"
         podman run --name crucible-run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
     fi
     if [ $RET_VAL -eq 0 ]; then
         if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
-            podman run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_cmd
+            podman run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd &&
+            podman run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd &&
+            podman run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_c_cmd &&
+	    echo "Benchmark result is in $base_run_dir" &&
+            podman run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_export_cmd &&
             RET_VAL=$?
+	    echo "Benchmark result now in elastic, localhost:9200"
 	    fi
     fi
 elif [ "${1}" == "wrapper" ]; then
