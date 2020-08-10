@@ -72,6 +72,7 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     echo "Could not find $CRUCIBLE_HOME, exiting."
     exit 1
 fi
+export CRUCIBLE_HOME
 . $CRUCIBLE_HOME/bin/base
 
 if [ "$CRUCIBLE_USE_CONTAINERS" == "1" -a -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
@@ -209,7 +210,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
 fi
 
 # invoke the main command handler
-${CRUCIBLE_HOME}/bin/_main "${CRUCIBLE_HOME}" "${LOG_DB}" "$@"
+${CRUCIBLE_HOME}/bin/_main "${LOG_DB}" "$@"
 RET_VAL=${?}
 
 if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then

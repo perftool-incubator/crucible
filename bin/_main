@@ -2,8 +2,6 @@
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
-CRUCIBLE_HOME="${1}"
-shift
 LOG_DB="${1}"
 shift
 
