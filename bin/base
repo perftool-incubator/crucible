@@ -16,7 +16,6 @@ container_common_args+=("--privileged")
 container_common_args+=("--ipc=host")
 container_common_args+=("--pid=host")
 container_common_args+=("--net=host")
-container_common_args+=("--cap-add=all")
 container_common_args+=("--security-opt=label=disable")
 container_common_args+=("--workdir=`/bin/pwd`")
 
