@@ -31,7 +31,9 @@
                 "elasticsearch_post",
                 "java",
                 "nodejs",
-                "motd"
+                "motd",
+                "go",
+                "bc"
             ]
         },
         {
@@ -60,7 +62,9 @@
                 "elasticsearch_post",
                 "java",
                 "nodejs",
-                "motd"
+                "motd",
+                "go",
+                "bc"
             ]
         },
         {
@@ -89,7 +93,9 @@
                 "elasticsearch_post",
                 "java",
                 "nodejs",
-                "motd"
+                "motd",
+                "go",
+                "bc"
             ]
         },
         {
@@ -118,7 +124,9 @@
                 "elasticsearch_post",
                 "java",
                 "nodejs",
-                "motd"
+                "motd",
+                "go",
+                "bc"
             ]
         }
     ],
@@ -329,6 +337,24 @@
             "manual_info": {
                 "commands": [
                     "printf \"Crucible\\n    There is no escape\\n        (unless you press control-D)\\n\\n\\n\" >/etc/motd"
+                ]
+            }
+        },
+        {
+            "name": "go",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "golang-src", "golang-bin", "golang"
+                ]
+            }
+        },
+        {
+            "name": "bc",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "bc"
                 ]
             }
         }
