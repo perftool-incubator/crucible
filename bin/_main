@@ -74,17 +74,27 @@ elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
     shift
-    # If --tags is used, embedd this in the $base_run_dir
-    # (Don't modify $@ to do this)
     base_run_dir=""
+    bench_params="bench-params.json"
+    default_bench_params=1
+    tool_params="tools-params.json"
+    default_tool_params=1
     args=("$@")
     arg_num=0
+    # do some arg processing without modifying $@
     while [ $arg_num -lt ${#args[@]} ]; do
         echo "arg $arg_num: ${args[$arg_num]}"
-	if [ ${args[$arg_num]} == "--tags" ]; then
-            ((arg_num++))
-            base_run_dir="--${args[$arg_num]}"
-	    break
+        if [ ${args[$arg_num]} == "--tags" ]; then
+            # if --tags is used, embedd this in the $base_run_dir
+            base_run_dir="--${args[$arg_num+1]}"
+        elif [ ${args[$arg_num]} == "--bench-params" ]; then
+            # note that --bench-params was provided so skip default
+            default_bench_params=0
+            bench_params="${args[$arg_num+1]}"
+        elif [ ${args[$arg_num]} == "--tool-params" ]; then
+            # note that --tools-params was provided so skip default
+            default_tool_params=0
+            tool_params="${args[$arg_num+1]}"
         fi
         ((arg_num++))
     done
@@ -104,8 +114,11 @@ elif [ "${1}" == "run" ]; then
     mkdir -p "$base_run_dir"
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
-    if [ ! -e bench-params.json ]; then
-        echo "Make sure you have defined the benchmark parameters and put in a file \"bench-params.json\""
+
+    if [ ! -e ${bench_params} ]; then
+        echo "Make sure you have defined the benchmark parameters and put them in a file \"./bench-params.json\""
+        echo "or that you explicitly specify the benchmark parameters file with \"--bench-params=<file>\"."
+        echo ""
         echo "You can generate these parameters with \"crucible gen-iterations <benchmark> <options>"
         echo "Here are some examples:"
         echo "crucible gen-iterations fio --defaults basic"
@@ -115,13 +128,27 @@ elif [ "${1}" == "run" ]; then
         exit 1
     fi
 
-    if [ ! -e tool-params.json ]; then
-        echo "You do not have a \"tool-params.json\" in the current directory.  Crucible will use"
-        echo "the default tools found in $rs_dir/config/tool-params.json.  If you wish to use"
-        echo "different tools, create a tool-params.json which adheres to this schema: $rs_dir/schema/tools/json"
+    if [ ! -e ${tool_params} ]; then
+        echo "You do not have a \"tool-params.json\" in the current directory and have not explicitly"
+        echo "specified where to find a tool parameters file with \"--tools-params=<file>\"."
+        echo ""
+        echo "Crucible will use the default tools found in $rs_dir/config/tool-params.json."
+        echo ""
+        echo "If you wish to use different tools, create a tool parameters file which adheres to"
+        echo "the proper schema ($rs_dir/schema/tools/json) and either place that file in the"
+        echo "current directory named \"tool-params.json\" or explicitly specify it with"
+        echo "\"--tool-params=<file>\"."
         tool_params_file="$rs_dir/config/tool-params.json"
     else
-        tool_params_file=tool-params.json
+        tool_params_file=${tools_params}
+    fi
+
+    params_args=""
+    if [ ${default_bench_params} == 1 ]; then
+        params_args="--bench-params ${bench_params} "
+    fi
+    if [ ${default_tool_params} == 1 ]; then
+        params_args="${params_args} --tool-params ${tool_params_file} "
     fi
 
     if [ ! -e "$benchmark_subproj_dir" ]; then
@@ -137,8 +164,7 @@ elif [ "${1}" == "run" ]; then
     es_start_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
     es_init_cmd="${CRUCIBLE_HOME}/config/init-es.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
-      --tool-params $tool_params_file\
-      --bench-params bench-params.json\
+      ${params_args}\
       --bench-dir $benchmark_subproj_dir\
       --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock\
       --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop\
