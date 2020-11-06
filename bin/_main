@@ -28,7 +28,7 @@ container_httpd_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/httpd/,de
 
 container_es_args=()
 container_es_args+=("-d")
-container_es_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/elasticsearch/,destination=/etc/elasticsearch/")
+#container_es_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/elasticsearch/,destination=/etc/elasticsearch/")
 
 container_rs_args=()
 container_rs_args+=("-i")
