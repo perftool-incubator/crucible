@@ -1,0 +1,17 @@
+[
+    {
+        "tool": "ovs"
+    },
+    {
+        "tool": "kernel",
+	"params": [
+		{ "arg": "perf-record-opts", "val": "--freq=100" }
+	]
+    },
+    {
+        "tool": "sysstat"
+    },
+    {
+        "tool": "procstat"
+    }
+]
