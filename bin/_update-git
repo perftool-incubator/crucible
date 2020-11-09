@@ -13,7 +13,7 @@ if [ -d "./.git" ]; then
     echo -e ${stash_output}
 
     # merge any changes from the remote branch
-    git pull --verbose
+    git pull --verbose --ff-only
 
     if ! echo "${stash_output}" | grep -q "No local changes to save"; then
         # reapply local changes
