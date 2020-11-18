@@ -245,7 +245,7 @@
             "type": "manual",
             "manual_info": {
                 "commands": [
-                    "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client"
+                    "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client Time::HiRes"
                 ]
             }
         },
