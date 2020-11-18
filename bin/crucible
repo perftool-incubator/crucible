@@ -75,19 +75,15 @@ fi
 export CRUCIBLE_HOME
 . $CRUCIBLE_HOME/bin/base
 
-if [ "$CRUCIBLE_USE_CONTAINERS" == "1" -a -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
-    echo "Switching to not using container because CRUCIBLE_CONTAINER_IMAGE is not defined"
-    CRUCIBLE_USE_CONTAINERS="0"
+if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
+    echo "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
+    exit 1
 fi
 
-if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
-    podman --version >/dev/null
-    if [ $? -gt 0 ]; then
-        echo "You must have podman to use the crucible controller with containers.  Please install and run again"
-        exit 1
-    fi
-else
-    echo ""
+podman --version >/dev/null
+if [ $? -gt 0 ]; then
+    echo "You must have podman to use the crucible controller with containers.  Please install and run again"
+    exit 1
 fi
 
 # make sure the user has a .crucible directory for storing things
@@ -197,11 +193,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     container_logger_args+=("--mount=type=bind,source=$LOG_DB,destination=$LOG_DB")
     container_logger_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
-    if [ "$CRUCIBLE_USE_CONTAINERS" == "1" ]; then
-        podman run ${container_logger_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $logger_cmd
-    else
-        $logger_cmd &
-    fi
+    podman run ${container_logger_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $logger_cmd
     LOGGER_PID=$!
 
     # redirect the output to the pipes
