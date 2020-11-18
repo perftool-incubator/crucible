@@ -20,7 +20,8 @@ container_common_args+=("--security-opt=label=disable")
 container_common_args+=("--workdir=`/bin/pwd`")
 
 var_crucible="/var/lib/crucible"
-podman_run="podman run --pull always"
+podman_pull="podman pull"
+podman_run="podman run"
 
 datetime=`date +%Y-%m-%d_%H:%M:%S`
 
