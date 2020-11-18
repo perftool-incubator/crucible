@@ -234,19 +234,25 @@ elif [ "${1}" == "run" ]; then
             RET_VAL=$?
             if [ $RET_VAL -eq 0 ]; then
 	            echo "Benchmark result now in elastic, localhost:9200"
-                run_id=`jq -r '."run-id"' "$base_run_dir/run/rickshaw-result.json"`
-                cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
-                cdm_query_cmd+=" --run=$run_id"
-                echo "Generating benchmark summary report"
-                sleep 5 # ES may take 5 seconds to have data ready (from a setting which can vastly improve index operations)
-                $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd | tee "$base_run_dir/run/result-summary.txt"
-                RET_VAL=$?
-                if [ $RET_VAL -eq 0 ]; then
-                    echo
-                    echo "Benchmark summary is complete and can be found in:"
-                    echo "$base_run_dir/run/result-summary.txt"
+                $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE jq -r '."run-id"' $base_run_dir/run/rickshaw-result.json | tr -d '\n' 
+                # Yes, there's a carriage return in this output, and no, I have no idea why...
+                this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE jq -r '."run-id"' $base_run_dir/run/rickshaw-result.json | tr -d '\r'`
+                if [ ! -z "$this_id" ]; then
+                    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
+                    cdm_query_cmd+=" --run=$this_id"
+                    echo "Generating benchmark summary report"
+                    sleep 5 # ES may take 5 seconds to have data ready (from a setting which can vastly improve index operations)
+                    $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd | tee "$base_run_dir/run/result-summary.txt"
+                    RET_VAL=$?
+                    if [ $RET_VAL -eq 0 ]; then
+                        echo
+                        echo "Benchmark summary is complete and can be found in:"
+                        echo "$base_run_dir/run/result-summary.txt"
+                    else
+                        echo "ERROR: Could not generate benchmark summary"
+                    fi
                 else
-                    echo "ERROR: Could not generate benchmark summary"
+                    echo "ERROR: Could not get the run-id from this run"
                 fi
             else
                 echo "ERROR: Could not index result into elasticsearch"
