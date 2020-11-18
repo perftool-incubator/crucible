@@ -2,6 +2,13 @@
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
+# make sure the user has a .crucible directory for storing things
+USER_STORE=$HOME/.crucible
+if [ ! -d ${USER_STORE} ]; then
+    mkdir -v ${USER_STORE}
+fi
+LOG_DB=${USER_STORE}/log.db
+
 container_common_args=()
 container_common_args+=("-t")
 container_common_args+=("--rm")
@@ -18,6 +25,12 @@ container_common_args+=("--pid=host")
 container_common_args+=("--net=host")
 container_common_args+=("--security-opt=label=disable")
 container_common_args+=("--workdir=`/bin/pwd`")
+
+container_log_args=()
+container_log_args+=("-i")
+container_log_args+=("--name crucible-log")
+container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
+container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
 var_crucible="/var/lib/crucible"
 podman_pull="podman pull"
@@ -48,5 +61,13 @@ function check_id {
     if [ -z "$CRUCIBLE_EMAIL" ]; then
         echo "Please consider adding \"CRUCIBLE_EMAIL=<your email address>\" to $HOME/.crucible/identity"
         sleep 1
+    fi
+}
+
+function crucible_log() {
+    if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
+        podman run ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
+    else
+        $CRUCIBLE_HOME/bin/log $@
     fi
 }

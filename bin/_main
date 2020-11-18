@@ -39,7 +39,7 @@ container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 
 if [ "${1}" == "log" ]; then
     shift
-    ${CRUCIBLE_HOME}/bin/log ${1} ${LOG_DB}
+    crucible_log ${1} ${LOG_DB}
     RET_VAL=$?
 elif [ "${1}" == "repo" ]; then
     shift
