@@ -102,7 +102,7 @@ check_id
 container_log_args=()
 container_log_args+=("-i")
 container_log_args+=("--name crucible-log")
-container_log_args+=("--mount=type=bind,source=$LOG_DB,destination=$LOG_DB")
+container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
 /bin/mkdir -p $var_crucible
