@@ -98,7 +98,7 @@ check_id
 container_log_args=()
 container_log_args+=("-i")
 container_log_args+=("--name crucible-log")
-container_log_args+=("--mount=type=bind,source=$LOG_DB,destination=$LOG_DB")
+container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
 /bin/mkdir -p $var_crucible
@@ -122,7 +122,7 @@ function setup_pipe() {
 
 # special case some log operations so they don't happen under log
 # redirection
-log_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${USER_STORE}/log.db ${STDOUT_PIPE} ${STDERR_PIPE}"
+log_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
 
 if [ ! -e ${LOG_DB} -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     crucible_log init ${LOG_DB}
@@ -184,7 +184,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
 
     COMMAND="$(basename $0) $@"
     COMMAND="`echo $COMMAND | sed -e 's/ /_/g'`"
-    logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${USER_STORE}/log.db ${STDOUT_PIPE} ${STDERR_PIPE}"
+    logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
 
     container_logger_args=()
     container_logger_args+=("-i")
