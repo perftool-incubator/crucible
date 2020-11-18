@@ -105,11 +105,11 @@ elif [ "${1}" == "run" ]; then
     if [ -z "$CRUCIBLE_CLIENT_SERVER_AUTH" ]; then
         exit_error "CRUCIBLE_CLIENT_SERVER_AUTH is not defined"
     fi
-
-    container_redis_cmd="podman run $container_redis_opts ${container_common_args[@]}"
     if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
         echo "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
         exit 1
+    else
+        $podman_pull $CRUCIBLE_CONTAINER_IMAGE
     fi
     mkdir -p "$base_run_dir"
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
