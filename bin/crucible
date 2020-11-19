@@ -86,33 +86,9 @@ if [ $? -gt 0 ]; then
     exit 1
 fi
 
-# make sure the user has a .crucible directory for storing things
-USER_STORE=$HOME/.crucible
-if [ ! -d ${USER_STORE} ]; then
-    mkdir -v ${USER_STORE}
-fi
-LOG_DB=${USER_STORE}/log.db
-
 check_id
 
-container_log_args=()
-container_log_args+=("-i")
-container_log_args+=("--name crucible-log")
-container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
-container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
-
 /bin/mkdir -p $var_crucible
-
-
-function crucible_log() {
-    if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-        echo podman run ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
-        podman run ${container_log_args[@]} ${container_common_args[@]}\
-            $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
-    else
-        $CRUCIBLE_HOME/bin/log $@
-    fi
-}
 
 function setup_pipe() {
     local PIPE=${1}
@@ -168,6 +144,8 @@ elif [ "$1" == "help" ]; then
 
     shift
     exec ${CRUCIBLE_HOME}/bin/_help ${CRUCIBLE_HOME} "$@"
+elif [ "$1" == "console" ]; then
+    exec podman run --name crucible-console -i "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
 fi
 
 if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
@@ -188,12 +166,11 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
 
     container_logger_args=()
     container_logger_args+=("-i")
-    container_logger_args+=("-d")
-    container_logger_args+=("--name crucible-log")
-    container_logger_args+=("--mount=type=bind,source=$LOG_DB,destination=$LOG_DB")
+    container_logger_args+=("--name crucible-logger")
+    container_logger_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
     container_logger_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
-    podman run ${container_logger_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $logger_cmd
+    podman run ${container_logger_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $logger_cmd &
     LOGGER_PID=$!
 
     # redirect the output to the pipes
