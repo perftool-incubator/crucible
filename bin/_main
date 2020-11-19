@@ -76,27 +76,42 @@ elif [ "${1}" == "run" ]; then
     shift
     base_run_dir=""
     bench_params="bench-params.json"
-    default_bench_params=1
     tool_params="tools-params.json"
-    default_tool_params=1
-    args=("$@")
-    arg_num=0
-    # do some arg processing without modifying $@
-    while [ $arg_num -lt ${#args[@]} ]; do
-        echo "arg $arg_num: ${args[$arg_num]}"
-        if [ ${args[$arg_num]} == "--tags" ]; then
-            # if --tags is used, embedd this in the $base_run_dir
-            base_run_dir="--${args[$arg_num+1]}"
-        elif [ ${args[$arg_num]} == "--bench-params" ]; then
-            # note that --bench-params was provided so skip default
-            default_bench_params=0
-            bench_params="${args[$arg_num+1]}"
-        elif [ ${args[$arg_num]} == "--tool-params" ]; then
-            # note that --tools-params was provided so skip default
-            default_tool_params=0
-            tool_params="${args[$arg_num+1]}"
-        fi
-        ((arg_num++))
+    use_mv_params=0
+    mv_params=""
+
+    passthru_args=()
+    while [ $# -gt 0 ]; do
+        arg=${1}
+        shift
+        case "${arg}" in
+            "--mv-params")
+                val=${1}
+                shift
+                use_mv_params=1
+                mv_params=${val}
+                ;;
+            "--tags")
+                val=${1}
+                shift
+                base_run_dir="--${val}"
+                passthru_args+=("${arg}")
+                passthru_args+=("${val}")
+                ;;
+            "--bench-params")
+                val=${1}
+                shift
+                bench_params=${val}
+                ;;
+            "--tool-params")
+                val=${1}
+                shift
+                tools_params=${1}
+                ;;
+            *)
+                passthru_args+=("${arg}")
+                ;;
+        esac
     done
     base_run_dir="$var_crucible/run/$benchmark-$datetime$base_run_dir"
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
@@ -111,11 +126,26 @@ elif [ "${1}" == "run" ]; then
     else
         $podman_pull $CRUCIBLE_CONTAINER_IMAGE
     fi
-    mkdir -p "$base_run_dir"
+    mkdir -pv "$base_run_dir/config"
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
 
-    if [ ! -e ${bench_params} ]; then
+    if [ "${use_mv_params}" == "1" ]; then
+        if [ ! -e "${mv_params}" ]; then
+            echo "The multi-value params file you specified with --mv-params (${mv_params}) does not exist!"
+            exit 1
+        else
+            mv_params_run_dir=${base_run_dir}/config/mv-params.json
+            cp -v ${mv_params} ${mv_params_run_dir}
+            bench_params_run_dir=${base_run_dir}/config/bench-params.json
+
+            echo "Generating --bench-params from --mv-params..."
+            echo "$podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /opt/crucible/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}"
+            $podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /opt/crucible/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}
+
+            bench_params=${bench_params_run_dir}
+        fi
+    elif [ ! -e ${bench_params} ]; then
         echo "Make sure you have defined the benchmark parameters and put them in a file \"./bench-params.json\""
         echo "or that you explicitly specify the benchmark parameters file with \"--bench-params=<file>\"."
         echo ""
@@ -126,8 +156,13 @@ elif [ "${1}" == "run" ]; then
         echo ""
         echo "Once you have run this, you should have a file, \"bench-params.json\" in your current directory"
         exit 1
+    else
+        bench_params_run_dir=${base_run_dir}/config/bench-params.json
+        cp -v ${bench_params} ${bench_params_run_dir}
+        bench_params=${bench_params_run_dir}
     fi
 
+    tool_params_file=${base_run_dir}/config/tool-params.json
     if [ ! -e ${tool_params} ]; then
         echo "You do not have a \"tool-params.json\" in the current directory and have not explicitly"
         echo "specified where to find a tool parameters file with \"--tools-params=<file>\"."
@@ -138,18 +173,14 @@ elif [ "${1}" == "run" ]; then
         echo "the proper schema ($rs_dir/schema/tools/json) and either place that file in the"
         echo "current directory named \"tool-params.json\" or explicitly specify it with"
         echo "\"--tool-params=<file>\"."
-        tool_params_file="$rs_dir/config/tool-params.json"
+        cp -v $rs_dir/config/tool-params.json ${tool_params_file}
     else
-        tool_params_file=${tools_params}
+        cp -v ${tools_params} ${tool_params_file}
     fi
 
     params_args=""
-    if [ ${default_bench_params} == 1 ]; then
-        params_args="--bench-params ${bench_params} "
-    fi
-    if [ ${default_tool_params} == 1 ]; then
-        params_args="${params_args} --tool-params ${tool_params_file} "
-    fi
+    params_args+=" --bench-params ${bench_params}"
+    params_args+=" --tool-params ${tool_params_file}"
 
     if [ ! -e "$benchmark_subproj_dir" ]; then
         echo "Running benchmark $benchmark requires that subproject"
@@ -170,7 +201,7 @@ elif [ "${1}" == "run" ]; then
       --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop\
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --base-run-dir=$base_run_dir\
-      $@"
+      ${passthru_args[@]}"
     rs_pp_b_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-bench\
       --base-run-dir=$base_run_dir"
     rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools\
