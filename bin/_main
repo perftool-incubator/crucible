@@ -290,6 +290,11 @@ elif [ "${1}" == "run" ]; then
             fi
 	    fi
     fi
+
+    if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
+	echo "Archiving crucible log to ${base_run_dir}"
+	crucible_log view ${LOG_DB} last | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
+    fi
 elif [ "${1}" == "wrapper" ]; then
     shift
 	$podman_run --name crucible-wrapper "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
