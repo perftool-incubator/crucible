@@ -16,7 +16,7 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo update workshop gen-iterations run wrapper console" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help log repo update workshop run wrapper console" -- "${COMP_WORDS[1]}"))
     elif [ ${COMP_WORDS[1]} == "workshop" ]; then
         if [ "$(expr $num_words % 2)" -eq 1 ]; then
             COMPREPLY=($(compgen -W "$($CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --completions all)" -- "${COMP_WORDS[$num_index]}"))
@@ -27,7 +27,7 @@ _crucible_completions() {
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "log repo update gen-iterations run" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "log repo update run" -- "${COMP_WORDS[2]}"))
                 ;;
             log)
                 COMPREPLY=($(compgen -W "clear info init insert view" -- "${COMP_WORDS[2]}"))
@@ -38,7 +38,7 @@ _crucible_completions() {
             update)
                 COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
                 ;;
-            gen-iterations|run)
+            run)
                 COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/benchmarks/; find . -mindepth 1 -maxdepth 1 -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
                 ;;
         esac
@@ -53,17 +53,6 @@ _crucible_completions() {
         rickshaw_params_file="$CRUCIBLE_HOME/subprojects/core/rickshaw/params"
         if [ -e $rickshaw_params_file ]; then
             params="$params $(cat $rickshaw_params_file)"
-        fi
-        COMPREPLY=($(compgen -W "$params" -- "${COMP_WORDS[$num_index]}"))
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "gen-iterations" ]; then
-        params=""
-        bench_params_file="$CRUCIBLE_HOME/subprojects/benchmarks/${COMP_WORDS[2]}/params"
-        multiplex_params_file="$CRUCIBLE_HOME/subprojects/core/multiplex/params"
-        if [ -e "$bench_params_file" ]; then
-            params="$params $(cat $bench_params_file)"
-        fi
-        if [ -e "$multiplex_params_file" ]; then
-            params="$params $(cat $multiplex_params_file)"
         fi
         COMPREPLY=($(compgen -W "$params" -- "${COMP_WORDS[$num_index]}"))
     fi
