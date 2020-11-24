@@ -14,15 +14,12 @@
 #                   clear-result    of a benchmark with one
 #                                   or more iterations
 #
-# Multiplex         gen-iterations  Convert a user's list     Minimally viable,
-#                                   of benchamrk params       Integrated
-#                                   (--opt val1,val2)
-#                                   into multiple benchmark
-#                                   iterations
-#
-# <remote-exec>     auth-hosts      Automated ssh key         Not implemented
-#                   ssh-hosts       installation, multi-
-#                                   remote-host execution
+# Multiplex         <TBD>           Convert a user's list     Currently only
+#                                   of benchamrk params       supported via
+#                                   (--opt val1,val2)         --mv-params with
+#                                   into multiple benchmark   run command (and
+#                                   iterations                requires mv-params
+#                                                             JSON format
 #
 # Roadblock         <TBD>           Provide synchrnization    Minimally viable,
 #                                   across endpoints (hosts   Not integrated
