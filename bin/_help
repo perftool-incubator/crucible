@@ -9,10 +9,12 @@ function help() {
     echo "The following commands are supported"
     echo ""
     echo "help            |  Show this help message"
-    echo "log             |  Work with the crucible log"
-    echo "repo            |  Crucible repository management"
-    echo "update          |  Update the repositories that comprise crucible"
-    echo "wrapper         |  Run user supplied programs inside a crucible wrapper for logging purposes"
+    echo "run             |  Run a benchmark"
+    echo "log             |  Manage with the crucible log"
+    echo "repo            |  Get info on the crucible and subproject git repos"
+    echo "update          |  Update all or part of the crucible software"
+    echo "console         |  Run user supplied programs inside a crucible wrapper for logging purposes"
+    echo "wrapper         |  Run a crucible subproject command directly, within a crucible container"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
@@ -34,6 +36,8 @@ function help() {
         ${CRUCIBLE_HOME}/bin/repo help
     elif [ "${1}" == "update" ]; then
         ${CRUCIBLE_HOME}/bin/update help
+    elif [ "${1}" == "run" ]; then
+        echo "please see https://github.com/perftool-incubator/crucible/tree/master/doc"
     else
         help
     fi

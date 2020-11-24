@@ -4,15 +4,15 @@
 
 # Crucible's purpose is to provide a single interface
 # for all of these subprojects for a seamless performance
-# benchmark and tool harness solution
-
-# Crucible expects to have these subprojects (eventually):
+# benchmark and tool automation solution
 #
-# Project-name      Commands        Purpose                   Status
+# Crucible expects to have these subprojects:
 #
-# Rickshaw          run-benchmark   Coordinate a full "run"   Not implemented
-#                   clear-result    of a benchmark with one
-#                                   or more iterations
+# Project-name      User-Commands   Purpose                   Status
+#
+# Rickshaw          run             Coordinate a full "run"   Implemented with
+#                                   of a benchmark with one   localhost, remotehost,
+#                                   or more iterations        and k8s endpoints
 #
 # Multiplex         <TBD>           Convert a user's list     Currently only
 #                                   of benchamrk params       supported via
@@ -21,33 +21,78 @@
 #                                   iterations                requires mv-params
 #                                                             JSON format
 #
-# Roadblock         <TBD>           Provide synchrnization    Minimally viable,
-#                                   across endpoints (hosts   Not integrated
-#                                   and/or containers) and
-#                                   this controller
+# Roadblock         none            Provide synchrnization    Fully integrated
+#                                   and message passing
+#                                   across all participants
+#                                   in benchmark execution
 #
-# Workshop          workshop        Image management for      Under Development
-#                                   endpoint execution
+# Workshop          none            Dynamic, multi-distro     Fully integrated
+#                                   container builder for
+#                                   all SW needed for bench-
+#                                   marks and tools.
 #
-# <tools-project>   register-tool   Integrate various tools   Not implemented
-#                   unregister-tool for execution
+# Tools-            none            Helper scripts for tool   Framework intregated,
+# subprojects                       execution and post-       per-tool status with
+#                                   processing                post-processed metrics
+#                                                             supported below:
 #
-# <elastic/CDM>     query-elastic   Data storage, query,      Under developoment
-#                   import-elastic  reporting, etc.
-#                   build-elastic
+#                                                             mpstat: cpu util
+#                                                             sar: netdev tput
+#                                                             iostat:
+#                                                             pidstat:
+#                                                             perf:
 #
+# Benchmarks-                      Helper scripts for         Framework intregated,
+# subprojects       none           benchmark execution        per-benchmark status
+#                                  and post-processing        below:
 #
-# Addtionally, Crucible will work with one or more
-# benchmark or tool subprojects, found in:
-# ./subprojects/tools
-# ./subprojects/benchmarks
-# 
-# These subprojects provide configuration information,
-# integration scripts, and post-processing scripts
-# for a specific benchmark or tool, like Fio or Iostat.
-
+#                                                             uperf: fully integrated
+#                                                             fio: fully integrated
+#
+# CommonDataModel   <TBD>          Data storage, query        Elastic instance
+#                                                             automatically created
+#                                                             and indices created.
+#                                                             Run result-summarization
+#                                                             functional.
+#
 # Crucible is meant to be run from a single command, 'crucible'
-# and provide all the functionality from these projects.
+# and provide all the functionality from these subprojects.
+#
+# The system where 'crucible' is run is the 'crucible-controller'.
+# It is not necessary to install crucible on any system-under-test
+# (host, cluster, cloud, etc).  The crucible-controller is where
+# a user initiates benchmark runs, to be executed on remote
+# systems-under-test, including remote-hosts and k8s clusters (more
+# to follow).  These systems-under-test are called endpoints, and a
+# benchmark run can include multiple endpoints, even with different
+# endpoint types (for example uperf clients on remote-hosts and uperf
+# servers in mulitple k8s clusters).
+#
+# The crucible controller only requires two software packages:
+# - podman
+# - git
+# 
+# Crucible also requires that a container registry with
+# push and pull capabilities, to be used for dynamic image
+# building for benchmarks and tools.  The following must be
+# set in /etc/sysconfig/crucible:
+# CRUCIBLE_CLIENT_SERVER_REPO
+# CRUCIBLE_CLIENT_SERVER_AUTH
+#
+# YOU MUST CREATE AN ACCOUNT ON A CONTAINER REGISTRY
+# If you are working among a team, you can use the same account.
+#
+# Finally, crucible-controller will use publicly available
+# container image to execute all subprojects.  This container is
+# defined in /etc/sysconfig/crucible with:
+# CRUCIBLE_CONTAINER_IMAGE
+# All of code for subprojects are contained on the controller, under
+# $CRUCIBLE_HOME/subprojects, but the crucbile-controller container image
+# provides all software dependencies to run that code.
+#
+# AS A CRUCBILE USER, YOU SHOULD NEVER HAVE TO INSTALL ANY SOFTWARE
+# OTHER THAN PODMAN AND GIT.
+
 
 if [ -e /etc/sysconfig/crucible ]; then
     . /etc/sysconfig/crucible
