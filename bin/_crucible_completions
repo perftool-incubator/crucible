@@ -16,14 +16,7 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo update workshop run wrapper console" -- "${COMP_WORDS[1]}"))
-    elif [ ${COMP_WORDS[1]} == "workshop" ]; then
-        if [ "$(expr $num_words % 2)" -eq 1 ]; then
-            COMPREPLY=($(compgen -W "$($CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --completions all)" -- "${COMP_WORDS[$num_index]}"))
-        else
-            let arg_index=$num_index-1
-            COMPREPLY=($(compgen -W "$($CRUCIBLE_HOME/subprojects/core/workshop/workshop.pl --completions ${COMP_WORDS[$arg_index]})" -- "${COMP_WORDS[$num_index]}"))
-        fi
+        COMPREPLY=($(compgen -W "help log repo update run wrapper console" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)

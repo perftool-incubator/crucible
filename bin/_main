@@ -59,10 +59,6 @@ elif [ "${1}" == "update" ]; then
         ${CRUCIBLE_HOME}/bin/update ${1}
         RET_VAL=$?
     fi
-elif [ "${1}" == "workshop" ]; then
-    shift
-    ${CRUCIBLE_HOME}/subprojects/core/workshop/workshop.pl "$@"
-    RET_VAL=$?
 elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
