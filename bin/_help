@@ -12,7 +12,6 @@ function help() {
     echo "log             |  Work with the crucible log"
     echo "repo            |  Crucible repository management"
     echo "update          |  Update the repositories that comprise crucible"
-    echo "workshop        |  Build container images"
     echo "wrapper         |  Run user supplied programs inside a crucible wrapper for logging purposes"
     echo ""
     echo "For more detailed help for each command, try:"
@@ -35,8 +34,6 @@ function help() {
         ${CRUCIBLE_HOME}/bin/repo help
     elif [ "${1}" == "update" ]; then
         ${CRUCIBLE_HOME}/bin/update help
-    elif [ "${1}" == "workshop" ]; then
-        ${CRUCIBLE_HOME}/subprojects/core/workshop/workshop.pl --help
     else
         help
     fi
