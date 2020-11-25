@@ -65,7 +65,7 @@ elif [ "${1}" == "run" ]; then
     shift
     base_run_dir=""
     bench_params="bench-params.json"
-    tool_params="tools-params.json"
+    tool_params="tool-params.json"
     use_mv_params=0
     mv_params=""
 
@@ -95,7 +95,7 @@ elif [ "${1}" == "run" ]; then
             "--tool-params")
                 val=${1}
                 shift
-                tools_params=${1}
+                tool_params=${1}
                 ;;
             *)
                 passthru_args+=("${arg}")
@@ -157,7 +157,7 @@ elif [ "${1}" == "run" ]; then
         echo "\"--tool-params=<file>\"."
         cp -v $rs_dir/config/tool-params.json ${tool_params_file}
     else
-        cp -v ${tools_params} ${tool_params_file}
+        cp -v ${tool_params} ${tool_params_file}
     fi
 
     params_args=""
