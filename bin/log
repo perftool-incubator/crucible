@@ -131,13 +131,27 @@ if ($mode eq "view") {
     }
     my $filter_query = "";
     if ($filter_cmd eq 'first') {
+        if (scalar(@ARGV) > 3) {
+            print "ERROR: Too may arguments!\n";
+            exit(1);
+        }
         $filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp ASC LIMIT 1)";
     } elsif ($filter_cmd eq 'last') {
+        if (scalar(@ARGV) > 3) {
+            print "ERROR: Too may arguments!\n";
+            exit(1);
+        }
         $filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp DESC LIMIT 1)";
     } elsif ($filter_cmd eq 'sessionid') {
         if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is' && $ARGV[4] =~ /[0-9]+\.[0-9]+/) {
             $filter_query = "WHERE sessions.timestamp = $ARGV[4]";
+        } else {
+            print "ERROR: Invalid sessionid query!\n";
+            exit(1);
         }
+    } elsif ($filter_cmd ne "") {
+        print "ERROR: Invalid filter command!\n";
+        exit(1);
     }
 
     my $sth = $log_dbh->prepare("SELECT ".
