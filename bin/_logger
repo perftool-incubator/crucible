@@ -31,6 +31,9 @@ my $log_dbh;
 # the logger should gracefully exit on it's own
 $SIG{'INT'} = sub { my $foo = 1; };
 
+# cleanup command that was passed
+$command =~ s/___/ /g;
+
 $log_dbh = DBI->connect("dbi:SQLite:dbname=" . $log_filename, "", "", { PrintError => 0 });
 if (! $log_dbh) {
     printf("ERROR: Logger could not open SQLite DB '%s'!\n", $log_filename);

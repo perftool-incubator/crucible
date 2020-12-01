@@ -203,7 +203,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     setup_pipe ${STDERR_PIPE}
 
     COMMAND="$(basename $0) $@"
-    COMMAND="`echo $COMMAND | sed -e 's/ /_/g'`"
+    COMMAND="`echo $COMMAND | sed -e 's/ /___/g'`"
     logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
 
     container_logger_args=()
