@@ -185,6 +185,7 @@ elif [ "$1" == "console" ]; then
     exec podman run --name crucible-console -i "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
 fi
 
+LOGGER_SESSION_ID="no-logger"
 if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     # disable CTRL-C killing this script while we are logging to a remote
     # process the CTRL-C should kill any subprocess other than the logger
@@ -197,12 +198,13 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     setup_pipe ${STDOUT_PIPE}
     setup_pipe ${STDERR_PIPE}
 
+    LOGGER_SESSION_ID=$(uuidgen)
+
     COMMAND="$(basename $0) $@"
     COMMAND="`echo $COMMAND | sed -e 's/ /___/g'`"
-    logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
+    logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${LOGGER_SESSION_ID}\" \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
 
-    logger_session_id=$(uuidgen)
-    logger_container_name="crucible-logger-${logger_session_id}"
+    logger_container_name="crucible-logger-${LOGGER_SESSION_ID}"
 
     container_logger_args=()
     container_logger_args+=("-i")
@@ -221,7 +223,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
 fi
 
 # invoke the main command handler
-${CRUCIBLE_HOME}/bin/_main "${LOG_DB}" "$@"
+${CRUCIBLE_HOME}/bin/_main "${LOGGER_SESSION_ID}" "${LOG_DB}" "$@"
 RET_VAL=${?}
 
 if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then

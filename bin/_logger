@@ -17,13 +17,13 @@ use Thread::Queue;
 $|++;
 
 my $source = $ARGV[0];
-my $command = $ARGV[1];
-my $log_filename = $ARGV[2];
-my $stdout_pipe = $ARGV[3];
-my $stderr_pipe = $ARGV[4];
+my $session_id = $ARGV[1];
+my $command = $ARGV[2];
+my $log_filename = $ARGV[3];
+my $stdout_pipe = $ARGV[4];
+my $stderr_pipe = $ARGV[5];
 
 my $start_timestamp = time();
-my $session_id;
 
 my $log_dbh;
 
@@ -105,7 +105,7 @@ if (! $log_dbh) {
         $command_id = $log_dbh->last_insert_id("", "", "commands", "");
     }
 
-    $rv = $log_dbh->do("INSERT INTO sessions (timestamp, source, command) VALUES ($start_timestamp, $source_id, $command_id);");
+    $rv = $log_dbh->do("INSERT INTO sessions (session_id, timestamp, source, command) VALUES ($session_id, $start_timestamp, $source_id, $command_id);");
     if ($rv < 0) {
         print $DBI::errstr;
         exit(1);

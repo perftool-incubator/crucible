@@ -85,7 +85,7 @@ if (($mode eq "init") || $do_init) {
         exit(1);
     }
 
-    $rv = $log_dbh->do("CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, timestamp REAL NOT NULL, source INTEGER NOT NULL REFERENCES sources (id), command INTEGER NOT NULL REFERENCES commands (id));");
+    $rv = $log_dbh->do("CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, session_id TEXT UNIQUE NOT NULL, timestamp REAL NOT NULL, source INTEGER NOT NULL REFERENCES sources (id), command INTEGER NOT NULL REFERENCES commands (id));");
     if ($rv < 0) {
         print $DBI::errstr;
         exit(1);
@@ -141,8 +141,8 @@ if ($mode eq "view") {
         }
         $filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp DESC LIMIT 1)";
     } elsif ($filter_cmd eq 'sessionid') {
-        if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is' && $ARGV[4] =~ /[0-9]+\.[0-9]+/) {
-            $filter_query = "WHERE sessions.timestamp = $ARGV[4]";
+        if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is') {
+            $filter_query = "WHERE sessions.session_id = " . $log_dbh->quote($ARGV[4]);
         } else {
             print "ERROR: Invalid sessionid query!\n";
             exit(1);
@@ -153,7 +153,8 @@ if ($mode eq "view") {
     }
 
     my $sth = $log_dbh->prepare("SELECT ".
-                                "sessions.timestamp AS session_timestamp, " .
+                                "sessions.session_id AS session_id, " .
+                                "sessions.timestamp as session_timestamp," .
                                 "commands.command AS session_command, " .
                                 "sources.source AS session_source, " .
                                 "lines.timestamp AS line_timestamp, " .
@@ -179,7 +180,7 @@ if ($mode eq "view") {
 
         if ($last_session_timestamp != $row->{'session_timestamp'}) {
             printf("==============================================================================================\n");
-            printf("[%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_timestamp'});
+            printf("[%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_id'});
             printf("[%s][%s] command:    %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_command'});
             printf("[%s][%s] source:     %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_source'});
             printf("[%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'});
