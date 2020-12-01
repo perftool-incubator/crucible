@@ -25,7 +25,6 @@ sub help {
     print("clear           |  Clear the crucible log\n");
     print("info            |  Display information about the log\n");
     print("init            |  Initialize the log\n");
-    print("insert          |  Insert a message into the log\n");
     print("view            |  View the crucible log (default)\n");
     print("\n");
 }
@@ -43,8 +42,7 @@ sub format_ts {
 if ((!($mode eq "view") &&
      !($mode eq "clear") &&
      !($mode eq "info") &&
-     !($mode eq "init") &&
-     !($mode eq "insert")) ||
+     !($mode eq "init")) ||
     ($mode eq "help")) {
     help();
     exit();
@@ -87,7 +85,7 @@ if (($mode eq "init") || $do_init) {
         exit(1);
     }
 
-    $rv = $log_dbh->do("CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, timestamp REAL NOT NULL, source INTEGER NOT NULL REFERENCES sources (id), command INTEGER NOT NULL REFERENCES commands (id));");
+    $rv = $log_dbh->do("CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, session_id TEXT UNIQUE NOT NULL, timestamp REAL NOT NULL, source INTEGER NOT NULL REFERENCES sources (id), command INTEGER NOT NULL REFERENCES commands (id));");
     if ($rv < 0) {
         print $DBI::errstr;
         exit(1);
@@ -143,8 +141,8 @@ if ($mode eq "view") {
         }
         $filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp DESC LIMIT 1)";
     } elsif ($filter_cmd eq 'sessionid') {
-        if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is' && $ARGV[4] =~ /[0-9]+\.[0-9]+/) {
-            $filter_query = "WHERE sessions.timestamp = $ARGV[4]";
+        if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is') {
+            $filter_query = "WHERE sessions.session_id = " . $log_dbh->quote($ARGV[4]);
         } else {
             print "ERROR: Invalid sessionid query!\n";
             exit(1);
@@ -155,7 +153,8 @@ if ($mode eq "view") {
     }
 
     my $sth = $log_dbh->prepare("SELECT ".
-                                "sessions.timestamp AS session_timestamp, " .
+                                "sessions.session_id AS session_id, " .
+                                "sessions.timestamp as session_timestamp," .
                                 "commands.command AS session_command, " .
                                 "sources.source AS session_source, " .
                                 "lines.timestamp AS line_timestamp, " .
@@ -181,7 +180,7 @@ if ($mode eq "view") {
 
         if ($last_session_timestamp != $row->{'session_timestamp'}) {
             printf("==============================================================================================\n");
-            printf("[%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_timestamp'});
+            printf("[%s][%s] session id: %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_id'});
             printf("[%s][%s] command:    %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_command'});
             printf("[%s][%s] source:     %s\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'}, $row->{'session_source'});
             printf("[%s][%s]\n", $row->{'session_timestamp_fmt'}, $row->{'line_stream'});
@@ -259,94 +258,6 @@ if ($mode eq "view") {
 
 
     print("\n");
-} elsif ($mode eq "insert") {
-    my $source = $ARGV[2];
-    my $stream = $ARGV[3];
-    my $msg = $ARGV[4];
-    my $start_timestamp = time();
-
-    if ($source eq "") {
-        printf(STDERR "ERROR: You must provide a message source!\n");
-        exit(1);
-    }
-
-    if (!($stream eq "STDOUT") && !($stream eq "STDERR")) {
-        printf(STDERR "ERROR: You must provid a valid stream (either STDOUT or STDERR)!\n");
-        exit(1);
-    }
-
-    if ($msg eq "") {
-        printf(STDERR "ERROR: You must provide a message!\n");
-        exit(1);
-    }
-
-    my $rv = $log_dbh->do("UPDATE db_state SET timestamp=$start_timestamp;");
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
-    my $sth = $log_dbh->prepare("SELECT id FROM sources WHERE source=" . $log_dbh->quote($source) . ";");
-    $rv = $sth->execute() or die $DBI::errstr;
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
-    my $source_id;
-    my $rows = 0;
-    while (my $row = $sth->fetchrow_hashref()) {
-        $source_id = $row->{'id'};
-        $rows += 1;
-    }
-
-    if ($rows == 0) {
-        $rv = $log_dbh->do("INSERT INTO sources (source) VALUES (" . $log_dbh->quote($source) . ");");
-        if ($rv < 0) {
-            print $DBI::errstr;
-            exit(1);
-        }
-        $source_id = $log_dbh->last_insert_id("", "", "sources", "");
-    }
-
-    my $command = "crucible log insert";
-
-    $sth = $log_dbh->prepare("SELECT id FROM commands WHERE command=" . $log_dbh->quote($command) . ";");
-    $rv = $sth->execute() or die $DBI::errstr;
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
-    my $command_id;
-    $rows = 0;
-    while (my $row = $sth->fetchrow_hashref()) {
-        $command_id = $row->{'id'};
-        $rows += 1;
-    }
-
-    if ($rows == 0) {
-        $rv = $log_dbh->do("INSERT INTO commands (command) VALUES (" . $log_dbh->quote($command) . ");");
-        if ($rv < 0) {
-            print $DBI::errstr;
-            exit(1);
-        }
-        $command_id = $log_dbh->last_insert_id("", "", "commands", "");
-    }
-
-    $rv = $log_dbh->do("INSERT INTO sessions (timestamp, source, command) VALUES ($start_timestamp, $source_id, $command_id);");
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-    my $session_id = $log_dbh->last_insert_id("", "", "sessions", "");
-
-    $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) SELECT $session_id, $start_timestamp, id, " . $log_dbh->quote($msg) . " FROM streams WHERE stream=" . $log_dbh->quote($stream) . ";");
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
 }
 
 $log_dbh->disconnect();

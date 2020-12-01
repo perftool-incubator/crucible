@@ -159,11 +159,6 @@ if [ "$1" == "log" ]; then
         elif [ "$2" == "init" ]; then
             crucible_log init ${LOG_DB}
             exit $?
-        elif [ "$2" == "insert" ]; then
-            shift
-            shift
-            crucible_log insert ${LOG_DB} "$@"
-            exit $?
         elif [ "$2" == "debug" ]; then
                 sqlite3 ${LOG_DB} ".headers on" \
                         ".echo on" \
@@ -190,6 +185,7 @@ elif [ "$1" == "console" ]; then
     exec podman run --name crucible-console -i "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
 fi
 
+LOGGER_SESSION_ID="no-logger"
 if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     # disable CTRL-C killing this script while we are logging to a remote
     # process the CTRL-C should kill any subprocess other than the logger
@@ -202,13 +198,17 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     setup_pipe ${STDOUT_PIPE}
     setup_pipe ${STDERR_PIPE}
 
+    LOGGER_SESSION_ID=$(uuidgen)
+
     COMMAND="$(basename $0) $@"
-    COMMAND="`echo $COMMAND | sed -e 's/ /_/g'`"
-    logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
+    COMMAND="`echo $COMMAND | sed -e 's/ /___/g'`"
+    logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${LOGGER_SESSION_ID}\" \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
+
+    logger_container_name="crucible-logger-${LOGGER_SESSION_ID}"
 
     container_logger_args=()
     container_logger_args+=("-i")
-    container_logger_args+=("--name crucible-logger")
+    container_logger_args+=("--name ${logger_container_name}")
     container_logger_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
     container_logger_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
@@ -216,22 +216,33 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     LOGGER_PID=$!
 
     # redirect the output to the pipes
-    # TODO: only redirct if logger is confirmed to be working
+    # backup the existing file handles, just in case they need to be restored
+    STDOUT_BACKUP=$(readlink -f /proc/$$/fd/1)
+    STDERR_BACKUP=$(readlink -f /proc/$$/fd/2)
     exec > ${STDOUT_PIPE} 2> ${STDERR_PIPE}
 fi
 
 # invoke the main command handler
-${CRUCIBLE_HOME}/bin/_main "${LOG_DB}" "$@"
+${CRUCIBLE_HOME}/bin/_main "${LOGGER_SESSION_ID}" "${LOG_DB}" "$@"
 RET_VAL=${?}
 
 if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-    # signal the logger that all output has been processed from each of
-    # the pipes
-    echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
-    echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
+    # ensure that the container where _logger is running is still active
+    # if it is not, these echo commands would block indefinitely
+    if podman container exists ${logger_container_name}; then
+	# signal the logger that all output has been processed from each of
+	# the pipes
+	echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
+	echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
 
-    # wait for the logger to exit
-    wait ${LOGGER_PID}
+	# wait for the logger to exit
+	wait ${LOGGER_PID}
+    else
+	# restore STDOUT/STDERR file handles since _logger is gone
+	exec 1>${STDOUT_BACKUP} 2>${STDERR_BACKUP}
+
+	echo "WARNING: The _logger container exited prematurely!"
+    fi
 fi
 
 exit ${RET_VAL}

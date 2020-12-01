@@ -2,12 +2,21 @@
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
+LOGGER_SESSION_ID="${1}"
+shift
 LOG_DB="${1}"
 shift
 
 if [ -z "${CRUCIBLE_HOME}" -o ! -e "${CRUCIBLE_HOME}" ]; then
     echo "ERROR: Could not find \${CRUCIBLE_HOME} [${CRUCIBLE_HOME}], exiting."
     exit 1
+fi
+
+if [ -z "${LOGGER_SESSION_ID}" ]; then
+    echo "ERROR: You must define a logger session ID."
+    exit 3
+else
+    export LOGGER_SESSION_ID="${LOGGER_SESSION_ID}"
 fi
 
 if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
@@ -275,11 +284,11 @@ elif [ "${1}" == "run" ]; then
 
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
 	echo "Archiving crucible log to ${base_run_dir}"
-	crucible_log view ${LOG_DB} last | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
+	crucible_log view ${LOG_DB} sessionid is ${LOGGER_SESSION_ID} | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-	$podman_run --name crucible-wrapper "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
+    $podman_run --name crucible-wrapper-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
     RET_VAL=$?
 else
     echo "This function has not been implemented"
