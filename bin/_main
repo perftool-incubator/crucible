@@ -279,7 +279,7 @@ elif [ "${1}" == "run" ]; then
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-	$podman_run --name crucible-wrapper "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
+    $podman_run --name crucible-wrapper-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
     RET_VAL=$?
 else
     echo "This function has not been implemented"
