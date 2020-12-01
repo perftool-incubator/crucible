@@ -13,7 +13,10 @@ use threads::shared qw(share);
 use Thread::Semaphore;
 use Thread::Queue;
 
-# disable STDOUT output buffering
+# disable output buffering for both STDERR and STDOUT
+my $old_fh = select(STDERR);
+$|++;
+select($old_fh);
 $|++;
 
 my $source = $ARGV[0];
