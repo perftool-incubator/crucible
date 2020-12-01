@@ -25,7 +25,6 @@ sub help {
     print("clear           |  Clear the crucible log\n");
     print("info            |  Display information about the log\n");
     print("init            |  Initialize the log\n");
-    print("insert          |  Insert a message into the log\n");
     print("view            |  View the crucible log (default)\n");
     print("\n");
 }
@@ -43,8 +42,7 @@ sub format_ts {
 if ((!($mode eq "view") &&
      !($mode eq "clear") &&
      !($mode eq "info") &&
-     !($mode eq "init") &&
-     !($mode eq "insert")) ||
+     !($mode eq "init")) ||
     ($mode eq "help")) {
     help();
     exit();
@@ -259,94 +257,6 @@ if ($mode eq "view") {
 
 
     print("\n");
-} elsif ($mode eq "insert") {
-    my $source = $ARGV[2];
-    my $stream = $ARGV[3];
-    my $msg = $ARGV[4];
-    my $start_timestamp = time();
-
-    if ($source eq "") {
-        printf(STDERR "ERROR: You must provide a message source!\n");
-        exit(1);
-    }
-
-    if (!($stream eq "STDOUT") && !($stream eq "STDERR")) {
-        printf(STDERR "ERROR: You must provid a valid stream (either STDOUT or STDERR)!\n");
-        exit(1);
-    }
-
-    if ($msg eq "") {
-        printf(STDERR "ERROR: You must provide a message!\n");
-        exit(1);
-    }
-
-    my $rv = $log_dbh->do("UPDATE db_state SET timestamp=$start_timestamp;");
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
-    my $sth = $log_dbh->prepare("SELECT id FROM sources WHERE source=" . $log_dbh->quote($source) . ";");
-    $rv = $sth->execute() or die $DBI::errstr;
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
-    my $source_id;
-    my $rows = 0;
-    while (my $row = $sth->fetchrow_hashref()) {
-        $source_id = $row->{'id'};
-        $rows += 1;
-    }
-
-    if ($rows == 0) {
-        $rv = $log_dbh->do("INSERT INTO sources (source) VALUES (" . $log_dbh->quote($source) . ");");
-        if ($rv < 0) {
-            print $DBI::errstr;
-            exit(1);
-        }
-        $source_id = $log_dbh->last_insert_id("", "", "sources", "");
-    }
-
-    my $command = "crucible log insert";
-
-    $sth = $log_dbh->prepare("SELECT id FROM commands WHERE command=" . $log_dbh->quote($command) . ";");
-    $rv = $sth->execute() or die $DBI::errstr;
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
-    my $command_id;
-    $rows = 0;
-    while (my $row = $sth->fetchrow_hashref()) {
-        $command_id = $row->{'id'};
-        $rows += 1;
-    }
-
-    if ($rows == 0) {
-        $rv = $log_dbh->do("INSERT INTO commands (command) VALUES (" . $log_dbh->quote($command) . ");");
-        if ($rv < 0) {
-            print $DBI::errstr;
-            exit(1);
-        }
-        $command_id = $log_dbh->last_insert_id("", "", "commands", "");
-    }
-
-    $rv = $log_dbh->do("INSERT INTO sessions (timestamp, source, command) VALUES ($start_timestamp, $source_id, $command_id);");
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-    my $session_id = $log_dbh->last_insert_id("", "", "sessions", "");
-
-    $rv = $log_dbh->do("INSERT INTO lines (session, timestamp, stream, line) SELECT $session_id, $start_timestamp, id, " . $log_dbh->quote($msg) . " FROM streams WHERE stream=" . $log_dbh->quote($stream) . ";");
-    if ($rv < 0) {
-        print $DBI::errstr;
-        exit(1);
-    }
-
 }
 
 $log_dbh->disconnect();

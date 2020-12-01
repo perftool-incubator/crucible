@@ -159,11 +159,6 @@ if [ "$1" == "log" ]; then
         elif [ "$2" == "init" ]; then
             crucible_log init ${LOG_DB}
             exit $?
-        elif [ "$2" == "insert" ]; then
-            shift
-            shift
-            crucible_log insert ${LOG_DB} "$@"
-            exit $?
         elif [ "$2" == "debug" ]; then
                 sqlite3 ${LOG_DB} ".headers on" \
                         ".echo on" \
