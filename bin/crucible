@@ -206,9 +206,12 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     COMMAND="`echo $COMMAND | sed -e 's/ /___/g'`"
     logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
 
+    logger_session_id=$(uuidgen)
+    logger_container_name="crucible-logger-${logger_session_id}"
+
     container_logger_args=()
     container_logger_args+=("-i")
-    container_logger_args+=("--name crucible-logger")
+    container_logger_args+=("--name ${logger_container_name}")
     container_logger_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
     container_logger_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
@@ -216,7 +219,9 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     LOGGER_PID=$!
 
     # redirect the output to the pipes
-    # TODO: only redirct if logger is confirmed to be working
+    # backup the existing file handles, just in case they need to be restored
+    STDOUT_BACKUP=$(readlink -f /proc/$$/fd/1)
+    STDERR_BACKUP=$(readlink -f /proc/$$/fd/2)
     exec > ${STDOUT_PIPE} 2> ${STDERR_PIPE}
 fi
 
@@ -225,13 +230,22 @@ ${CRUCIBLE_HOME}/bin/_main "${LOG_DB}" "$@"
 RET_VAL=${?}
 
 if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-    # signal the logger that all output has been processed from each of
-    # the pipes
-    echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
-    echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
+    # ensure that the container where _logger is running is still active
+    # if it is not, these echo commands would block indefinitely
+    if podman container exists ${logger_container_name}; then
+	# signal the logger that all output has been processed from each of
+	# the pipes
+	echo "STDOUT->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDOUT_PIPE}
+	echo "STDERR->CRUCIBLE_CLOSE_LOG_PIPE" > ${STDERR_PIPE}
 
-    # wait for the logger to exit
-    wait ${LOGGER_PID}
+	# wait for the logger to exit
+	wait ${LOGGER_PID}
+    else
+	# restore STDOUT/STDERR file handles since _logger is gone
+	exec 1>${STDOUT_BACKUP} 2>${STDERR_BACKUP}
+
+	echo "WARNING: The _logger container exited prematurely!"
+    fi
 fi
 
 exit ${RET_VAL}
