@@ -166,7 +166,7 @@ if ($mode eq "view") {
                                 "JOIN sources ON sources.id=sessions.source " .
                                 "JOIN commands ON commands.id=sessions.command " .
                                 "$filter_query " .
-                                "ORDER BY sessions.timestamp;");
+                                "ORDER BY sessions.timestamp, lines.timestamp;");
     my $rv = $sth->execute() or die $DBI::errstr;
     if ($rv < 0) {
         print $DBI::errstr;
