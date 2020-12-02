@@ -182,7 +182,7 @@ elif [ "$1" == "help" ]; then
     shift
     exec ${CRUCIBLE_HOME}/bin/_help ${CRUCIBLE_HOME} "$@"
 elif [ "$1" == "console" ]; then
-    exec podman run --name crucible-console -i "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
+    exec podman run --name crucible-console-$(uuidgen) --tty --interactive "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
 fi
 
 LOGGER_SESSION_ID="no-logger"
