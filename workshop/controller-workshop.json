@@ -8,6 +8,7 @@
         {
             "name": "default",
             "requirements": [
+		"xz",
                 "hostname",
                 "procps-ng",
                 "jq",
@@ -39,6 +40,7 @@
         {
             "name": "fedora31",
             "requirements": [
+		"xz",
                 "hostname",
                 "procps-ng",
                 "jq",
@@ -70,6 +72,7 @@
         {
             "name": "fedora32",
             "requirements": [
+		"xz",
                 "hostname",
                 "procps-ng",
                 "jq",
@@ -101,6 +104,7 @@
         {
             "name": "centos8",
             "requirements": [
+		"xz",
                 "hostname",
                 "procps-ng",
                 "jq",
@@ -131,6 +135,16 @@
         }
     ],
     "requirements": [
+        {
+            "name": "xz",
+            "type": "distro",
+            "distro_info": {
+                "packages": [
+                    "xz",
+                    "xz-devel"
+                ]
+            }
+        },
         {
             "name": "hostname",
             "type": "distro",
@@ -245,7 +259,7 @@
             "type": "manual",
             "manual_info": {
                 "commands": [
-                    "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client Time::HiRes"
+                    "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client Time::HiRes IO::Uncompress::UnXz IO::Compress::Xz"
                 ]
             }
         },

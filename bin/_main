@@ -249,14 +249,20 @@ elif [ "${1}" == "run" ]; then
 	    echo "Benchmark result is in $base_run_dir" && \
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
         RET_VAL=$?
-        if [ -f "$base_run_dir/run/rickshaw-result.json" -a $RET_VAL -eq 0 ]; then
+        result_dumper=cat
+        result_json="$base_run_dir/run/rickshaw-result.json"
+        if [ ! -f $result_json ]; then
+            result_dumper=xzcat
+            result_json="$base_run_dir/run/rickshaw-result.json.xz"
+        fi
+        if [ -f $result_json -a $RET_VAL -eq 0 ]; then
             $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_export_cmd
             RET_VAL=$?
             if [ $RET_VAL -eq 0 ]; then
-	            echo "Benchmark result now in elastic, localhost:9200"
-                $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE jq -r '."run-id"' $base_run_dir/run/rickshaw-result.json | tr -d '\n' 
+                echo "Benchmark result now in elastic, localhost:9200"
+                $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${result_dumper} ${result_json} | jq -r '."run-id"' | tr -d '\n' 
                 # Yes, there's a carriage return in this output, and no, I have no idea why...
-                this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE jq -r '."run-id"' $base_run_dir/run/rickshaw-result.json | tr -d '\r'`
+                this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${result_dumper} ${result_json} | jq -r '."run-id"' | tr -d '\r'`
                 if [ ! -z "$this_id" ]; then
                     cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
                     cdm_query_cmd+=" --run=$this_id"
