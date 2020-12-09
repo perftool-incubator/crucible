@@ -121,8 +121,6 @@ elif [ "${1}" == "run" ]; then
     if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
         echo "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
         exit 1
-    else
-        $podman_pull $CRUCIBLE_CONTAINER_IMAGE
     fi
     mkdir -pv "$base_run_dir/config"
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark

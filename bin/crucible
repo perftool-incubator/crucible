@@ -182,7 +182,7 @@ elif [ "$1" == "help" ]; then
     shift
     exec ${CRUCIBLE_HOME}/bin/_help ${CRUCIBLE_HOME} "$@"
 elif [ "$1" == "console" ]; then
-    exec podman run --name crucible-console-$(uuidgen) --tty --interactive "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
+    exec ${podman_run} --name crucible-console-$(uuidgen) --tty --interactive "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
 fi
 
 LOGGER_SESSION_ID="no-logger"
@@ -212,7 +212,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     container_logger_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
     container_logger_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
-    podman run ${container_logger_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $logger_cmd &
+    ${podman_run} ${container_logger_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $logger_cmd &
     LOGGER_PID=$!
 
     # redirect the output to the pipes

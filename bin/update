@@ -4,6 +4,8 @@
 
 # repo updating infrastructure
 
+. /etc/sysconfig/crucible
+
 if [ -z "$CRUCIBLE_HOME" ]; then
     echo "CRUCIBLE_HOME not defined, exiting."
     exit 1
@@ -13,6 +15,8 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     echo "Could not find $CRUCIBLE_HOME, exiting."
     exit 1
 fi
+
+. $CRUCIBLE_HOME/bin/base
 
 function help() {
     echo "Usage:"
@@ -42,7 +46,7 @@ fi
 
 
 case "${repo}" in
-    "all"|"crucible")
+    "all"|"crucible"|"controller-image")
         # nothing to do here yet
         foo=1
         ;;
@@ -56,6 +60,10 @@ case "${repo}" in
         fi
         ;;
 esac
+
+if [ "${repo}" == "all" -o "${repo}" == "controller-image" ]; then
+    ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
+fi
 
 if [ "${repo}" == "all" ]; then
     if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
