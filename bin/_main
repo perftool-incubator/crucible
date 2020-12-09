@@ -204,7 +204,7 @@ elif [ "${1}" == "run" ]; then
         echo "...appears to be running"
     else
         echo "...not present, starting a container for it:"
-	firewall-cmd --zone=public --add-port=6379/tcp
+        firewall-cmd --zone=public --add-port=6379/tcp
         echo "$podman_run --name crucible-redis ${container_common_args[@]} ${container_redis_args[@]} $CRUCIBLE_CONTAINER_IMAGE $redis_cmd"
         $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
     fi
@@ -246,7 +246,7 @@ elif [ "${1}" == "run" ]; then
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd && \
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd && \
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_c_cmd && \
-	    echo "Benchmark result is in $base_run_dir" && \
+            echo "Benchmark result is in $base_run_dir" && \
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
         RET_VAL=$?
         result_dumper=cat
@@ -283,12 +283,12 @@ elif [ "${1}" == "run" ]; then
             else
                 echo "ERROR: Could not index result into elasticsearch"
             fi
-	    fi
+        fi
     fi
 
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-	echo "Archiving crucible log to ${base_run_dir}"
-	crucible_log view ${LOG_DB} sessionid is ${LOGGER_SESSION_ID} | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
+        echo "Archiving crucible log to ${base_run_dir}"
+        crucible_log view ${LOG_DB} sessionid is ${LOGGER_SESSION_ID} | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
