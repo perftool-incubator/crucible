@@ -32,7 +32,7 @@ container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
 var_crucible="/var/lib/crucible"
 podman_pull="podman pull"
-podman_run="podman run"
+podman_run="podman run --pull=missing"
 
 datetime=`date +%Y-%m-%d_%H:%M:%S`
 
@@ -64,7 +64,7 @@ function check_id {
 
 function crucible_log() {
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-        podman run ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
+        ${podman_run} ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
     else
         $CRUCIBLE_HOME/bin/log $@
     fi
