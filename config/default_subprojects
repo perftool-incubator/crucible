@@ -5,6 +5,7 @@ roadblock            core           /roadblock                                  
 workshop             core           /workshop                                       master
 junk-drawer          core           /junk-drawer                                    master
 CommonDataModel      core           /CommonDataModel                                master
+toolbox              core           /toolbox                                        main
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
 oslat                benchmark      /bench-oslat                                    master
