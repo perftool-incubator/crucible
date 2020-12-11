@@ -115,6 +115,7 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     exit 1
 fi
 export CRUCIBLE_HOME
+export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
 . $CRUCIBLE_HOME/bin/base
 
 if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
