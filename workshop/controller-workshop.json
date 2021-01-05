@@ -1,376 +1,427 @@
 {
-    "workshop": {
-        "schema": {
-            "version": "2020.03.02"
-        }
+  "workshop": {
+    "schema": {
+      "version": "2020.03.02"
+    }
+  },
+  "userenvs": [
+    {
+      "name": "default",
+      "requirements": [
+        "bind-utils",
+        "iproute",
+        "xz",
+        "hostname",
+        "procps-ng",
+        "jq",
+        "gcc",
+        "make",
+        "redis",
+        "glibc-langpack-en",
+        "perl-App-cpanminus",
+        "git",
+        "python3",
+        "pip-redis",
+        "pip-jsonschema",
+        "cpan-perl-modules",
+        "crucible-git",
+        "buildah",
+        "podman",
+        "skopeo",
+        "container-storage-fuse",
+        "httpd",
+        "elasticsearch_from_es",
+        "elasticsearch_post",
+        "java",
+        "nodejs",
+        "motd",
+        "bc"
+      ]
     },
-    "userenvs": [
-        {
-            "name": "default",
-            "requirements": [
-		"xz",
-                "hostname",
-                "procps-ng",
-                "jq",
-                "gcc",
-                "make",
-                "redis",
-                "glibc-langpack-en",
-                "perl-App-cpanminus",
-                "git",
-                "python3",
-                "pip-redis",
-                "pip-jsonschema",
-                "cpan-perl-modules",
-                "crucible-git",
-                "buildah",
-                "podman",
-                "skopeo",
-                "container-storage-fuse",
-                "httpd",
-                "elasticsearch",
-                "elasticsearch_post",
-                "java",
-                "nodejs",
-                "motd",
-                "go",
-                "bc"
-            ]
-        },
-        {
-            "name": "fedora31",
-            "requirements": [
-		"xz",
-                "hostname",
-                "procps-ng",
-                "jq",
-                "gcc",
-                "make",
-                "redis",
-                "glibc-langpack-en",
-                "perl-App-cpanminus",
-                "git",
-                "python3",
-                "pip-redis",
-                "pip-jsonschema",
-                "cpan-perl-modules",
-                "crucible-git",
-                "buildah",
-                "podman",
-                "skopeo",
-                "container-storage-fuse",
-                "httpd",
-                "elasticsearch",
-                "elasticsearch_post",
-                "java",
-                "nodejs",
-                "motd",
-                "go",
-                "bc"
-            ]
-        },
-        {
-            "name": "fedora32",
-            "requirements": [
-		"xz",
-                "hostname",
-                "procps-ng",
-                "jq",
-                "gcc",
-                "make",
-                "redis",
-                "glibc-langpack-en",
-                "perl-App-cpanminus",
-                "git",
-                "python3",
-                "pip-redis",
-                "pip-jsonschema",
-                "cpan-perl-modules",
-                "crucible-git",
-                "buildah",
-                "podman",
-                "skopeo",
-                "container-storage-fuse",
-                "httpd",
-                "elasticsearch",
-                "elasticsearch_post",
-                "java",
-                "nodejs",
-                "motd",
-                "go",
-                "bc"
-            ]
-        },
-        {
-            "name": "centos8",
-            "requirements": [
-		"xz",
-                "hostname",
-                "procps-ng",
-                "jq",
-                "gcc",
-                "make",
-                "redis",
-                "glibc-langpack-en",
-                "perl-App-cpanminus",
-                "git",
-                "python3",
-                "pip-redis",
-                "pip-jsonschema",
-                "cpan-perl-modules",
-                "crucible-git",
-                "buildah",
-                "podman",
-                "skopeo",
-                "container-storage-fuse",
-                "httpd",
-                "elasticsearch",
-                "elasticsearch_post",
-                "java",
-                "nodejs",
-                "motd",
-                "go",
-                "bc"
-            ]
-        }
-    ],
-    "requirements": [
-        {
-            "name": "xz",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "xz",
-                    "xz-devel"
-                ]
-            }
-        },
-        {
-            "name": "hostname",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "hostname"
-                ]
-            }
-        },
-        {
-            "name": "jq",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "jq"
-                ]
-            }
-        },
-        {
-            "name": "procps-ng",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "procps-ng"
-                ]
-            }
-        },
-        {
-            "name": "gcc",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "gcc"
-                ]
-            }
-        },
-        {
-            "name": "make",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "make"
-                ]
-            }
-        },
-        {
-            "name": "glibc-langpack-en",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "glibc-langpack-en"
-                ]
-            }
-        },
-        {
-            "name": "perl-App-cpanminus",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "perl-App-cpanminus"
-                ]
-            }
-        },
-        {
-            "name": "git",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "git"
-                ]
-            }
-        },
-        {
-            "name": "python3",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "python3",
-                    "python3-pip"
-                ]
-            }
-        },
-        {
-            "name": "redis",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "redis"
-                ]
-            }
-        },
-        {
-            "name": "pip-redis",
-            "type": "manual",
-            "manual_info": {
-                "commands": [
-                    "pip3 install redis"
-                ]
-            }
-        },
-        {
-            "name": "pip-jsonschema",
-            "type": "manual",
-            "manual_info": {
-                "commands": [
-                    "pip3 install jsonschema"
-                ]
-            }
-        },
-        {
-            "name": "cpan-perl-modules",
-            "type": "manual",
-            "manual_info": {
-                "commands": [
-                    "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client Time::HiRes IO::Uncompress::UnXz IO::Compress::Xz"
-                ]
-            }
-        },
-        {
-            "name": "container-storage-fuse",
-            "type": "manual",
-            "manual_info": {
-                "commands": [
-                    "sed -i -e 's|#mount_program = \"/usr/bin/fuse-overlayfs\"|mount_program = \"/usr/bin/fuse-overlayfs\"|' /etc/containers/storage.conf"
-                ]
-            }
-        },
-        {
-            "name": "buildah",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "buildah"
-                ]
-            }
-        },
-        {
-            "name": "podman",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "podman"
-                ]
-            }
-        },
-        {
-            "name": "skopeo",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "skopeo"
-                ]
-            }
-        },
-        {
-            "name": "httpd",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "httpd"
-                ]
-            }
-        },
-        {
-            "name": "elasticsearch",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.6.2-x86_64.rpm"
-                ]
-            }
-        },
-        {
-            "name": "elasticsearch_post",
-            "type": "manual",
-            "manual_info": {
-                "commands": [
-                    "usermod -s /bin/bash elasticsearch",
-                    "chown -R elasticsearch:elasticsearch /etc/elasticsearch/"
-                ]
-            }
-        },
-        {
-            "name": "java",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "java"
-                ]
-            }
-        },
-        {
-            "name": "nodejs",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "nodejs"
-                ]
-            }
-        },
-        {
-            "name": "motd",
-            "type": "manual",
-            "manual_info": {
-                "commands": [
-                    "printf \"Crucible\\n    There is no escape\\n        (unless you press control-D)\\n\\n\\n\" >/etc/motd"
-                ]
-            }
-        },
-        {
-            "name": "go",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "golang-src", "golang-bin", "golang"
-                ]
-            }
-        },
-        {
-            "name": "bc",
-            "type": "distro",
-            "distro_info": {
-                "packages": [
-                    "bc"
-                ]
-            }
-        }
-    ]
+    {
+      "name": "fedora33",
+      "requirements": [
+        "bind-utils",
+        "iproute",
+        "xz",
+        "hostname",
+        "procps-ng",
+        "jq",
+        "gcc",
+        "make",
+        "redis",
+        "glibc-langpack-en",
+        "perl-App-cpanminus",
+        "git",
+        "python3",
+        "pip-redis",
+        "pip-jsonschema",
+        "cpan-perl-modules",
+        "crucible-git",
+        "buildah",
+        "podman",
+        "skopeo",
+        "container-storage-fuse",
+        "httpd",
+        "elasticsearch_from_es",
+        "elasticsearch_post",
+        "java",
+        "nodejs",
+        "motd",
+        "bc"
+      ]
+    },
+    {
+      "name": "opensuse",
+      "requirements": [
+        "zlib-devel",
+        "openssl-devel",
+        "bind-utils",
+        "iproute",
+        "xz",
+        "hostname",
+        "procps",
+        "jq",
+        "gcc",
+        "make",
+        "redis",
+        "perl-App-cpanminus",
+        "git",
+        "python3",
+        "pip-redis",
+        "pip-jsonschema",
+        "cpan-perl-modules",
+        "crucible-git",
+        "buildah",
+        "podman",
+        "skopeo",
+        "container-storage-fuse",
+        "httpd",
+        "elastic_gpg",
+        "elasticsearch_from_es",
+        "elasticsearch_post",
+        "java",
+        "nodejs",
+        "motd",
+        "bc"
+      ]
+    },
+    {
+      "name": "stream8",
+      "requirements": [
+        "bind-utils",
+        "iproute",
+        "xz",
+        "hostname",
+        "procps-ng",
+        "jq",
+        "gcc",
+        "make",
+        "redis",
+        "glibc-langpack-en",
+        "perl-App-cpanminus",
+        "git",
+        "python3",
+        "pip-redis",
+        "pip-jsonschema",
+        "cpan-perl-modules",
+        "crucible-git",
+        "buildah",
+        "podman",
+        "skopeo",
+        "container-storage-fuse",
+        "httpd",
+        "elasticsearch",
+        "elasticsearch_post",
+        "java",
+        "nodejs",
+        "motd",
+        "bc"
+      ]
+    }
+  ],
+  "requirements": [
+    {
+      "name": "openssl-devel",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "openssl-devel"
+        ]
+      }
+    },
+    {
+      "name": "zlib-devel",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "zlib-devel"
+        ]
+      }
+    },
+    {
+      "name": "bind-utils",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "bind-utils"
+        ]
+      }
+    },
+    {
+      "name": "iproute",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "iproute"
+        ]
+      }
+    },
+    {
+      "name": "xz",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "xz",
+          "xz-devel"
+        ]
+      }
+    },
+    {
+      "name": "hostname",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "hostname"
+        ]
+      }
+    },
+    {
+      "name": "jq",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "jq"
+        ]
+      }
+    },
+    {
+      "name": "procps-ng",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "procps-ng"
+        ]
+      }
+    },
+    {
+      "name": "gcc",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "gcc"
+        ]
+      }
+    },
+    {
+      "name": "make",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "make"
+        ]
+      }
+    },
+    {
+      "name": "glibc-langpack-en",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "glibc-langpack-en"
+        ]
+      }
+    },
+    {
+      "name": "perl-App-cpanminus",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "perl-App-cpanminus"
+        ]
+      }
+    },
+    {
+      "name": "git",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "git"
+        ]
+      }
+    },
+    {
+      "name": "python3",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "python3",
+          "python3-pip"
+        ]
+      }
+    },
+    {
+      "name": "redis",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "redis"
+        ]
+      }
+    },
+    {
+      "name": "elastic_gpg",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch"
+        ]
+      }
+    },
+    {
+      "name": "pip-redis",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "pip3 install redis"
+        ]
+      }
+    },
+    {
+      "name": "pip-jsonschema",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "pip3 install jsonschema"
+        ]
+      }
+    },
+    {
+      "name": "cpan-perl-modules",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client Time::HiRes IO::Uncompress::UnXz IO::Compress::Xz"
+        ]
+      }
+    },
+    {
+      "name": "container-storage-fuse",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "sed -i -e 's|#mount_program = \"/usr/bin/fuse-overlayfs\"|mount_program = \"/usr/bin/fuse-overlayfs\"|' /etc/containers/storage.conf"
+        ]
+      }
+    },
+    {
+      "name": "buildah",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "buildah"
+        ]
+      }
+    },
+    {
+      "name": "podman",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "podman"
+        ]
+      }
+    },
+    {
+      "name": "skopeo",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "skopeo"
+        ]
+      }
+    },
+    {
+      "name": "httpd",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "httpd"
+        ]
+      }
+    },
+    {
+      "name": "elasticsearch",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "elasticsearch"
+        ]
+      }
+    },
+    {
+      "name": "elasticsearch_from_es",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.6.2-x86_64.rpm"
+        ]
+      }
+    },
+    {
+      "name": "elasticsearch_post",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "usermod -s /bin/bash elasticsearch",
+          "chown -R elasticsearch:elasticsearch /etc/elasticsearch/"
+        ]
+      }
+    },
+    {
+      "name": "java",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "java"
+        ]
+      }
+    },
+    {
+      "name": "nodejs",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "nodejs"
+        ]
+      }
+    },
+    {
+      "name": "motd",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "printf \"Crucible\\n    There is no escape\\n        (unless you press control-D)\\n\\n\\n\" >/etc/motd"
+        ]
+      }
+    },
+    {
+      "name": "bc",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "bc"
+        ]
+      }
+    }
+  ]
 }
