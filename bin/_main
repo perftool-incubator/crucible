@@ -46,6 +46,71 @@ container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
 container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
 container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 
+function start_httpd() {
+    httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
+    echo "Checking for httpd"
+    RET_VAL=0
+    if podman ps | grep -q crucible-httpd; then
+        echo "...appears to be running"
+    else
+        echo "...not present, starting a container for it:"
+        firewall-cmd --zone=public --add-port=8080/tcp
+        echo "$podman_run --name crucible-httpd ${container_common_args[@]} ${container_httpd_args[@]} $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd"
+        $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd
+        RET_VAL=$?
+    fi
+    if [ $RET_VAL -gt 0 ]; then
+        exit_error "Could not start httpd"
+    fi
+}
+
+function start_redis() {
+    redis_cmd="redis-server /etc/redis.conf"
+    echo "Checking for redis"
+    RET_VAL=0
+    if podman ps | grep -q crucible-redis; then
+        echo "...appears to be running"
+    else
+        echo "...not present, starting a container for it:"
+        firewall-cmd --zone=public --add-port=6379/tcp
+        echo "$podman_run --name crucible-redis ${container_common_args[@]} ${container_redis_args[@]} $CRUCIBLE_CONTAINER_IMAGE $redis_cmd"
+        $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
+    fi
+    RET_VAL=$?
+    if [ $RET_VAL -gt 0 ]; then
+        exit_error "Could not start redis"
+    fi
+}
+
+function start_es() {
+    es_start_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
+    echo "Checking for elasticsearch"
+    RET_VAL=0
+    if podman ps | grep -q crucible-es; then
+        echo "...appears to be running"
+    else
+        echo "...not present, starting a container for it:"
+     firewall-cmd --zone=public --add-port=9200/tcp --add-port=9300/tcp
+        mkdir -p "$var_crucible/es"
+        echo "$podman_run --name crucible-es ${container_common_args[@]} ${container_es_args[@]} $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd"
+        $podman_run --name crucible-es "${container_common_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd
+    fi
+    RET_VAL=$?
+    if [ $RET_VAL -gt 0 ]; then
+        exit_error "Could not start elasticseach"
+    fi
+}
+
+function init_es() {
+    RET_VAL=0
+    es_init_cmd="${CRUCIBLE_HOME}/config/init-es.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
+    $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
+    RET_VAL=$?
+    if [ $RET_VAL -gt 0 ]; then
+        exit_error "Could not init elasticseach"
+    fi
+}
+
 if [ "${1}" == "log" ]; then
     shift
     crucible_log ${1} ${LOG_DB}
@@ -67,6 +132,15 @@ elif [ "${1}" == "update" ]; then
     else
         ${CRUCIBLE_HOME}/bin/update ${1}
         RET_VAL=$?
+    fi
+elif [ "${1}" == "start" ]; then
+    shift
+    if [ "${1}" == "httpd" ]; then
+        shift
+        start_httpd
+    elif [ "${1}" == "es" ]; then
+        shift
+        start_es
     fi
 elif [ "${1}" == "run" ]; then
     shift
@@ -183,10 +257,6 @@ elif [ "${1}" == "run" ]; then
         /bin/ls "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark
         exit 1
     fi
-    redis_cmd="redis-server /etc/redis.conf"
-    httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
-    es_start_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
-    es_init_cmd="${CRUCIBLE_HOME}/config/init-es.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
       --bench-dir $benchmark_subproj_dir\
@@ -203,46 +273,10 @@ elif [ "${1}" == "run" ]; then
       --base-run-dir=$base_run_dir"
     rs_export_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-export\
       --base-run-dir=$base_run_dir"
-    echo "Checking for redis"
-    if podman ps | grep -q crucible-redis; then
-        echo "...appears to be running"
-    else
-        echo "...not present, starting a container for it:"
-        firewall-cmd --zone=public --add-port=6379/tcp
-        echo "$podman_run --name crucible-redis ${container_common_args[@]} ${container_redis_args[@]} $CRUCIBLE_CONTAINER_IMAGE $redis_cmd"
-        $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
-    fi
-    RET_VAL=$?
-    if [ $RET_VAL -gt 0 ]; then
-        exit_error "Could not start redis"
-    fi
+    start_redis
+    start_httpd
+    start_es
 
-    echo "Checking for httpd"
-    if podman ps | grep -q crucible-httpd; then
-        echo "...appears to be running"
-    else
-        echo "...not present, starting a container for it:"
-     firewall-cmd --zone=public --add-port=8080/tcp
-        echo "$podman_run --name crucible-httpd ${container_common_args[@]} ${container_httpd_args[@]} $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd"
-        $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd
-    fi
-    if [ $RET_VAL -gt 0 ]; then
-        exit_error "Could not start httpd"
-    fi
-
-    echo "Checking for elasticsearch"
-    if podman ps | grep -q crucible-es; then
-        echo "...appears to be running"
-    else
-        echo "...not present, starting a container for it:"
-     firewall-cmd --zone=public --add-port=9200/tcp --add-port=9300/tcp
-        mkdir -p "$var_crucible/es"
-        echo "$podman_run --name crucible-es ${container_common_args[@]} ${container_es_args[@]} $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd"
-        $podman_run --name crucible-es "${container_common_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd
-    fi
-    if [ $RET_VAL -gt 0 ]; then
-        exit_error "Could not start elasticseach"
-    fi
 
     echo "$podman_run --name crucible-run ${container_common_args[@]} ${container_rs_args[@]} $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd"
     $podman_run --name crucible-run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
@@ -251,8 +285,7 @@ elif [ "${1}" == "run" ]; then
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd && \
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_c_cmd && \
             echo "Benchmark result is in $base_run_dir" && \
-        $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
-        RET_VAL=$?
+        init_es
         result_dumper=cat
         result_json="$base_run_dir/run/rickshaw-result.json"
         if [ ! -f $result_json ]; then
