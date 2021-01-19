@@ -183,7 +183,7 @@ elif [ "${1}" == "run" ]; then
         /bin/ls "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark
         exit 1
     fi
-    redis_cmd="/usr/bin/redis-server /etc/redis.conf"
+    redis_cmd="redis-server /etc/redis.conf"
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
     es_start_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
     es_init_cmd="${CRUCIBLE_HOME}/config/init-es.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
