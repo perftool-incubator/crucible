@@ -9,6 +9,7 @@ toolbox              core           /toolbox                                    
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
 oslat                benchmark      /bench-oslat                                    master
+trafficgen           benchmark      /bench-trafficgen                               master
 sysstat              tool           /tool-sysstat                                   master
 procstat             tool           /tool-procstat                                  master
 ftrace               tool           /tool-ftrace                                    master
