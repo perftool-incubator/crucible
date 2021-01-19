@@ -123,6 +123,10 @@ elif [ "${1}" == "run" ]; then
         exit 1
     fi
     mkdir -pv "$base_run_dir/config"
+    if [ -e "$var_crucible/run/latest" ]; then
+        /bin/rm "$var_crucible/run/latest"
+    fi
+    ln -sf "$base_run_dir" "$var_crucible/run/latest"
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
 
