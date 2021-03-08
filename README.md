@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Crucible takes multiple performance tooling projects and integrates them, with the intention to provide a well rounded, portable, and highly functional end-to-end performance tool harness. If successful, crucible can be used for test automation which can execute, measure, store, visualize, and analyze the performance of various systems-under-test.
+Crucible takes [multiple performance tooling projects](config/default_subprojects) and integrates them, with the intention to provide a well rounded, portable, and highly functional end-to-end performance tool harness. If successful, crucible can be used for test automation which can execute, measure, store, visualize, and analyze the performance of various systems-under-test.
 
 ## Features
 
