@@ -142,9 +142,6 @@ if [ -z ${CRUCIBLE_AUTH_FILE+x} ]; then
     exit_error "You must specify an authentication file with the --auth-file option." $EC_FAIL_AUTH_UNSET
 fi
 
-
-CRUCIBLE_AUTH_FILE
-
 identity
 
 for dep in $DEPENDENCIES; do
