@@ -1,0 +1,9 @@
+include: '/tests/.gitlab-jobs.yml'
+
+image: quay.io/krister/centos-stream
+
+stages:
+  - installation
+  - update
+  - functional
+  - integration

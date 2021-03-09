@@ -1,5 +1,9 @@
 # crucible
 
+## Pipeline Status
+
+[![pipeline status](https://gitlab.com/perftool-incubator/crucible/badges/master/pipeline.svg)](https://gitlab.com/perftool-incubator/crucible/-/commits/master)
+
 ## Introduction
 
 Crucible takes [multiple performance tooling projects](config/default_subprojects) and integrates them, with the intention to provide a well rounded, portable, and highly functional end-to-end performance tool harness. If successful, crucible can be used for test automation which can execute, measure, store, visualize, and analyze the performance of various systems-under-test.
