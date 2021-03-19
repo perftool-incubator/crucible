@@ -85,5 +85,6 @@ pushd $CRUCIBLE_HOME > /dev/null
 
 TMP_SCRIPT=$(mktemp)
 cp -a $CRUCIBLE_HOME/bin/_update-git ${TMP_SCRIPT}
+echo "${CRUCIBLE_HOME}/bin/subprojects-install" >> ${TMP_SCRIPT}
 echo "rm ${TMP_SCRIPT}" >> ${TMP_SCRIPT}
 exec ${TMP_SCRIPT}
