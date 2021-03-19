@@ -12,6 +12,7 @@ fio                  benchmark      /bench-fio                                  
 uperf                benchmark      /bench-uperf                                    master
 oslat                benchmark      /bench-oslat                                    master
 trafficgen           benchmark      /bench-trafficgen                               main
+cyclictest           benchmark      /bench-cyclictest                               main
 sysstat              tool           /tool-sysstat                                   master
 procstat             tool           /tool-procstat                                  master
 ftrace               tool           /tool-ftrace                                    master
