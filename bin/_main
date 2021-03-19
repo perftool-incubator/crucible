@@ -139,6 +139,23 @@ elif [ "${1}" == "start" ]; then
         shift
         start_es
     fi
+elif [ "${1}" == "get" ]; then
+    shift
+    if [ "${1}" == "result" ]; then
+        shift
+        start_redis
+        start_httpd
+        start_es
+        get_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
+        $podman_run --name crucible-get-result "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_result_cmd "$@"
+    elif [ "${1}" == "metric" ]; then
+        shift
+        start_redis
+        start_httpd
+        start_es
+        get_metric_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh"
+        $podman_run --name crucible-get-metric "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_metric_cmd "$@"
+    fi
 elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
