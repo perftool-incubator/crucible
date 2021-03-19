@@ -15,6 +15,7 @@ function help() {
     echo "update          |  Update all or part of the crucible software"
     echo "console         |  Run user supplied programs inside a crucible wrapper for logging purposes"
     echo "wrapper         |  Run a crucible subproject command directly, within a crucible container"
+    echo "get             |  Get either a result summary (get result) or any metric (get metric)"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
