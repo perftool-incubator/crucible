@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set +e
+set -x
+
+# remove auth file
+rm -f /tmp/auth-file.json
+
+# remove config file
+cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+rm -f $cfgfile
+
+# remove install path
+install_path=$(grep INSTALL_PATH= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+rm -rf $install_path
+
+# remove identity file
+rm -f /root/.crucible/identity
