@@ -29,7 +29,7 @@ else
     shift
 fi
 
-fmt_line="%-15s  %-13s  %-16s  %-53s  %-17s  %-15s  %-13s"
+fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s"
 
 function process_repo() {
     local repo=$1
