@@ -5,28 +5,33 @@ set -x
 stdout=$(./crucible-install.sh --help)
 [[ "$stdout" = *"Usage"* ]] || exit 1
 
+# non-root
+ec=$(grep EC_FAIL_USER= crucible-install.sh | cut -d '=' -f2)
+./crucible-install.sh
+test "$?" = "$ec" || exit 1
+
 # no args
 ec=$(grep EC_FAIL_REGISTRY_UNSET= crucible-install.sh | cut -d '=' -f2)
-./crucible-install.sh
+sudo ./crucible-install.sh
 test "$?" = "$ec" || exit 1
 
 # missing auth-file arg
 ec=$(grep EC_FAIL_AUTH_UNSET= crucible-install.sh | cut -d '=' -f2)
-./crucible-install.sh \
+sudo ./crucible-install.sh \
   --registry myregistry.io/crucible
 test "$?" = "$ec" || exit 1
 
 # auth file not found
 ec=$(grep EC_AUTH_FILE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
-./crucible-install.sh \
+sudo ./crucible-install.sh \
   --registry myregistry.io/crucible \
   --auth-file /tmp/auth-file.json
 test "$?" = "$ec" || exit 1
 
 # default args
 touch /tmp/auth-file.json
-cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
-./crucible-install.sh \
+cfgfile=$(grep CRUCIBLE_CONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+sudo ./crucible-install.sh \
   --registry myregistry.io/crucible \
   --auth-file /tmp/auth-file.json
 test "$?" = "0" || exit 1
