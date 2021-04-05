@@ -1,8 +1,6 @@
 # crucible
 
-## Pipeline Status
-
-[![pipeline status](https://gitlab.com/perftool-incubator/crucible/badges/master/pipeline.svg)](https://gitlab.com/perftool-incubator/crucible/-/commits/master)
+[![CI Actions Status](https://github.com/perftool-incubator/crucible/workflows/CI/badge.svg)](https://github.com/perftool-incubator/crucible/actions)
 
 ## Introduction
 
