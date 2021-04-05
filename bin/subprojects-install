@@ -32,9 +32,9 @@ else
     sudo_cmd="sudo"
 fi
 
-# Create or update /etc/sysconfig/crucible
-$sudo_cmd /bin/bash -c "if [ -e /etc/sysconfig/crucible ]; then echo Updating existing /etc/sysconfig/crucible; sed -i '/^CRUCIBLE_HOME=/d' /etc/sysconfig/crucible; fi"
-$sudo_cmd /bin/bash -c "echo \"CRUCIBLE_HOME=$crucible_repo_dir\" >>/etc/sysconfig/crucible"
+# Create or update /etc/crucible.conf
+$sudo_cmd /bin/bash -c "if [ -e /etc/crucible.conf ]; then echo Updating existing /etc/crucible.conf; sed -i '/^CRUCIBLE_HOME=/d' /etc/crucible.conf; fi"
+$sudo_cmd /bin/bash -c "echo \"CRUCIBLE_HOME=$crucible_repo_dir\" >>/etc/crucible.conf"
 export CRUCIBLE_HOME="$crucible_repo_dir"
 
 # Install the tab completions for crucible

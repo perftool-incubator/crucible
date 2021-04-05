@@ -3,7 +3,7 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 # Installer Settings
-SYSCONFIG="/etc/sysconfig/crucible"
+CRUCIBLE_CONFIG="/etc/crucible.conf"
 DEPENDENCIES="podman git"
 INSTALL_PATH="/opt/crucible"
 GIT_REPO="https://github.com/perftool-incubator/crucible.git"
@@ -165,13 +165,13 @@ if [ ! -f $CRUCIBLE_AUTH_FILE ]; then
 fi
 
 # native crucible install script already created this, only append
-cat << _SYSCFG_ >> $SYSCONFIG
+cat << _CFG_ >> $CRUCIBLE_CONFIG
 CRUCIBLE_USE_CONTAINERS=1
 CRUCIBLE_USE_LOGGER=1
 CRUCIBLE_CONTAINER_IMAGE=$CRUCIBLE_REGISTRY/controller:latest
 CRUCIBLE_CLIENT_SERVER_REPO=$CRUCIBLE_REGISTRY/client-server
 CRUCIBLE_CLIENT_SERVER_AUTH="$CRUCIBLE_AUTH_FILE"
-_SYSCFG_
+_CFG_
 
 echo "Installation is complete.  Run \"crucible help\" to see what's possible"
 echo "You can also source /etc/profile.d/crucible_completions.sh (or re-login) to use tab completion for crucible"

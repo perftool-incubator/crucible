@@ -4,7 +4,7 @@
 
 # repo updating infrastructure
 
-. /etc/sysconfig/crucible
+. /etc/crucible.conf
 
 if [ -z "$CRUCIBLE_HOME" ]; then
     echo "CRUCIBLE_HOME not defined, exiting."

@@ -24,7 +24,7 @@ if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     exit 2
 fi
 
-. /etc/sysconfig/crucible
+. /etc/crucible.conf
 . $CRUCIBLE_HOME/bin/base
 
 container_redis_args=()

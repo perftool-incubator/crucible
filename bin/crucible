@@ -75,7 +75,7 @@
 # Crucible also requires that a container registry with
 # push and pull capabilities, to be used for dynamic image
 # building for benchmarks and tools.  The following must be
-# set in /etc/sysconfig/crucible:
+# set in /etc/crucible.conf
 # CRUCIBLE_CLIENT_SERVER_REPO
 # CRUCIBLE_CLIENT_SERVER_AUTH
 #
@@ -84,7 +84,7 @@
 #
 # Finally, crucible-controller will use publicly available
 # container image to execute all subprojects.  This container is
-# defined in /etc/sysconfig/crucible with:
+# defined in /etc/crucible.conf with:
 # CRUCIBLE_CONTAINER_IMAGE
 # All of code for subprojects are contained on the controller, under
 # $CRUCIBLE_HOME/subprojects, but the crucbile-controller container image
@@ -94,14 +94,14 @@
 # OTHER THAN PODMAN AND GIT.
 
 
-if [ -e /etc/sysconfig/crucible ]; then
-    . /etc/sysconfig/crucible
+if [ -e /etc/crucible.conf ]; then
+    . /etc/crucible.conf
     if [ -z "$CRUCIBLE_HOME" ]; then
-        echo "\$CRUCIBLE_HOME does not appear to be defined in /etc/sysconfig/crucible, exiting"
+        echo "\$CRUCIBLE_HOME does not appear to be defined in /etc/crucible.conf, exiting"
         exit 1
     fi
 else
-    echo "Could not find /etc/sysconfig/crucible.  Please ensure crucible is installed first."
+    echo "Could not find /etc/crucible.conf.  Please ensure crucible is installed first."
     exit 1
 fi
 

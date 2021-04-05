@@ -4,8 +4,8 @@
 
 _crucible_completions() {
     if [ -z "$CRUCIBLE_HOME" ]; then
-        if [ -e /etc/sysconfig/crucible ]; then
-            . /etc/sysconfig/crucible
+        if [ -e /etc/crucible.conf ]; then
+            . /etc/crucible.conf
             if [ -z "$CRUCIBLE_HOME" ]; then
                 return
             fi
