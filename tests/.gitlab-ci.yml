@@ -1,7 +1,0 @@
-include: '/tests/.gitlab-jobs.yml'
-
-stages:
-  - installation
-  - update
-  - functional
-  - integration
