@@ -2,6 +2,8 @@
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
+EC_FAIL_USER=2
+
 # make sure the user has a .crucible directory for storing things
 USER_STORE=$HOME/.crucible
 if [ ! -d ${USER_STORE} ]; then
@@ -70,3 +72,8 @@ function crucible_log() {
         $CRUCIBLE_HOME/bin/log $@
     fi
 }
+
+function root_or_die {
+    if [ "`id -u`" != "0" ]; then
+        exit_error "You must run this as root, exiting" $EC_FAIL_USER
+    fi
