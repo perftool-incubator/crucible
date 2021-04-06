@@ -30,7 +30,9 @@ test "$?" = "$ec" || exit 1
 
 # default args
 touch /tmp/auth-file.json
-cfgfile=$(grep CRUCIBLE_CONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+# TODO(rfolco): temporary workaround until we make it distro generic
+sudo mkdir -p $(dirname $cfgfile)
 sudo ./crucible-install.sh \
   --registry myregistry.io/crucible \
   --auth-file /tmp/auth-file.json
