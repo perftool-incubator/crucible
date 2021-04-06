@@ -118,6 +118,9 @@ export CRUCIBLE_HOME
 export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
 . $CRUCIBLE_HOME/bin/base
 
+# must run as root
+root_or_die
+
 if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
     echo "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
     exit 1
