@@ -18,21 +18,25 @@ fi
 
 . $CRUCIBLE_HOME/bin/base
 
+help_column_width=25
+
 function help() {
     echo "Usage:"
-    echo "  update <repository>"
-    echo ""
-    echo "The following repositories are supported"
-    echo ""
-    echo "all             |  Update all repositories (default)"
-    echo "crucible        |  Update the main crucible repository"
+    echo "  update <target>"
+    echo
+    echo "The following targets are supported:"
+    echo
+    printf "%-${help_column_width}s | Update all repositories (default)\n" "all"
+    printf "%-${help_column_width}s | Update the main crucible repository\n" "crucible"
+    printf "%-${help_column_width}s | Update the controller container image\n" "controller-image"
+    echo
     if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
         for repo in $(find . -type l | sed 'sX./XX'); do
-            printf "%-15s |  Update the %s repository\n" "${repo}" "${repo}"
+            printf "%-${help_column_width}s | Update the %s repository\n" "${repo}" "${repo}"
         done
         popd > /dev/null
     fi
-    echo ""
+    echo
 }
 
 if [ "$1" == "help" ]; then
@@ -44,16 +48,46 @@ else
     repo="$1"
 fi
 
+case "${repo}" in
+    "all"|"__all"|"crucible"|"__crucible")
+        # the first and second time this script is called for the
+        # "all" or "crucible" targets a special case is invoked to
+        # ensure that updates can be done to the crucible repository
+        # in a manner which does not break the update process
+
+        pushd $CRUCIBLE_HOME > /dev/null
+
+        # create and execute a temporary script so that changes to the
+        # "real" script do not break the updating process while it is
+        # running -- ie. handle bash does not behave when the script
+        # is changed while it is running
+        TMP_SCRIPT=$(mktemp)
+        cp -a $CRUCIBLE_HOME/bin/_update-git ${TMP_SCRIPT}
+        echo "rm ${TMP_SCRIPT}" >> ${TMP_SCRIPT}
+        echo "exec ${CRUCIBLE_HOME}/bin/update __${repo}" >> ${TMP_SCRIPT}
+
+        exec ${TMP_SCRIPT}
+        ;;
+esac
+
+# beyond this point the script behaves "normally", meaning that it
+# does not have to create a copy of itself anymore and exec that copy
 
 case "${repo}" in
-    "all"|"crucible"|"controller-image")
-        # nothing to do here yet
-        foo=1
+    "____all"|"____crucible")
+        # any crucible specific post update logic goes here
+        ;;
+esac
+
+case "${repo}" in
+    "____all"|"____crucible"|"controller-image")
+        ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
         ;;
     *)
         if pushd $CRUCIBLE_HOME/subprojects/${repo} > /dev/null; then
             $CRUCIBLE_HOME/bin/_update-git
             popd > /dev/null
+            exit
         else
             echo "Invalid repo '${repo}'."
             exit 1
@@ -61,11 +95,7 @@ case "${repo}" in
         ;;
 esac
 
-if [ "${repo}" == "all" -o "${repo}" == "controller-image" ]; then
-    ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
-fi
-
-if [ "${repo}" == "all" ]; then
+if [ "${repo}" == "____all" ]; then
     if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
         for tmp_repo in $(find . -type l | sed 'sX./XX'); do
             if pushd ${tmp_repo} > /dev/null; then
@@ -77,14 +107,11 @@ if [ "${repo}" == "all" ]; then
     fi
 fi
 
-if [ "${repo}" != "all" -a "${repo}" != "crucible" ]; then
-    exit
-fi
-
-pushd $CRUCIBLE_HOME > /dev/null
-
-TMP_SCRIPT=$(mktemp)
-cp -a $CRUCIBLE_HOME/bin/_update-git ${TMP_SCRIPT}
-echo "${CRUCIBLE_HOME}/bin/subprojects-install" >> ${TMP_SCRIPT}
-echo "rm ${TMP_SCRIPT}" >> ${TMP_SCRIPT}
-exec ${TMP_SCRIPT}
+case "${repo}" in
+    "____all"|"____crucible")
+        # install any new subprojects; do this after the updating
+        # process so we don't clone and then immediately try to update
+        # the repo which would just hammer the repo site
+        ${CRUCIBLE_HOME}/bin/subprojects-install
+        ;;
+esac
