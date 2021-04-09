@@ -77,3 +77,4 @@ function root_or_die {
     if [ "`id -u`" != "0" ]; then
         exit_error "You must run this as root, exiting" $EC_FAIL_USER
     fi
+}
