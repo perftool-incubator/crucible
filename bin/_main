@@ -121,7 +121,6 @@ function post_process_run() {
     rs_export_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-export\
       --base-run-dir=${RUN_DIR}"
 
-    start_redis
     start_httpd
     start_es
 
@@ -337,6 +336,9 @@ elif [ "${1}" == "run" ]; then
         /bin/ls "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark
         exit 1
     fi
+
+    start_redis
+
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
       --bench-dir $benchmark_subproj_dir\
