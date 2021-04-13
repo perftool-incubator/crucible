@@ -116,9 +116,7 @@ function post_process_run() {
       --base-run-dir=${RUN_DIR}"
     rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools\
       --base-run-dir=${RUN_DIR}"
-    rs_pp_c_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-consolidate\
-      --base-run-dir=${RUN_DIR}"
-    rs_export_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-export\
+    rs_index_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index\
       --base-run-dir=${RUN_DIR}"
 
     start_httpd
@@ -126,7 +124,6 @@ function post_process_run() {
 
     $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd && \
         $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd && \
-        $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_c_cmd && \
         echo "Benchmark result is in ${RUN_DIR}" && \
         init_es
 
@@ -136,18 +133,17 @@ function post_process_run() {
     fi
 
     result_dumper=cat
-    result_json="${RUN_DIR}/run/rickshaw-result.json"
-    if [ ! -f $result_json ]; then
+    run_json="${RUN_DIR}/run/rickshaw-run.json"
+    if [ ! -f $run_json ]; then
         result_dumper=xzcat
-        result_json="${RUN_DIR}/run/rickshaw-result.json.xz"
     fi
 
-    if [ -f $result_json ]; then
-        $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_export_cmd
+    if [ -f $run_json ]; then
+        $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_index_cmd
         RET_VAL=$?
         if [ $RET_VAL -eq 0 ]; then
             echo "Benchmark result now in elastic, localhost:9200"
-            this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${result_dumper} ${result_json} | jq -r '."run-id"'`
+            this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${result_dumper} ${run_json} | jq -r '. "run-id"'`
             if [ ! -z "$this_id" ]; then
                 cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
                 cdm_query_cmd+=" --run=$this_id"
@@ -169,7 +165,7 @@ function post_process_run() {
             echo "ERROR: Could not index result into elasticsearch"
         fi
     else
-        echo "ERROR: Could not find result json '${result_json}'"
+        echo "ERROR: Could not find result json '${run_json}'"
     fi
 }
 
@@ -293,8 +289,8 @@ elif [ "${1}" == "run" ]; then
             bench_params_run_dir=${base_run_dir}/config/bench-params.json
 
             echo "Generating --bench-params from --mv-params..."
-            echo "$podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /opt/crucible/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}"
-            $podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /opt/crucible/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}
+            echo "$podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}"
+            $podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}
 
             bench_params=${bench_params_run_dir}
         fi
