@@ -218,6 +218,16 @@ elif [ "${1}" == "get" ]; then
         get_metric_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh"
         $podman_run --name crucible-get-metric "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_metric_cmd "$@"
     fi
+elif [ "${1}" == "rm" ]; then
+    shift
+    start_es
+    rm_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh"
+    $podman_run --name crucible-rm-result "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rm_result_cmd "$@"
+elif [ "${1}" == "index" ]; then
+    shift
+    start_es
+    index_result_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index"
+    $podman_run --name crucible-index "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
 elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
