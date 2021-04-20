@@ -227,6 +227,10 @@ elif [ "${1}" == "index" ]; then
     start_es
     index_result_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index"
     $podman_run --name crucible-index "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
+elif [ "${1}" == "postprocess" ]; then
+    shift
+    base_run_dir=$(echo "$@" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
+    post_process_run "${base_run_dir}"
 elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
