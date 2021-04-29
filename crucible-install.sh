@@ -3,6 +3,7 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 
 # Installer Settings
+IDENTITY="/root/.crucible/identity"
 SYSCONFIG="/etc/sysconfig/crucible"
 DEPENDENCIES="podman git"
 INSTALL_PATH="/opt/crucible"
@@ -47,24 +48,25 @@ _USAGE_
 }
 
 function identity {
-    identity="$HOME/.crucible/identity"
-    if [ -e $identity ]; then
-        echo "Sourcing $identity"
-        . $identity
+    if [ -e $IDENTITY ]; then
+        echo "Sourcing $IDENTITY"
+        . $IDENTITY
     else
-        mkdir -p "$HOME/.crucible"
+        mkdir -p $(dirname $IDENTITY)
+        touch $(basename $IDENTITY)
     fi
 
     if [ -z "$CRUCIBLE_NAME" ]; then
         echo "Please enter your full name:"
         read CRUCIBLE_NAME
-        echo "CRUCIBLE_NAME=\"$CRUCIBLE_NAME\"" >>"$identity"
     fi
+    echo "CRUCIBLE_NAME=\"$CRUCIBLE_NAME\"" >> $IDENTITY
+
     if [ -z "$CRUCIBLE_EMAIL" ]; then
         echo "Please enter your email address:"
         read CRUCIBLE_EMAIL
-        echo "CRUCIBLE_EMAIL=\"$CRUCIBLE_EMAIL\"" >>"$identity"
     fi
+    echo "CRUCIBLE_EMAIL=\"$CRUCIBLE_EMAIL\"" >> $IDENTITY
 }
 
 
