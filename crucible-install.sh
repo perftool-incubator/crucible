@@ -48,24 +48,26 @@ _USAGE_
 }
 
 function identity {
-    if [ -e $IDENTITY ]; then
-        echo "Sourcing $IDENTITY"
-        . $IDENTITY
-    else
-        mkdir -p $(dirname $IDENTITY)
-        touch $(basename $IDENTITY)
+
+    if [ -z $CRUCIBLE_NAME ] && [ -z $CRUCIBLE_EMAIL ]; then
+        if [ -e $IDENTITY ]; then
+            echo "Sourcing $IDENTITY"
+            . $IDENTITY
+        fi
     fi
 
-    if [ -z "$CRUCIBLE_NAME" ]; then
-        echo "Please enter your full name:"
-        read CRUCIBLE_NAME
+    if [ -z $CRUCIBLE_NAME ]; then
+            echo "Please enter your full name:"
+            read CRUCIBLE_NAME
     fi
-    echo "CRUCIBLE_NAME=\"$CRUCIBLE_NAME\"" >> $IDENTITY
 
-    if [ -z "$CRUCIBLE_EMAIL" ]; then
+    if [ -z $CRUCIBLE_EMAIL ]; then
         echo "Please enter your email address:"
         read CRUCIBLE_EMAIL
     fi
+
+    mkdir -p $(dirname $IDENTITY)
+    echo "CRUCIBLE_NAME=\"$CRUCIBLE_NAME\"" > $IDENTITY
     echo "CRUCIBLE_EMAIL=\"$CRUCIBLE_EMAIL\"" >> $IDENTITY
 }
 
@@ -95,12 +97,12 @@ fi
 eval set -- "$opts";
 while true; do
     case "$1" in
-       --registry)
+        --registry)
             shift;
             CRUCIBLE_REGISTRY="$1"
             shift;
             ;;
-       --name)
+        --name)
             shift;
             CRUCIBLE_NAME="$1"
             shift;

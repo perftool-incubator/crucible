@@ -52,4 +52,5 @@ sudo ./crucible-install.sh \
   --auth-file /tmp/auth-file.json \
   --name "Nobody" \
   --email "nobody@somewhere.com"
-sudo grep "CRUCIBLE_NAME" $idfile || exit 1
+sudo grep "CRUCIBLE_NAME=\"Nobody\"" $idfile || exit 1
+sudo grep "CRUCIBLE_EMAIL=\"nobody@somewhere.com\"" $idfile || exit 1
