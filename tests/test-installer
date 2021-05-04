@@ -40,3 +40,17 @@ test "$?" = "0" || exit 1
 grep "myregistry.io" $cfgfile || exit 1
 grep "auth-file.json" $cfgfile || exit 1
 command -v crucible || exit 1
+
+# identity
+touch /tmp/auth-file.json || true
+cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+idfile=$(grep IDENTITY= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+# TODO(rfolco): temporary workaround until we make it distro generic
+sudo mkdir -p $(dirname $cfgfile)
+sudo ./crucible-install.sh \
+  --registry myregistry.io/crucible \
+  --auth-file /tmp/auth-file.json \
+  --name "Nobody" \
+  --email "nobody@somewhere.com"
+sudo grep "CRUCIBLE_NAME=\"Nobody\"" $idfile || exit 1
+sudo grep "CRUCIBLE_EMAIL=\"nobody@somewhere.com\"" $idfile || exit 1
