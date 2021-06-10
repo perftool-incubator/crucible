@@ -13,6 +13,7 @@ uperf                benchmark      /bench-uperf                                
 oslat                benchmark      /bench-oslat                                    master
 trafficgen           benchmark      /bench-trafficgen                               main
 cyclictest           benchmark      /bench-cyclictest                               main
+hwlatdetect          benchmark      /bench-hwlatdetect                              main
 sysstat              tool           /tool-sysstat                                   master
 procstat             tool           /tool-procstat                                  master
 ftrace               tool           /tool-ftrace                                    master
