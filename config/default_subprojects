@@ -8,6 +8,7 @@ workshop             core           /workshop                                   
 junk-drawer          core           /junk-drawer                                    master
 CommonDataModel      core           /CommonDataModel                                master
 toolbox              core           /toolbox                                        main
+packrat              core           /packrat                                        master
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
 oslat                benchmark      /bench-oslat                                    master
