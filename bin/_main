@@ -305,6 +305,13 @@ elif [ "${1}" == "run" ]; then
             echo "Generating --bench-params from --mv-params..."
             echo "$podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}"
             $podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}
+            rc=$?
+            if [ "$rc" != "0" ]; then
+                echo "multiplex failed with an error and returned rc=$rc"
+                echo "multiplex output is:"
+                cat ${bench_params_run_dir}
+                exit 1
+            fi
 
             bench_params=${bench_params_run_dir}
         fi
