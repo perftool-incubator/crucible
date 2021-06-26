@@ -136,6 +136,7 @@ function post_process_run() {
     run_json="${RUN_DIR}/run/rickshaw-run.json"
     if [ ! -f $run_json ]; then
         result_dumper=xzcat
+        run_json="${RUN_DIR}/run/rickshaw-run.json.xz"
     fi
 
     if [ -f $run_json ]; then
