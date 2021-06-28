@@ -16,6 +16,9 @@ function help() {
     echo "console         |  Run user supplied programs inside a crucible wrapper for logging purposes"
     echo "wrapper         |  Run a crucible subproject command directly, within a crucible container"
     echo "get             |  Get either a result summary (get result) or any metric (get metric)"
+    echo "index           |  Index a result which is already post-processed with run-result-dir argument immediately following 'index'"
+    echo "postprocess     |  Post-process (and index) a result with run-result-dir argument immediately following 'index'"
+    echo "reindex         |  Completely delete and init ES, then post-process and index all runs found in $var_crucible/run"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
@@ -27,9 +30,10 @@ function help() {
     shift
 
     if [ -z "${CRUCIBLE_HOME}" -o ! -e "${CRUCIBLE_HOME}" ]; then
-	echo "ERROR: Could not find ${CRUCIBLE_HOME}, exiting."
-	exit 1
+	    echo "ERROR: Could not find ${CRUCIBLE_HOME}, exiting."
+	    exit 1
     fi
+    . $CRUCIBLE_HOME/bin/base
 
     if [ "${1}" == "log" ]; then
         ${CRUCIBLE_HOME}/bin/log help
