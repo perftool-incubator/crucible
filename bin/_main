@@ -228,25 +228,29 @@ elif [ "${1}" == "index" ]; then
     start_es
     index_result_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index"
     $podman_run --name crucible-index "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
+elif [ "${1}" == "es" ]; then
+    shift
+    start_es
+    if [ "${1}" == "init" -o "${1}" == "rebuild" ]; then
+        delete_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
+        init_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/init.sh"
+        $podman_run --name crucible-es-delete "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $delete_es_cmd
+        $podman_run --name crucible-es-init "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $init_es_cmd
+    fi
+    if [ "${1}" == "rebuild" ]; then
+        pushd $var_crucible/run >/dev/null || exit_error "Could not chdir to $var_crucible/run"
+        for base_run_dir in `/bin/ls | grep -v latest`; do
+            if [ -d "$base_run_dir" ]; then
+                echo "Going to post-process and index $base_run_dir"
+                post_process_run "${base_run_dir}"
+            fi
+        done
+        popd >/dev/null
+    fi
 elif [ "${1}" == "postprocess" ]; then
     shift
     base_run_dir=$(echo "$@" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
     post_process_run "${base_run_dir}"
-elif [ "${1}" == "reindex" ]; then
-    shift
-    start_es
-    delete_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
-    init_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/init.sh"
-    $podman_run --name crucible-es-delete "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $delete_es_cmd
-    $podman_run --name crucible-es-init "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $init_es_cmd
-    pushd $var_crucible/run >/dev/null || exit_error "Could not chdir to $var_crucible/run"
-    for base_run_dir in `/bin/ls | grep -v latest`; do
-        if [ -d "$base_run_dir" ]; then
-            echo "Going to post-process and index $base_run_dir"
-            post_process_run "${base_run_dir}"
-        fi
-    done
-    popd >/dev/null
 elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
