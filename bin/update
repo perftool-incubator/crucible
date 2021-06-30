@@ -50,6 +50,17 @@ fi
 
 case "${repo}" in
     "all"|"__all"|"crucible"|"__crucible")
+        case "${repo}" in
+            "all"|"crucible")
+                echo "Crucible update pass 1:"
+                ;;
+            "__all"|"__crucible")
+                echo
+                echo "Crucible update pass 2:"
+                ;;
+        esac
+        echo
+
         # the first and second time this script is called for the
         # "all" or "crucible" targets a special case is invoked to
         # ensure that updates can be done to the crucible repository
@@ -81,9 +92,17 @@ esac
 
 case "${repo}" in
     "____all"|"____crucible"|"controller-image")
+        echo
+        echo "Checking for new controller image:"
+        echo
+
         ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
         ;;
     *)
+        echo
+        echo "Updating ${repo}:"
+        echo
+
         if pushd $CRUCIBLE_HOME/subprojects/${repo} > /dev/null; then
             $CRUCIBLE_HOME/bin/_update-git
             popd > /dev/null
@@ -98,6 +117,10 @@ esac
 if [ "${repo}" == "____all" ]; then
     if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
         for tmp_repo in $(find . -type l | sed 'sX./XX'); do
+            echo
+            echo "Updating ${tmp_repo}:"
+            echo
+
             if pushd ${tmp_repo} > /dev/null; then
                 $CRUCIBLE_HOME/bin/_update-git
                 popd > /dev/null
@@ -112,6 +135,10 @@ case "${repo}" in
         # install any new subprojects; do this after the updating
         # process so we don't clone and then immediately try to update
         # the repo which would just hammer the repo site
+        echo
+        echo "Checking for and installing any new subprojects:"
+        echo
+
         ${CRUCIBLE_HOME}/bin/subprojects-install
         ;;
 esac
