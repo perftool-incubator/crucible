@@ -242,7 +242,7 @@ elif [ "${1}" == "es" ]; then
         for base_run_dir in `/bin/ls | grep -v latest`; do
             if [ -d "$base_run_dir" ]; then
                 echo "Going to post-process and index $base_run_dir"
-                post_process_run "${base_run_dir}"
+                post_process_run "${var_crucible}/run/${base_run_dir}"
             fi
         done
         popd >/dev/null
