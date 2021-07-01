@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 _crucible_completions() {
     if [ -z "$CRUCIBLE_HOME" ]; then
@@ -16,7 +16,7 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess es" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
@@ -40,11 +40,29 @@ _crucible_completions() {
             start)
                 COMPREPLY=($(compgen -W "httpd es" -- "${COMP_WORDS[2]}"))
                 ;;
+            rm)
+                COMPREPLY=($(compgen -W "--run" -- "${COMP_WORDS[2]}"))
+                ;;
+            es)
+                COMPREPLY=($(compgen -W "init rebuild" -- "${COMP_WORDS[2]}"))
+                ;;
+            postprocess)
+                . ${CRUCIBLE_HOME}/bin/base
+                COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[2]}"))
+                ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "repo" ]; then
         case "${COMP_WORDS[2]}" in
             status)
                 COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[3]}"))
+                ;;
+        esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "rm" ]; then
+        case "${COMP_WORDS[2]}" in
+            --run)
+                . ${CRUCIBLE_HOME}/bin/base
+                run_ids=$(find ${var_crucible}/run -name rickshaw-run.json -print0 -o -name rickshaw-run.json.xz -print0 | xargs -0 -L1 xzcat -f | jq -r '. "run-id"')
+                COMPREPLY=($(compgen -W "${run_ids}" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "run" ]; then
