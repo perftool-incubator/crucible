@@ -29,7 +29,7 @@ else
     shift
 fi
 
-fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s"
+fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-13s"
 
 function process_repo() {
     local repo=$1
@@ -66,18 +66,20 @@ function process_repo() {
             git_remote_url="N/A"
         fi
 
+	current_commit=$(git rev-parse --short HEAD)
+
         popd > /dev/null
     else
         # something fishy is going on...
         foo=1
     fi
 
-    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}"
+    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}" "${current_commit}"
 }
 
 case "${command}" in
     status)
-        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes"
+        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit"
  
         if [ -z "$1" -o "$1" == "crucible" -o "$1" == "all" ]; then
             if pushd $CRUCIBLE_HOME > /dev/null; then
