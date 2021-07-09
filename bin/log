@@ -42,6 +42,7 @@ sub format_ts {
 if ((!($mode eq "view") &&
      !($mode eq "clear") &&
      !($mode eq "info") &&
+     !($mode eq "getsessionids") &&
      !($mode eq "init")) ||
     ($mode eq "help")) {
     help();
@@ -141,8 +142,8 @@ if ($mode eq "view") {
         }
         $filter_query = "WHERE sessions.timestamp = (SELECT sessions2.timestamp FROM sessions as sessions2 ORDER BY sessions2.timestamp DESC LIMIT 1)";
     } elsif ($filter_cmd eq 'sessionid') {
-        if (defined($ARGV[3]) && defined($ARGV[4]) && $ARGV[3] eq 'is') {
-            $filter_query = "WHERE sessions.session_id = " . $log_dbh->quote($ARGV[4]);
+        if (defined($ARGV[3])) {
+            $filter_query = "WHERE sessions.session_id = " . $log_dbh->quote($ARGV[3]);
         } else {
             print "ERROR: Invalid sessionid query!\n";
             exit(1);
@@ -258,6 +259,17 @@ if ($mode eq "view") {
 
 
     print("\n");
+} elsif ($mode eq "getsessionids") {
+    my $sth = $log_dbh->prepare("SELECT session_id FROM sessions ORDER BY sessions.timestamp;");
+    my $rv = $sth->execute() or die $DBI::errstr;
+    if ($rv < 0) {
+        print $DBI::errstr;
+        exit(1);
+    }
+
+    while (my $row = $sth->fetchrow_hashref()) {
+        printf("%s\n", $row->{'session_id'});
+    }
 }
 
 $log_dbh->disconnect();

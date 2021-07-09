@@ -65,6 +65,20 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "${run_ids}" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
+    elif [ "$(expr $num_words % 2)" -eq 1 -a ${COMP_WORDS[1]} == "log" -a ${COMP_WORDS[2]} == "view" ]; then
+        case "${COMP_WORDS[3]}" in
+            sessionid)
+                . ${CRUCIBLE_HOME}/bin/base
+                session_ids=$(crucible_log getsessionids ${LOG_DB})
+                COMPREPLY=($(compgen -W "${session_ids}" -- "${COMP_WORDS[4]}"))
+                ;;
+        esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "log" ]; then
+        case "${COMP_WORDS[2]}" in
+            view)
+                COMPREPLY=($(compgen -W "first last sessionid" -- "${COMP_WORDS[3]}"))
+                ;;
+        esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "run" ]; then
         params=""
         rickshaw_params_file="$CRUCIBLE_HOME/subprojects/core/rickshaw/params"
@@ -75,4 +89,4 @@ _crucible_completions() {
     fi
 }
 
-complete -F _crucible_completions crucible
+complete -o nosort -F _crucible_completions crucible
