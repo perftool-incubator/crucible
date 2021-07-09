@@ -42,7 +42,9 @@ grep "auth-file.json" $cfgfile || exit 1
 command -v crucible || exit 1
 
 # identity
-touch /tmp/auth-file.json || true
+touch /tmp/auth-file.json
+# Remove all previous installs
+rm -rf /opt/crucible*
 cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
 idfile=$(grep IDENTITY= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
 # TODO(rfolco): temporary workaround until we make it distro generic
