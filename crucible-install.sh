@@ -152,6 +152,10 @@ for dep in $DEPENDENCIES; do
     has_dependency $dep
 done
 
+if [ ! -f $CRUCIBLE_AUTH_FILE ]; then
+    exit_error "Crucible authentication file not found. See --auth-file for details." $EC_AUTH_FILE_NOT_FOUND
+fi
+
 if [ -d $INSTALL_PATH ]; then
     old_install_path="/opt/crucible-moved-on-`date +%d-%m-%Y_%H:%M:%S`"
     echo "An existing installation of crucible exists and will be moved to $old_install_path"
@@ -164,9 +168,6 @@ git clone $GIT_REPO $INSTALL_PATH > $GIT_INSTALL_LOG 2>&1 ||
 $INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
     exit_error "Failed to execute crucbile-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
 
-if [ ! -f $CRUCIBLE_AUTH_FILE ]; then
-    exit_error "Crucible authentication file not found. See --auth-file for details." $EC_AUTH_FILE_NOT_FOUND
-fi
 
 # native crucible install script already created this, only append
 cat << _SYSCFG_ >> $SYSCONFIG

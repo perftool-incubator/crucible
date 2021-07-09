@@ -54,3 +54,14 @@ sudo ./crucible-install.sh \
   --email "nobody@somewhere.com"
 sudo grep "CRUCIBLE_NAME=\"Nobody\"" $idfile || exit 1
 sudo grep "CRUCIBLE_EMAIL=\"nobody@somewhere.com\"" $idfile || exit 1
+
+# override existing installation
+touch /tmp/auth-file.json
+cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+# TODO(rfolco): temporary workaround until we make it distro generic
+sudo mkdir -p $(dirname $cfgfile)
+sudo ./crucible-install.sh \
+  --registry myregistry.io/crucible \
+  --auth-file /tmp/auth-file.json
+test "$?" = "0" || exit 1
+ls /opt/crucible-moved* || exit 1
