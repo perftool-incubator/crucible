@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 # repo management infrastructure
 
@@ -15,7 +15,8 @@ function help() {
     echo ""
     echo "The following commands are supported"
     echo ""
-    echo "status          |  Give high level status of the active repositories (default)"
+    echo "info          |  Give high level info about the active repositories (default)"
+    echo "details       |  Give details for the active repositories"
     echo ""
 }
 
@@ -23,89 +24,185 @@ if [ "$1" == "help" ]; then
     help
     exit
 elif [ -z "$1" ]; then
-    command="status"
+    command="info"
 else
     command=$1
     shift
 fi
 
-fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-13s"
-
-function process_repo() {
+function repo_info() {
     local repo=$1
     local alt_dir=$2
 
-    type=$(echo "${repo}" | awk -F'/' '{ print $1 }')
-    name=$(echo "${repo}" | awk -F'/' '{ print $2 }')
+    local type=$(echo "${repo}" | awk -F'/' '{ print $1 }')
+    local name=$(echo "${repo}" | awk -F'/' '{ print $2 }')
 
     if [ -z "${alt_dir}" ]; then
-        dir=$(readlink -e ${repo})
+        local dir=$(readlink -e ${repo})
+        local error=${repo}
     else
-        dir=${alt_dir}
+        local dir=${alt_dir}
+        local error=${dir}
+    fi
+
+    if [ -z "${dir}" ]; then
+        echo "Error finding directory [${error}]"
+        return
     fi
 
     if pushd ${dir} > /dev/null; then
-        git_status=$(git status --porcelain=2 --untracked-files=no --branch)
-        git_tracked_entries=$(echo "${git_status}" | grep -v "^#" | wc -l)
+        local git_status=$(git status --porcelain=2 --untracked-files=no --branch)
+        local git_tracked_entries=$(echo "${git_status}" | grep -v "^#" | wc -l)
         if [ "${git_tracked_entries}" == "0" ]; then
             local_changes="N"
         else
             local_changes="Y"
         fi
-        git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
-        git_local_branch=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+        local git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
+        local git_local_branch=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
         if [ -n "${git_tracking}" ]; then
-            git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
-            git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
-            git_remote_url=$(git remote get-url ${git_remote_name})
+            local git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
+            local git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
+            local git_remote_url=$(git remote get-url ${git_remote_name})
         else
             # this likely means the branch is not tracking any
             # upstream repository branch (yet)
-            git_remote_name="N/A"
-            git_remote_branch="N/A"
-            git_remote_url="N/A"
+            local git_remote_name="N/A"
+            local git_remote_branch="N/A"
+            local git_remote_url="N/A"
         fi
 
-	current_commit=$(git rev-parse --short HEAD)
+        local current_commit=$(git rev-parse --short HEAD)
 
         popd > /dev/null
     else
-        # something fishy is going on...
-        foo=1
+        echo "ERROR: Failed to pushd to ${dir}"
     fi
 
     printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}" "${current_commit}"
 }
 
-case "${command}" in
-    status)
-        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit"
- 
-        if [ -z "$1" -o "$1" == "crucible" -o "$1" == "all" ]; then
-            if pushd $CRUCIBLE_HOME > /dev/null; then
-                process_repo "/crucible" $CRUCIBLE_HOME
+function repo_details() {
+    local repo=${1}
+    local alt_dir=${2}
 
-                popd > /dev/null
-            fi
+    local type=$(echo "${repo}" | awk -F'/' '{ print $1 }')
+    local name=$(echo "${repo}" | awk -F'/' '{ print $2 }')
+
+    if [ -z "${alt_dir}" ]; then
+        local dir=$(readlink -e ${repo})
+        local error=${repo}
+    else
+        local dir=${alt_dir}
+        local error=${dir}
+    fi
+
+    if [ -z "${dir}" ]; then
+        echo "Error finding directory [${error}]"
+        return
+    fi
+
+    local section_title=-
+    if [ -z "${type}" ]; then
+        section_title=" ${name} "
+    else
+        section_title=" ${type}:${name} "
+    fi
+    local section_title_length=$(echo ${section_title} | wc -c)
+    local width=80
+    local header_width=$(echo "(${width} - ${section_title_length}) / 2" | bc)
+    local header=$(printf "%0${header_width}d" 0 | sed -e 's/0/#/g')
+    local footer=$(printf "%0${width}d" 0 | sed -e 's/0/*/g')
+
+    if pushd ${dir} > /dev/null; then
+        printf "%s%s%s\n" "${header}" "${section_title}" "${header}"
+
+        git status --verbose --untracked-files=all --renames
+        echo
+        git diff --patch --stat --no-color
+
+        printf "%s\n" "${footer}"
+
+        popd > /dev/null
+    else
+        echo "ERROR: Failed to pushd to ${type}:${name} [${dir}]"
+    fi
+}
+
+function handle_scope() {
+    local mode=${1}
+    shift
+    local scope=${1}
+    shift
+
+    if [ "${scope}" == "crucible" -o "${scope}" == "all" ]; then
+        if pushd $CRUCIBLE_HOME > /dev/null; then
+            case "${mode}" in
+                info)
+                    repo_info "/crucible" $CRUCIBLE_HOME
+                    ;;
+                details)
+                    repo_details "/crucible" ${CRUCIBLE_HOME}
+                    ;;
+            esac
+
+            popd > /dev/null
         fi
 
-        if [ -z "$1" -o "$1" == "all" ]; then
-            if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-                for tmp_repo in $(find . -type l | sed 'sX./XX'); do
-                    process_repo ${tmp_repo}
-                done
+        if [ "${scope}" == "crucible" ]; then
+            exit
+        fi
+    fi
 
-                popd > /dev/null
-            fi
+    if [ "${scope}" == "all" ]; then
+        if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+            for tmp_repo in $(find . -type l | sed 'sX./XX'); do
+                case "${mode}" in
+                    info)
+                        repo_info ${tmp_repo}
+                        ;;
+                    details)
+                        repo_details ${tmp_repo}
+                        ;;
+                esac
+            done
+
+            popd > /dev/null
+        fi
+    else
+        if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
+            case "${mode}" in
+                info)
+                    repo_info ${scope}
+                    ;;
+                details)
+                    repo_details ${scope}
+                    ;;
+            esac
+
+            popd > /dev/null
         else
-            if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-                process_repo $1
-
-                popd > /dev/null
-            else
-                echo "ERROR: repo '$1' could not be found!"
-                exit 1
-            fi
+            echo "ERROR: repo '${scope}' could not be found!"
+            exit 1
         fi
+    fi
+}
+
+if [ -z "${1}" ]; then
+    scope="all"
+else
+    scope=${1}
+    shift
+fi
+
+case "${command}" in
+    info)
+        fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-13s"
+        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit"
+
+        handle_scope info ${scope}
+        ;;
+    details)
+        handle_scope details ${scope}
         ;;
 esac

@@ -177,7 +177,7 @@ if [ "${1}" == "log" ]; then
 elif [ "${1}" == "repo" ]; then
     shift
     if [ -z "${1}" ]; then
-        ${CRUCIBLE_HOME}/bin/repo status
+        ${CRUCIBLE_HOME}/bin/repo info
         RET_VAL=$?
     else
         ${CRUCIBLE_HOME}/bin/repo "$@"
@@ -375,6 +375,9 @@ elif [ "${1}" == "run" ]; then
     fi
 
     start_redis
+
+    ${CRUCIBLE_HOME}/bin/repo info > ${base_run_dir}/config/crucible.repo.info
+    ${CRUCIBLE_HOME}/bin/repo details > ${base_run_dir}/config/crucible.repo.details
 
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
