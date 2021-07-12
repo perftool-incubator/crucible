@@ -119,6 +119,8 @@ function repo_details() {
 
         git status --verbose --untracked-files=all --renames
         echo
+        git log -n 1 HEAD
+        echo
         git diff --patch --stat --no-color
 
         printf "%s\n" "${footer}"
