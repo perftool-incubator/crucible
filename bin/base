@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 EC_FAIL_USER=2
 
@@ -35,6 +35,7 @@ container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
 var_crucible="/var/lib/crucible"
 podman_pull="podman pull"
+podman_stop="podman stop"
 podman_run="podman run --pull=missing"
 
 datetime=`date +%Y-%m-%d_%H:%M:%S`
