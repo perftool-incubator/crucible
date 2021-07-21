@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 # repo updating infrastructure
 
@@ -93,9 +93,15 @@ esac
 case "${repo}" in
     "____all"|"____crucible"|"controller-image")
         echo
+        echo "Controller update:"
+        echo
+        echo "Shutting down existing controller pods:"
+        ${podman_stop} crucible-es
+        ${podman_stop} crucible-httpd
+        ${podman_stop} crucible-redis
+        echo
         echo "Checking for new controller image:"
         echo
-
         ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
         ;;
     *)
