@@ -394,7 +394,7 @@ elif [ "${1}" == "run" ]; then
 
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
         echo "Archiving crucible log to ${base_run_dir}"
-        crucible_log view ${LOG_DB} sessionid is ${LOGGER_SESSION_ID} | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
+        crucible_log view ${LOG_DB} sessionid ${LOGGER_SESSION_ID} | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
