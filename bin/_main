@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 LOGGER_SESSION_ID="${1}"
 shift
@@ -81,20 +81,41 @@ function start_redis() {
 }
 
 function start_es() {
+    local es_available count status_check RET_VAL es_timeout
+    local es_start_cmd es_status_cmd
     es_start_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
+    es_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cat/indices"
     echo -n "Checking for elasticsearch"
     RET_VAL=0
-    if podman ps | grep -q crucible-es; then
+    if podman container exists crucible-es; then
         echo "...appears to be running"
     else
         echo "...not present, starting a container for it:"
         firewall-cmd --zone=public --add-port=9200/tcp --add-port=9300/tcp >/dev/null 2>&1
         mkdir -p "$var_crucible/es"
         $podman_run --name crucible-es "${container_common_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd
-    fi
-    RET_VAL=$?
-    if [ $RET_VAL -gt 0 ]; then
-        exit_error "Could not start elasticseach"
+        RET_VAL=$?
+        if [ $RET_VAL -gt 0 ]; then
+            exit_error "Could not start elasticseach"
+        fi
+        es_available=0
+        count=1
+        es_timeout=60
+        echo "Waiting for elasticsearch to be available (${es_timeout} seconds maximum)..."
+        while [ ${es_available} != 1 -a ${count} -lt ${es_timeout} ]; do
+            status_check=$($podman_run --name crucible-es-status-check "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_status_cmd)
+            if echo "${status_check}" | grep -q "Connection refused"; then
+                sleep 1
+            else
+                echo "Elasticsearch is online after ${count} seconds"
+                es_available=1
+            fi
+            (( count += 1 ))
+        done
+        if [ ${es_available} -eq 0 ]; then
+            echo -n "Elasticsearch failed"
+            exit_error "elasticsearch failed to launch properly"
+        fi
     fi
 }
 
