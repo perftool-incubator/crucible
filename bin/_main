@@ -334,36 +334,55 @@ elif [ "${1}" == "run" ]; then
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
 
+    if [ ! -e "$benchmark_subproj_dir" ]; then
+        echo "Running benchmark $benchmark requires that subproject"
+        echo "located in "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark"
+        echo "This directory could not be found.  Here are the benchmark"
+        echo "subproject directories:"
+        /bin/ls "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark
+        exit 1
+    fi
+
     if [ "${use_mv_params}" == "1" ]; then
         if [ ! -e "${mv_params}" ]; then
             echo "The multi-value params file you specified with --mv-params (${mv_params}) does not exist!"
             exit 1
         else
+            echo "Generating --bench-params from --mv-params..."
+
             mv_params_run_dir=${base_run_dir}/config/mv-params.json
             cp ${mv_params} ${mv_params_run_dir}
-            bench_params_run_dir=${base_run_dir}/config/bench-params.json
+            bench_params_run_file=${base_run_dir}/config/bench-params.json
+            bench_params_run_output=${base_run_dir}/config/bench-params.txt
 
-            echo "Generating --bench-params from --mv-params..."
-            echo "$podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}"
-            $podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} > ${bench_params_run_dir}
+            multiplex_cmd="${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} --output ${bench_params_run_file}"
+            if [ -e ${benchmark_subproj_dir}/multiplex.json ]; then
+                multiplex_cmd+=" --requirements ${benchmark_subproj_dir}/multiplex.json"
+            else
+                echo "Skipping benchmark requirements validation because there is no ${benchmark_subproj_dir}/multiplex.json"
+            fi
+
+            multiplex_cmd="$podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
+            echo "${multiplex_cmd} > ${bench_params_run_output} 2>&1"
+            ${multiplex_cmd} > ${bench_params_run_output} 2>&1
             rc=$?
             if [ "$rc" != "0" ]; then
                 echo "multiplex failed with an error and returned rc=$rc"
                 echo "multiplex output is:"
-                cat ${bench_params_run_dir}
+                cat ${bench_params_run_output}
                 exit 1
             fi
 
-            bench_params=${bench_params_run_dir}
+            bench_params=${bench_params_run_file}
         fi
     elif [ ! -e ${bench_params} ]; then
         echo "Make sure you have defined the benchmark parameters and put them in a file \"./bench-params.json\""
         echo "or that you explicitly specify the benchmark parameters file with \"--bench-params=<file>\"."
         exit 1
     else
-        bench_params_run_dir=${base_run_dir}/config/bench-params.json
-        cp ${bench_params} ${bench_params_run_dir}
-        bench_params=${bench_params_run_dir}
+        bench_params_run_file=${base_run_dir}/config/bench-params.json
+        cp ${bench_params} ${bench_params_run_file}
+        bench_params=${bench_params_run_file}
     fi
 
     tool_params_file=${base_run_dir}/config/tool-params.json
@@ -385,15 +404,6 @@ elif [ "${1}" == "run" ]; then
     params_args=""
     params_args+=" --bench-params ${bench_params}"
     params_args+=" --tool-params ${tool_params_file}"
-
-    if [ ! -e "$benchmark_subproj_dir" ]; then
-        echo "Running benchmark $benchmark requires that subproject"
-        echo "located in "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark"
-        echo "This directory could not be found.  Here are the benchmark"
-        echo "subproject directories:"
-        /bin/ls "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark
-        exit 1
-    fi
 
     start_redis
 
