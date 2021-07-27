@@ -319,9 +319,6 @@ elif [ "${1}" == "run" ]; then
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
         exit_error "CRUCIBLE_CLIENT_SERVER_REPO is not defined"
     fi
-    if [ -z "$CRUCIBLE_CLIENT_SERVER_AUTH" ]; then
-        exit_error "CRUCIBLE_CLIENT_SERVER_AUTH is not defined"
-    fi
     if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
         echo "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
         exit 1

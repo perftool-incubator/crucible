@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 # Installer Settings
 IDENTITY="/root/.crucible/identity"
@@ -9,6 +9,9 @@ DEPENDENCIES="podman git"
 INSTALL_PATH="/opt/crucible"
 GIT_REPO="https://github.com/perftool-incubator/crucible.git"
 GIT_INSTALL_LOG="/tmp/crucible-git-install.log"
+CRUCIBLE_CONTROLLER_REGISTRY="quay.io/crucible/controller:latest"
+CRUCIBLE_NO_CLIENT_SERVER_REGISTRY=0
+VERBOSE=0
 
 # User Exit Codes
 EC_DEFAULT_EC=1
@@ -21,6 +24,8 @@ EC_FAIL_REGISTRY_UNSET=8
 EC_FAIL_AUTH_UNSET=9
 EC_INVALID_OPTION=10
 EC_UNEXPECTED_ARG=11
+EC_FAIL_REGISTRY_SET=12
+EC_FAIL_AUTH_SET=13
 
 function exit_error {
     # Send message to stderr
@@ -34,14 +39,17 @@ function usage {
 
     Crucible installer script.
 
-    Usage: $0 --registry <value> --auth-file <value> [ opt ]
+    Usage: $0 [--client-server-registry <value> --client-server-auth-file <value> | --no-client-server-registry ] [ opt ]
 
-    --registry <registry/crucible>
-    --auth-file <authentication file>
+    --client-server-registry <full registry url>
+    --client-server-auth-file <authentication file>
+    --no-client-server-registry
 
     optional:
+        --controller-registry <full registry url> (default is ${CRUCIBLE_CONTROLLER_REGISTRY})
         --name <your full name>
         --email <your email address>
+        --verbose
 
     --help [displays this usage output]
 _USAGE_
@@ -89,7 +97,9 @@ function has_dependency {
     echo
 }
 
-longopts="name:,email:,registry:,auth-file:,help"
+longopts="name:,email:,help,verbose"
+longopts+=",client-server-registry:,client-server-auth-file:,no-client-server-registry"
+longopts+=",controller-registry:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
     exit_error "Unrecognized option specified: $@" $EC_INVALID_OPTION
@@ -97,9 +107,13 @@ fi
 eval set -- "$opts";
 while true; do
     case "$1" in
-        --registry)
+        --no-client-server-registry)
             shift;
-            CRUCIBLE_REGISTRY="$1"
+            CRUCIBLE_NO_CLIENT_SERVER_REGISTRY=1
+            ;;
+        --client-server-registry)
+            shift;
+            CRUCIBLE_CLIENT_SERVER_REGISTRY="$1"
             shift;
             ;;
         --name)
@@ -112,15 +126,24 @@ while true; do
             CRUCIBLE_EMAIL="$1"
             shift;
             ;;
-        --auth-file)
+        --client-server-auth-file)
             shift;
-            CRUCIBLE_AUTH_FILE="$1"
+            CRUCIBLE_CLIENT_SERVER_AUTH_FILE="$1"
+            shift;
+            ;;
+        --controller-registry)
+            shift;
+            CRUCIBLE_CONTROLLER_REGISTRY="$1"
             shift;
             ;;
         --help)
             shift;
             usage
             exit
+            ;;
+        --verbose)
+            shift;
+            VERBOSE=1
             ;;
         --)
             shift;
@@ -138,12 +161,22 @@ if [ "`id -u`" != "0" ]; then
     exit_error "You must run this as root, exiting" $EC_FAIL_USER
 fi
 
-if [ -z ${CRUCIBLE_REGISTRY+x} ]; then
-    exit_error "You must specify a registry with the --registry option." $EC_FAIL_REGISTRY_UNSET
-fi
+if [ ${CRUCIBLE_NO_CLIENT_SERVER_REGISTRY} == 1 ]; then
+    if [ ! -z ${CRUCIBLE_CLIENT_SERVER_REGISTRY+x} ]; then
+        exit_error "You cannot specify both --no-client-server-registry and --client-server-registry." $EC_FAIL_REGISTRY_SET
+    fi
 
-if [ -z ${CRUCIBLE_AUTH_FILE+x} ]; then
-    exit_error "You must specify an authentication file with the --auth-file option." $EC_FAIL_AUTH_UNSET
+    if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
+        exit_error "You cannot specify both --no-client-server-registry and --client-server-auth-file." $EC_FAIL_AUTH_SET
+    fi
+else
+    if [ -z ${CRUCIBLE_CLIENT_SERVER_REGISTRY+x} ]; then
+        exit_error "You must specify a registry with the --client-server-registry option." $EC_FAIL_REGISTRY_UNSET
+    fi
+
+    if [ -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
+        exit_error "You must specify an authentication file with the --client-server-auth-file option." $EC_FAIL_AUTH_UNSET
+    fi
 fi
 
 identity
@@ -152,8 +185,10 @@ for dep in $DEPENDENCIES; do
     has_dependency $dep
 done
 
-if [ ! -f $CRUCIBLE_AUTH_FILE ]; then
-    exit_error "Crucible authentication file not found. See --auth-file for details." $EC_AUTH_FILE_NOT_FOUND
+if [ ${CRUCIBLE_NO_CLIENT_SERVER_REGISTRY} == 0 ]; then
+    if [ ! -f $CRUCIBLE_CLIENT_SERVER_AUTH_FILE ]; then
+        exit_error "Crucible authentication file not found. See --client-server-auth-file for details." $EC_AUTH_FILE_NOT_FOUND
+    fi
 fi
 
 if [ -d $INSTALL_PATH ]; then
@@ -166,17 +201,28 @@ echo "Installing crucible in $INSTALL_PATH"
 git clone $GIT_REPO $INSTALL_PATH > $GIT_INSTALL_LOG 2>&1 ||
     exit_error "Failed to git clone $GIT_REPO, check $GIT_INSTALL_LOG for details" $EC_FAIL_CLONE
 $INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
-    exit_error "Failed to execute crucbile-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
+    exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
 
+SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY=""
+SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH=""
+if [ ${CRUCIBLE_NO_CLIENT_SERVER_REGISTRY} == 0 ]; then
+    SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY="${CRUCIBLE_CLIENT_SERVER_REGISTRY}"
+    SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH="\"${CRUCIBLE_CLIENT_SERVER_AUTH_FILE}\""
+fi
 
 # native crucible install script already created this, only append
 cat << _SYSCFG_ >> $SYSCONFIG
 CRUCIBLE_USE_CONTAINERS=1
 CRUCIBLE_USE_LOGGER=1
-CRUCIBLE_CONTAINER_IMAGE=$CRUCIBLE_REGISTRY/controller:latest
-CRUCIBLE_CLIENT_SERVER_REPO=$CRUCIBLE_REGISTRY/client-server
-CRUCIBLE_CLIENT_SERVER_AUTH="$CRUCIBLE_AUTH_FILE"
+CRUCIBLE_CONTAINER_IMAGE=${CRUCIBLE_CONTROLLER_REGISTRY}
+CRUCIBLE_CLIENT_SERVER_REPO=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY}
+CRUCIBLE_CLIENT_SERVER_AUTH=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH}
 _SYSCFG_
+
+if [ ${VERBOSE} == 1 ]; then
+    cat ${GIT_INSTALL_LOG}
+    echo
+fi
 
 echo "Installation is complete.  Run \"crucible help\" to see what's possible"
 echo "You can also source /etc/profile.d/crucible_completions.sh (or re-login) to use tab completion for crucible"
