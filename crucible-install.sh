@@ -2,12 +2,35 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
+# Repository Source Control
+PWD=$(pwd)
+PWD=$(readlink -e ${PWD})
+SCRIPT_DIR=$(dirname $0)
+SCRIPT_DIR=$(readlink -e ${SCRIPT_DIR})
+if [ "${PWD}" != "${SCRIPT_DIR}" ]; then
+    if ! pushd ${SCRIPT_DIR} > /dev/null; then
+        echo "WARNING: Failed to pushd to ${SCRIPT_DIR}"
+    fi
+fi
+git_status=$(git status --porcelain=2 --untracked-files=no --branch 2>&1)
+if echo -e "${git_status}" | grep -q "not a git repository"; then
+    GIT_REPO="https://github.com/perftool-incubator/crucible.git"
+    GIT_BRANCH="master"
+else
+    git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
+    git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
+    git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
+    git_remote_url=$(git remote get-url ${git_remote_name})
+
+    GIT_REPO="${git_remote_url}"
+    GIT_BRANCH="${git_remote_branch}"
+fi
+
 # Installer Settings
 IDENTITY="/root/.crucible/identity"
 SYSCONFIG="/etc/sysconfig/crucible"
 DEPENDENCIES="podman git"
 INSTALL_PATH="/opt/crucible"
-GIT_REPO="https://github.com/perftool-incubator/crucible.git"
 GIT_INSTALL_LOG="/tmp/crucible-git-install.log"
 CRUCIBLE_CONTROLLER_REGISTRY="quay.io/crucible/controller:latest"
 CRUCIBLE_NO_CLIENT_SERVER_REGISTRY=0
@@ -26,6 +49,8 @@ EC_INVALID_OPTION=10
 EC_UNEXPECTED_ARG=11
 EC_FAIL_REGISTRY_SET=12
 EC_FAIL_AUTH_SET=13
+EC_FAIL_CHECKOUT=14
+EC_PUSHD_FAIL=15
 
 function exit_error {
     # Send message to stderr
@@ -200,6 +225,13 @@ fi
 echo "Installing crucible in $INSTALL_PATH"
 git clone $GIT_REPO $INSTALL_PATH > $GIT_INSTALL_LOG 2>&1 ||
     exit_error "Failed to git clone $GIT_REPO, check $GIT_INSTALL_LOG for details" $EC_FAIL_CLONE
+if pushd ${INSTALL_PATH} > /dev/null; then
+    git checkout ${GIT_BRANCH} >> $GIT_INSTALL_LOG 2>&1 ||
+        exit_error "Failed to git checkout ${GIT_BRANCH}, check $GIT_INSTALL_LOG for details" $EC_FAIL_CHECKOUT
+    popd > /dev/null
+else
+    exit_error "Failed to pushd to ${INSTALL_PATH}, check ${GIT_INSTALL_LOG} for details" $EC_PUSHD_FAIL
+fi
 $INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
     exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
 
