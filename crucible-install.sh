@@ -53,6 +53,12 @@ EC_FAIL_CHECKOUT=14
 EC_PUSHD_FAIL=15
 
 function exit_error {
+    if [ -e ${GIT_INSTALL_LOG} ]; then
+        echo "Contents of ${GIT_INSTALL_LOG}:"
+        cat ${GIT_INSTALL_LOG}
+        echo
+    fi
+
     # Send message to stderr
     printf '\n%s\n\n' "$1" >&2
     # Return a code specified by $2 or 1 by default
