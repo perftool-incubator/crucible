@@ -46,6 +46,9 @@ container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
 container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
 container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 
+container_rs_run_args=()
+container_rs_run_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
+
 function start_httpd() {
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
     echo -n "Checking for httpd"
@@ -406,7 +409,7 @@ elif [ "${1}" == "run" ]; then
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
-    $podman_run --name crucible-run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
+    $podman_run --name crucible-run "${container_common_args[@]}" "${container_rs_args[@]}" "${container_rs_run_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
 
     post_process_run ${base_run_dir}
 
