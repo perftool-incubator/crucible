@@ -50,7 +50,7 @@ function start_httpd() {
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
     echo -n "Checking for httpd"
     RET_VAL=0
-    if podman ps | grep -q crucible-httpd; then
+    if ${podman_exists} crucible-httpd; then
         echo "...appears to be running"
     else
         echo "...not present, starting a container for it:"
@@ -67,7 +67,7 @@ function start_redis() {
     redis_cmd="redis-server /etc/redis.conf"
     echo -n "Checking for redis"
     RET_VAL=0
-    if podman ps | grep -q crucible-redis; then
+    if ${podman_exists} crucible-redis; then
         echo "...appears to be running"
     else
         echo "...not present, starting a container for it:"
@@ -87,7 +87,7 @@ function start_es() {
     es_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cat/indices"
     echo -n "Checking for elasticsearch"
     RET_VAL=0
-    if podman container exists crucible-es; then
+    if ${podman_exists} crucible-es; then
         echo "...appears to be running"
     else
         echo "...not present, starting a container for it:"
