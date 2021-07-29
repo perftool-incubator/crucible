@@ -168,7 +168,7 @@ function post_process_run() {
         RET_VAL=$?
         if [ $RET_VAL -eq 0 ]; then
             echo "Benchmark result now in elastic, localhost:9200"
-            this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${result_dumper} ${run_json} | jq -r '. "run-id"'`
+            this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
             if [ ! -z "$this_id" ]; then
                 cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
                 cdm_query_cmd+=" --run=$this_id"
