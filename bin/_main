@@ -410,10 +410,14 @@ elif [ "${1}" == "run" ]; then
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
     $podman_run --name crucible-run "${container_common_args[@]}" "${container_rs_args[@]}" "${container_rs_run_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
+    RET_VAL=$?
 
-    post_process_run ${base_run_dir}
+    if [ ${RET_VAL} == 0 ]; then
+        post_process_run ${base_run_dir}
+    fi
 
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
+        sleep 1
         echo "Archiving crucible log to ${base_run_dir}"
         crucible_log view ${LOG_DB} sessionid ${LOGGER_SESSION_ID} | xz -9 -T0 > ${base_run_dir}/crucible.log.xz
     fi
