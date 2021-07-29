@@ -24,7 +24,7 @@ jobs:
 
     - name: Install crucible
       run: |
-        sudo ./crucible-install.sh --no-client-server-registry --name nobody --email nobody@nobody.nobody.com --verbose
+        sudo ./crucible-install.sh --client-server-registry dir:/home/crucible-containers/client-server --name nobody --email nobody@nobody.nobody.com --verbose
 
     - name: Crucible config check
       run: |
@@ -38,9 +38,13 @@ jobs:
       run: |
         sudo crucible repo info
 
-    - name: Crucible Run FIO
+    - name: Crucible Run FIO-1
       run: |
-        sudo crucible run fio --num-samples 3 --test-order r --mv-params ./tests/end-to-end/fio.json --endpoint remotehost,host:localhost,user:root,userenv:rhubi8,osruntime:podman,client:1
+        sudo crucible run fio --num-samples 3 --test-order s --mv-params ./tests/end-to-end/fio-1.json --endpoint remotehost,host:localhost,user:root,userenv:rhubi8,osruntime:podman,client:1
+
+    - name: Crucible Run FIO-2
+      run: |
+        sudo crucible run fio --num-samples 3 --test-order r --mv-params ./tests/end-to-end/fio-2.json --endpoint remotehost,host:localhost,user:root,userenv:rhubi8,osruntime:podman,client:1
 
     - name: Crucible log info
       run: |
@@ -49,3 +53,13 @@ jobs:
     - name: Crucible log view
       run: |
         sudo crucible log view
+
+    - name: Podman Status
+      run: |
+        sudo podman ps --all --external
+        echo
+        sudo podman images
+
+    - name: Temporary Container Registry Status
+      run: |
+        ls -laR /home/crucible-containers

@@ -15,7 +15,7 @@
 		{ "arg": "log_avg_msec", "vals": [ "1000" ] },
 		{ "arg": "ramp_time", "vals": [ "5" ] },
 
-		{ "arg": "bs", "vals": [ "4K", "8K", "16K" ] },
+		{ "arg": "bs", "vals": [ "4K" ] },
 		{ "arg": "unlink", "vals": [ "1" ] },
 		{ "arg": "filename", "vals": [ "/tmp/fio.foo" ] },
 		{ "arg": "runtime", "vals": [ "30" ] },

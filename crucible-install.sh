@@ -44,7 +44,7 @@ EC_FAIL_INSTALL=5
 EC_AUTH_FILE_NOT_FOUND=6
 EC_FAIL_DEPENDENCY=7
 EC_FAIL_REGISTRY_UNSET=8
-EC_FAIL_AUTH_UNSET=9
+#9
 EC_INVALID_OPTION=10
 EC_UNEXPECTED_ARG=11
 EC_FAIL_REGISTRY_SET=12
@@ -70,13 +70,14 @@ function usage {
 
     Crucible installer script.
 
-    Usage: $0 [--client-server-registry <value> --client-server-auth-file <value> | --no-client-server-registry ] [ opt ]
+    Usage: $0 [--client-server-registry <value> | --no-client-server-registry ] [ opt ]
 
     --client-server-registry <full registry url>
-    --client-server-auth-file <authentication file>
+    or
     --no-client-server-registry
 
     optional:
+        --client-server-auth-file <authentication file>
         --controller-registry <full registry url> (default is ${CRUCIBLE_CONTROLLER_REGISTRY})
         --name <your full name>
         --email <your email address>
@@ -204,10 +205,6 @@ else
     if [ -z ${CRUCIBLE_CLIENT_SERVER_REGISTRY+x} ]; then
         exit_error "You must specify a registry with the --client-server-registry option." $EC_FAIL_REGISTRY_UNSET
     fi
-
-    if [ -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
-        exit_error "You must specify an authentication file with the --client-server-auth-file option." $EC_FAIL_AUTH_UNSET
-    fi
 fi
 
 identity
@@ -217,8 +214,10 @@ for dep in $DEPENDENCIES; do
 done
 
 if [ ${CRUCIBLE_NO_CLIENT_SERVER_REGISTRY} == 0 ]; then
-    if [ ! -f $CRUCIBLE_CLIENT_SERVER_AUTH_FILE ]; then
-        exit_error "Crucible authentication file not found. See --client-server-auth-file for details." $EC_AUTH_FILE_NOT_FOUND
+    if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
+        if [ ! -f $CRUCIBLE_CLIENT_SERVER_AUTH_FILE ]; then
+            exit_error "Crucible authentication file not found. See --client-server-auth-file for details." $EC_AUTH_FILE_NOT_FOUND
+        fi
     fi
 fi
 
