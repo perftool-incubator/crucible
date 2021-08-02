@@ -33,7 +33,6 @@ DEPENDENCIES="podman git"
 INSTALL_PATH="/opt/crucible"
 GIT_INSTALL_LOG="/tmp/crucible-git-install.log"
 CRUCIBLE_CONTROLLER_REGISTRY="quay.io/crucible/controller:latest"
-CRUCIBLE_NO_CLIENT_SERVER_REGISTRY=0
 VERBOSE=0
 
 # User Exit Codes
@@ -70,11 +69,9 @@ function usage {
 
     Crucible installer script.
 
-    Usage: $0 [--client-server-registry <value> | --no-client-server-registry ] [ opt ]
+    Usage: $0 --client-server-registry <value> [ opt ]
 
     --client-server-registry <full registry url>
-    or
-    --no-client-server-registry
 
     optional:
         --client-server-auth-file <authentication file>
@@ -130,7 +127,7 @@ function has_dependency {
 }
 
 longopts="name:,email:,help,verbose"
-longopts+=",client-server-registry:,client-server-auth-file:,no-client-server-registry"
+longopts+=",client-server-registry:,client-server-auth-file:"
 longopts+=",controller-registry:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
@@ -139,10 +136,6 @@ fi
 eval set -- "$opts";
 while true; do
     case "$1" in
-        --no-client-server-registry)
-            shift;
-            CRUCIBLE_NO_CLIENT_SERVER_REGISTRY=1
-            ;;
         --client-server-registry)
             shift;
             CRUCIBLE_CLIENT_SERVER_REGISTRY="$1"
@@ -193,18 +186,8 @@ if [ "`id -u`" != "0" ]; then
     exit_error "You must run this as root, exiting" $EC_FAIL_USER
 fi
 
-if [ ${CRUCIBLE_NO_CLIENT_SERVER_REGISTRY} == 1 ]; then
-    if [ ! -z ${CRUCIBLE_CLIENT_SERVER_REGISTRY+x} ]; then
-        exit_error "You cannot specify both --no-client-server-registry and --client-server-registry." $EC_FAIL_REGISTRY_SET
-    fi
-
-    if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
-        exit_error "You cannot specify both --no-client-server-registry and --client-server-auth-file." $EC_FAIL_AUTH_SET
-    fi
-else
-    if [ -z ${CRUCIBLE_CLIENT_SERVER_REGISTRY+x} ]; then
-        exit_error "You must specify a registry with the --client-server-registry option." $EC_FAIL_REGISTRY_UNSET
-    fi
+if [ -z ${CRUCIBLE_CLIENT_SERVER_REGISTRY+x} ]; then
+    exit_error "You must specify a registry with the --client-server-registry option." $EC_FAIL_REGISTRY_UNSET
 fi
 
 identity
@@ -213,11 +196,9 @@ for dep in $DEPENDENCIES; do
     has_dependency $dep
 done
 
-if [ ${CRUCIBLE_NO_CLIENT_SERVER_REGISTRY} == 0 ]; then
-    if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
-        if [ ! -f $CRUCIBLE_CLIENT_SERVER_AUTH_FILE ]; then
-            exit_error "Crucible authentication file not found. See --client-server-auth-file for details." $EC_AUTH_FILE_NOT_FOUND
-        fi
+if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
+    if [ ! -f $CRUCIBLE_CLIENT_SERVER_AUTH_FILE ]; then
+        exit_error "Crucible authentication file not found. See --client-server-auth-file for details." $EC_AUTH_FILE_NOT_FOUND
     fi
 fi
 
@@ -240,10 +221,9 @@ fi
 $INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
     exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
 
-SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY=""
+SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY="${CRUCIBLE_CLIENT_SERVER_REGISTRY}"
 SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH=""
-if [ ${CRUCIBLE_NO_CLIENT_SERVER_REGISTRY} == 0 ]; then
-    SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY="${CRUCIBLE_CLIENT_SERVER_REGISTRY}"
+if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
     SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH="\"${CRUCIBLE_CLIENT_SERVER_AUTH_FILE}\""
 fi
 
@@ -264,4 +244,3 @@ fi
 echo "Installation is complete.  Run \"crucible help\" to see what's possible"
 echo "You can also source /etc/profile.d/crucible_completions.sh (or re-login) to use tab completion for crucible"
 echo
-
