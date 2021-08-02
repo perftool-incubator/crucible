@@ -13,7 +13,14 @@ if [ "${PWD}" != "${SCRIPT_DIR}" ]; then
     fi
 fi
 git_status=$(git status --porcelain=2 --untracked-files=no --branch 2>&1)
+git_use_default=0
 if echo -e "${git_status}" | grep -q "not a git repository"; then
+    git_use_default=1
+fi
+if ! echo -e "${git_status}" | grep "branch\.upstream"; then
+    git_use_default=1
+fi
+if [ "${git_use_default}" == 1 ]; then
     GIT_REPO="https://github.com/perftool-incubator/crucible.git"
     GIT_BRANCH="master"
 else
@@ -209,6 +216,8 @@ if [ -d $INSTALL_PATH ]; then
 fi
 
 echo "Installing crucible in $INSTALL_PATH"
+echo "Using Git repo:   ${GIT_REPO}"
+echo "Using Git branch: ${GIT_BRANCH}"
 git clone $GIT_REPO $INSTALL_PATH > $GIT_INSTALL_LOG 2>&1 ||
     exit_error "Failed to git clone $GIT_REPO, check $GIT_INSTALL_LOG for details" $EC_FAIL_CLONE
 if pushd ${INSTALL_PATH} > /dev/null; then
