@@ -24,7 +24,7 @@ jobs:
 
     - name: Install crucible
       run: |
-        sudo ./crucible-install.sh --client-server-registry dir:/home/crucible-containers/client-server --name nobody --email nobody@nobody.nobody.com --verbose
+        sudo ./crucible-install.sh --client-server-registry dir:/home/crucible-containers/client-server --name nobody --email nobody@nobody.nobody.com --verbose --git-repo $(pwd)/.git
 
     - name: Crucible config check
       run: |
