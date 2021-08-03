@@ -2,37 +2,6 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
-# Repository Source Control
-PWD=$(pwd)
-PWD=$(readlink -e ${PWD})
-SCRIPT_DIR=$(dirname $0)
-SCRIPT_DIR=$(readlink -e ${SCRIPT_DIR})
-if [ "${PWD}" != "${SCRIPT_DIR}" ]; then
-    if ! pushd ${SCRIPT_DIR} > /dev/null; then
-        echo "WARNING: Failed to pushd to ${SCRIPT_DIR}"
-    fi
-fi
-git_status=$(git status --porcelain=2 --untracked-files=no --branch 2>&1)
-git_use_default=0
-if echo -e "${git_status}" | grep -q "not a git repository"; then
-    git_use_default=1
-fi
-if ! echo -e "${git_status}" | grep "branch\.upstream"; then
-    git_use_default=1
-fi
-if [ "${git_use_default}" == 1 ]; then
-    GIT_REPO="https://github.com/perftool-incubator/crucible.git"
-    GIT_BRANCH="master"
-else
-    git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
-    git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
-    git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
-    git_remote_url=$(git remote get-url ${git_remote_name})
-
-    GIT_REPO="${git_remote_url}"
-    GIT_BRANCH="${git_remote_branch}"
-fi
-
 # Installer Settings
 IDENTITY="/root/.crucible/identity"
 SYSCONFIG="/etc/sysconfig/crucible"
@@ -40,6 +9,10 @@ DEPENDENCIES="podman git"
 INSTALL_PATH="/opt/crucible"
 GIT_INSTALL_LOG="/tmp/crucible-git-install.log"
 CRUCIBLE_CONTROLLER_REGISTRY="quay.io/crucible/controller:latest"
+DEFAULT_GIT_REPO="https://github.com/perftool-incubator/crucible.git"
+DEFAULT_GIT_BRANCH="master"
+GIT_REPO=""
+GIT_BRANCH=""
 VERBOSE=0
 
 # User Exit Codes
@@ -57,6 +30,49 @@ EC_FAIL_REGISTRY_SET=12
 EC_FAIL_AUTH_SET=13
 EC_FAIL_CHECKOUT=14
 EC_PUSHD_FAIL=15
+
+function determine_git_install_source {
+    local PWD SCRIPT_DIR
+    local git_status git_use_default git_tracking git_remote_branch git_remote_name git_remote_url
+
+    # check if the user specified GIT_REPO
+    if [ -n "${GIT_REPO}" ]; then
+        return
+    fi
+    git_use_default=0
+
+    PWD=$(pwd)
+    PWD=$(readlink -e ${PWD})
+    SCRIPT_DIR=$(dirname $0)
+    SCRIPT_DIR=$(readlink -e ${SCRIPT_DIR})
+    if [ "${PWD}" != "${SCRIPT_DIR}" ]; then
+        if ! pushd ${SCRIPT_DIR} > /dev/null; then
+            echo "WARNING: Failed to pushd to ${SCRIPT_DIR}"
+            git_use_default=1
+        fi
+    fi
+
+    git_status=$(git status --porcelain=2 --untracked-files=no --branch 2>&1)
+    if echo -e "${git_status}" | grep -q "not a git repository"; then
+        git_use_default=1
+    fi
+    if ! echo -e "${git_status}" | grep "branch\.upstream"; then
+        git_use_default=1
+    fi
+
+    if [ "${git_use_default}" == 0 ]; then
+        git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
+        git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
+        git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
+        git_remote_url=$(git remote get-url ${git_remote_name})
+
+        GIT_REPO="${git_remote_url}"
+        GIT_BRANCH="${git_remote_branch}"
+    elif [ "${git_use_default}" == 1 ]; then
+        GIT_REPO="${DEFAULT_GIT_REPO}"
+        GIT_BRANCH="${DEFAULT_GIT_BRANCH}"
+    fi
+}
 
 function exit_error {
     if [ -e ${GIT_INSTALL_LOG} ]; then
@@ -86,6 +102,8 @@ function usage {
         --name <your full name>
         --email <your email address>
         --verbose
+        --git-repo <repo path/url>
+        --git-branch <branch name>
 
     --help [displays this usage output]
 _USAGE_
@@ -135,7 +153,7 @@ function has_dependency {
 
 longopts="name:,email:,help,verbose"
 longopts+=",client-server-registry:,client-server-auth-file:"
-longopts+=",controller-registry:"
+longopts+=",controller-registry:,git-repo:,git-branch:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
     exit_error "Unrecognized option specified: $@" $EC_INVALID_OPTION
@@ -177,6 +195,16 @@ while true; do
             shift;
             VERBOSE=1
             ;;
+        --git-repo)
+            shift;
+            GIT_REPO="$1"
+            shift;
+            ;;
+        --git-branch)
+            shift;
+            GIT_BRANCH="$1"
+            shift;
+            ;;
         --)
             shift;
             break;
@@ -188,6 +216,8 @@ while true; do
            ;;
     esac
 done
+
+determine_git_install_source
 
 if [ "`id -u`" != "0" ]; then
     exit_error "You must run this as root, exiting" $EC_FAIL_USER
@@ -220,12 +250,16 @@ echo "Using Git repo:   ${GIT_REPO}"
 echo "Using Git branch: ${GIT_BRANCH}"
 git clone $GIT_REPO $INSTALL_PATH > $GIT_INSTALL_LOG 2>&1 ||
     exit_error "Failed to git clone $GIT_REPO, check $GIT_INSTALL_LOG for details" $EC_FAIL_CLONE
-if pushd ${INSTALL_PATH} > /dev/null; then
-    git checkout ${GIT_BRANCH} >> $GIT_INSTALL_LOG 2>&1 ||
-        exit_error "Failed to git checkout ${GIT_BRANCH}, check $GIT_INSTALL_LOG for details" $EC_FAIL_CHECKOUT
-    popd > /dev/null
+if [ -n "${GIT_BRANCH}" ]; then
+    if pushd ${INSTALL_PATH} > /dev/null; then
+        git checkout ${GIT_BRANCH} >> $GIT_INSTALL_LOG 2>&1 ||
+            exit_error "Failed to git checkout ${GIT_BRANCH}, check $GIT_INSTALL_LOG for details" $EC_FAIL_CHECKOUT
+        popd > /dev/null
+    else
+        exit_error "Failed to pushd to ${INSTALL_PATH}, check ${GIT_INSTALL_LOG} for details" $EC_PUSHD_FAIL
+    fi
 else
-    exit_error "Failed to pushd to ${INSTALL_PATH}, check ${GIT_INSTALL_LOG} for details" $EC_PUSHD_FAIL
+    echo "No specific git branch requested, using default"
 fi
 $INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
     exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
