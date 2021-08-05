@@ -1,0 +1,35 @@
+{
+    "global-options": [
+	{
+	    "name": "required",
+	    "params": [
+		{ "arg": "write_hist_log", "vals": [ "fio" ] },
+		{ "arg": "write_bw_log", "vals": [ "fio" ] },
+		{ "arg": "write_iops_log", "vals": [ "fio" ] },
+		{ "arg": "write_lat_log", "vals": [ "fio" ] },
+		{ "arg": "output-format", "vals": [ "json" ] },
+		{ "arg": "output", "vals": [ "fio-result.json" ] },
+		{ "arg": "log_unix_epoch", "vals": [ "1" ] },
+		{ "arg": "clocksource", "vals": [ "gettimeofday" ] },
+		{ "arg": "log_hist_msec", "vals": [ "10000" ] },
+		{ "arg": "log_avg_msec", "vals": [ "1000" ] },
+		{ "arg": "ramp_time", "vals": [ "5" ] },
+
+		{ "arg": "bs", "vals": [ "4K" ] },
+		{ "arg": "unlink", "vals": [ "1" ] },
+		{ "arg": "filename", "vals": [ "/tmp/fio.foo" ] },
+		{ "arg": "runtime", "vals": [ "30" ] },
+		{ "arg": "time_based", "vals": [ "1" ] },
+		{ "arg": "norandommap", "vals": [ "ON" ] },
+		{ "arg": "rw", "vals": [ "randrw" ] },
+		{ "arg": "ioengine", "vals": [ "sync" ] },
+		{ "arg": "size", "vals": [ "10M" ] }
+	    ]
+	}
+    ],
+    "sets": [
+	{
+	    "include": "required"
+        }
+    ]
+}

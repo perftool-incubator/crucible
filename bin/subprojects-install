@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+default_git_host_org="https://github.com/perftool-incubator"
 
 function exit_error() {
     echo $1
@@ -106,9 +108,17 @@ for subproject in "${!subprojects[@]}"; do
     clone_user_host_org_proj_dir="$clone_user_host_org_dir/$sp_git_proj"
     subproject_dir="subprojects/$sp_dir_prefix$subproject"
     if [ ! -e "$clone_user_host_org_proj_dir" ]; then
-        echo git clone $sp_git_user_host_org/$sp_git_proj "$clone_user_host_org_proj_dir"
-        git clone $sp_git_user_host_org/$sp_git_proj "$clone_user_host_org_proj_dir" || \
-            exit_error "Could not clone repo $sp_git_user_host_org_proj"
+        cmd="git clone $sp_git_user_host_org/$sp_git_proj $clone_user_host_org_proj_dir"
+        echo "${cmd}"
+        if ! ${cmd}; then
+            echo "failed to clone ${sp_git_user_host_org}/${sp_git_proj}"
+            cmd="git clone ${default_git_host_org}/${sp_git_proj} $clone_user_host_org_proj_dir"
+            echo "${cmd}"
+            if ! ${cmd}; then
+                echo "failed to clone ${default_git_host_org}/${sp_git_proj}"
+                exit_error "Could not clone repo ${sp_git_proj}"
+            fi
+        fi
     else
         no_clone="$no_clone $subproject"
     fi
