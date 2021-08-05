@@ -1,6 +1,14 @@
 name: end-to-end-ci
 
-on: [push]
+on:
+  # run on push or pull request events for the master branch only
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  # allow for manual invocation from the actions tab
+  workflow_dispatch:
 
 jobs:
   end-to-end-ci:
