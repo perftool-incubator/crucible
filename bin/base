@@ -28,7 +28,6 @@ container_common_args+=("--security-opt=label=disable")
 container_common_args+=("--workdir=`/bin/pwd`")
 
 container_log_args=()
-container_log_args+=("--name crucible-log")
 container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
@@ -68,7 +67,7 @@ function check_id {
 
 function crucible_log() {
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-        ${podman_run} ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
+        ${podman_run} --name crucible-log-$(uuidgen) ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
     else
         $CRUCIBLE_HOME/bin/log $@
     fi
