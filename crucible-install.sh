@@ -35,32 +35,73 @@ function determine_git_install_source {
     local PWD SCRIPT_DIR
     local git_status git_use_default git_tracking git_remote_branch git_remote_name git_remote_url
 
-    # check if the user specified GIT_REPO
+    # check if the user specified a git repository via --git-repo
     if [ -n "${GIT_REPO}" ]; then
+        # since the user specified a git repository to use as the
+        # installation source there is no need to introspect the
+        # current environment to determine where to install from
+
         return
     fi
+
+    # the default behavior is to introspect the environment to
+    # determine what to use as the crucible installation source; there
+    # are reasons why we may not be able to do that and if we
+    # encounter one of those scenarios we will have to fall back on
+    # assuming that the upstream repository and master branch are what
+    # we should use; this variable tracks whether or not we have
+    # encountered one of those scenarios
     git_use_default=0
 
     PWD=$(pwd)
     PWD=$(readlink -e ${PWD})
     SCRIPT_DIR=$(dirname $0)
     SCRIPT_DIR=$(readlink -e ${SCRIPT_DIR})
+    # if the current working directory is not the same directory where
+    # the install script resides then we need to make it the same
     if [ "${PWD}" != "${SCRIPT_DIR}" ]; then
+        # make sure we move to the directory where the installer
+        # script resides; if we are going to do git operations we need
+        # to be in the git repository
         if ! pushd ${SCRIPT_DIR} > /dev/null; then
+            # since we can't even pushd to the directory where the
+            # script resides lets assume we are in some unknown state
+            # and just install from the upstream master branch
+
             echo "WARNING: Failed to pushd to ${SCRIPT_DIR}"
             git_use_default=1
         fi
     fi
 
+    # query for git repository information using a interface --
+    # porcelain v2 -- that is guaranteed to be consistent even as git
+    # changes
     git_status=$(git status --porcelain=2 --untracked-files=no --branch 2>&1)
+
     if echo -e "${git_status}" | grep -q "not a git repository"; then
+        # since we are not in a git repository we cannot determine
+        # what repo/branch to use for installation so use the default
+        # upstream master branch; this implies the installer script
+        # was acquired via wget/curl/etc. instead of via git-clone
+
         git_use_default=1
     fi
+
     if ! echo -e "${git_status}" | grep "branch\.upstream"; then
+        # the repository we are in does not reveal an upstream
+        # repository that we should install from so use the default
+        # upstream master branch; an example of where this happens is
+        # the github runner environment that is created by a pull
+        # request
+
         git_use_default=1
     fi
 
     if [ "${git_use_default}" == 0 ]; then
+        # we were able to introspect the git repository and find the
+        # information required to install crucible by pointing at the
+        # upstream repository and branch that it is tracking
+
         git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
         git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
         git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
@@ -69,6 +110,9 @@ function determine_git_install_source {
         GIT_REPO="${git_remote_url}"
         GIT_BRANCH="${git_remote_branch}"
     elif [ "${git_use_default}" == 1 ]; then
+        # fall back on the upstream repository and the master branch
+        # as the installation source
+
         GIT_REPO="${DEFAULT_GIT_REPO}"
         GIT_BRANCH="${DEFAULT_GIT_BRANCH}"
     fi
