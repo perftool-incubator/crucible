@@ -125,7 +125,7 @@ function start_es() {
 function init_es() {
     RET_VAL=0
     es_init_cmd="${CRUCIBLE_HOME}/config/init-es.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
-    $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
+    $podman_run --name crucible-init-es-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
     RET_VAL=$?
     if [ $RET_VAL -gt 0 ]; then
         exit_error "Could not init elasticseach"
@@ -146,8 +146,8 @@ function post_process_run() {
     start_httpd
     start_es
 
-    $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd && \
-        $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd && \
+    $podman_run --name crucible-rickshaw-pp-bench-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd && \
+        $podman_run --name crucible-rickshaw-pp-tools-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd && \
         echo "Benchmark result is in ${RUN_DIR}" && \
         init_es
 
@@ -164,17 +164,17 @@ function post_process_run() {
     fi
 
     if [ -f $run_json ]; then
-        $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_index_cmd
+        $podman_run --name crucible-rickshaw-index-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_index_cmd
         RET_VAL=$?
         if [ $RET_VAL -eq 0 ]; then
             echo "Benchmark result now in elastic, localhost:9200"
-            this_id=`$podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
+            this_id=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
             if [ ! -z "$this_id" ]; then
                 cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
                 cdm_query_cmd+=" --run=$this_id"
                 echo "Generating benchmark summary report"
                 sleep 5 # ES may take 5 seconds to have data ready (from a setting which can vastly improve index operations)
-                $podman_run "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd | tee "${RUN_DIR}/run/result-summary.txt"
+                $podman_run --name crucible-get-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd | tee "${RUN_DIR}/run/result-summary.txt"
                 RET_VAL=$?
                 if [ $RET_VAL -eq 0 ]; then
                     echo
@@ -233,25 +233,25 @@ elif [ "${1}" == "get" ]; then
         start_httpd
         start_es
         get_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
-        $podman_run --name crucible-get-result "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_result_cmd "$@"
+        $podman_run --name crucible-get-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_result_cmd "$@"
     elif [ "${1}" == "metric" ]; then
         shift
         start_redis
         start_httpd
         start_es
         get_metric_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh"
-        $podman_run --name crucible-get-metric "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_metric_cmd "$@"
+        $podman_run --name crucible-get-metric-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_metric_cmd "$@"
     fi
 elif [ "${1}" == "rm" ]; then
     shift
     start_es
     rm_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh"
-    $podman_run --name crucible-rm-result "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rm_result_cmd "$@"
+    $podman_run --name crucible-rm-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rm_result_cmd "$@"
 elif [ "${1}" == "index" ]; then
     shift
     start_es
     index_result_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index"
-    $podman_run --name crucible-index "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
+    $podman_run --name crucible-rickshaw-index-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
 elif [ "${1}" == "es" ]; then
     shift
     start_es
@@ -362,7 +362,7 @@ elif [ "${1}" == "run" ]; then
                 echo "Skipping benchmark requirements validation because there is no ${benchmark_subproj_dir}/multiplex.json"
             fi
 
-            multiplex_cmd="$podman_run -i --name crucible-multiplex "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
+            multiplex_cmd="$podman_run -i --name crucible-multiplex-$(uuidgen) "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
             echo "${multiplex_cmd} > ${bench_params_run_output} 2>&1"
             ${multiplex_cmd} > ${bench_params_run_output} 2>&1
             rc=$?
@@ -419,7 +419,7 @@ elif [ "${1}" == "run" ]; then
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
-    $podman_run --name crucible-run "${container_common_args[@]}" "${container_rs_args[@]}" "${container_rs_run_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
+    $podman_run --name crucible-rickshaw-run-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" "${container_rs_run_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
     RET_VAL=$?
 
     if [ ${RET_VAL} == 0 ]; then
