@@ -1,0 +1,39 @@
+name: crucible-ci
+
+on:
+  # run on push or pull request events for the master branch only
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  # allow for manual invocation from the actions tab
+  workflow_dispatch:
+
+jobs:
+  crucible-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Show Environment
+      run: |
+        whoami
+        echo
+        pwd
+        echo
+        ls -la
+
+    - name: Git Clone crucible-ci
+      run: |
+        pushd ~/
+        git clone https://github.com/perftool-incubator/crucible-ci.git
+
+    - name: Setup CI Environment
+      run: |
+        sudo ~/crucible-ci/setup-ci-environment --ci-target crucible --ci-target-dir $(pwd)
+
+    - name: Run CI
+      run: |
+        sudo ~/crucible-ci/run-ci
