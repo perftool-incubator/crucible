@@ -22,6 +22,8 @@ jobs:
         pwd
         echo
         ls -la
+        echo
+        ip address show
 
     - name: Git Clone crucible-ci
       run: |
