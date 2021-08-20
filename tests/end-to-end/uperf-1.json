@@ -1,0 +1,24 @@
+{
+    "global-options": [
+	{
+	    "name": "required",
+	    "params": [
+		{ "arg": "protocol", "vals": [ "tcp" ], "role": "client" },
+		{ "arg": "wsize", "vals": [ "64" ], "role": "client" },
+		{ "arg": "rsize", "vals": [ "64" ], "role": "client" },
+		{ "arg": "duration", "vals": [ "60" ], "role": "client" },
+
+		{ "arg": "ifname", "vals" : [ "eth0" ], "role": "server" }
+	    ]
+	}
+    ],
+    "sets": [
+	{
+	    "include": "required",
+	    "params": [
+		{ "arg": "test-type", "vals": [ "stream" ], "role": "client" },
+		{ "arg": "nthreads", "vals": [ "1", "8" ], "role": "client" }
+	    ]
+        }
+    ]
+}
