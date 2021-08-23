@@ -11,15 +11,21 @@ if [ ! -d ${USER_STORE} ]; then
 fi
 LOG_DB=${USER_STORE}/log.db
 
+if [ -z "${HOSTFS_DIR}" ]; then
+    export CRUCIBLE_HOSTFS_PWD=$(pwd)
+fi
+
 container_common_args=()
 container_common_args+=("--rm")
 container_common_args+=("-e CRUCIBLE_HOME=$CRUCIBLE_HOME")
 container_common_args+=("-e TOOLBOX_HOME=${TOOLBOX_HOME}")
+container_common_args+=("-e CRUCIBLE_HOSTFS_PWD=${CRUCIBLE_HOSTFS_PWD}")
 container_common_args+=("--mount=type=bind,source=/root,destination=/root")
 container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME}/config/.bashrc,destination=/root/.bashrc")
 container_common_args+=("--mount=type=bind,source=/home,destination=/home")
 container_common_args+=("--mount=type=bind,source=/var/lib/crucible,destination=/var/lib/crucible")
 container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME},destination=${CRUCIBLE_HOME}")
+container_common_args+=("--mount=type=bind,source=/,destination=/hostfs")
 container_common_args+=("--privileged")
 container_common_args+=("--ipc=host")
 container_common_args+=("--pid=host")
