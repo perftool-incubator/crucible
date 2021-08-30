@@ -176,22 +176,28 @@ function post_process_run() {
         if [ $RET_VAL -eq 0 ]; then
             echo "Benchmark result now in elastic, localhost:9200"
             this_id=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
-            if [ ! -z "$this_id" ]; then
-                cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
-                cdm_query_cmd+=" --run=$this_id"
-                echo "Generating benchmark summary report"
-                sleep 5 # ES may take 5 seconds to have data ready (from a setting which can vastly improve index operations)
-                $podman_run --name crucible-get-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd | tee "${RUN_DIR}/run/result-summary.txt"
-                RET_VAL=$?
-                if [ $RET_VAL -eq 0 ]; then
-                    echo
-                    echo "Benchmark summary is complete and can be found in:"
-                    echo "${RUN_DIR}/run/result-summary.txt"
-                else
-                    echo "ERROR: Could not generate benchmark summary"
-                fi
+            if [ ! -z "$this_id" -a "$this_id" != "null" ]; then
+                echo "Found run ID from rickshaw-result.json: {.run-id: $this_id}"
             else
-                echo "ERROR: Could not get the run-id from this run"
+                this_id=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"id\"'"`
+                if [ ! -z "$this_id" -a "$this_id" != "null" ]; then
+                    echo "Found run ID from rickshaw-result.json: {.id: $this_id}"
+                else
+                    echo "Could not find run ID from rickshaw-result.json:, {.id} or {.run-id}, exiting"
+                    exit 1
+                fi
+            fi 
+            cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
+            cdm_query_cmd+=" --run=$this_id"
+            echo "Generating benchmark summary report"
+            $podman_run --name crucible-get-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd | tee "${RUN_DIR}/run/result-summary.txt"
+            RET_VAL=$?
+            if [ $RET_VAL -eq 0 ]; then
+                echo
+                echo "Benchmark summary is complete and can be found in:"
+                echo "${RUN_DIR}/run/result-summary.txt"
+            else
+                echo "ERROR: Could not generate benchmark summary"
             fi
         else
             echo "ERROR: Could not index result into elasticsearch"
