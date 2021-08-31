@@ -126,7 +126,7 @@ function exit_error {
     fi
 
     # Send message to stderr
-    printf '\n%s\n\n' "$1" >&2
+    printf 'ERROR:\n%s\n\n' "$1" >&2
     # Return a code specified by $2 or 1 by default
     exit "${2-1}"
 }
