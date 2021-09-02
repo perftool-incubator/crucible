@@ -6,7 +6,7 @@
 		{ "arg": "protocol", "vals": [ "tcp" ], "role": "client" },
 		{ "arg": "wsize", "vals": [ "64" ], "role": "client" },
 		{ "arg": "rsize", "vals": [ "64" ], "role": "client" },
-		{ "arg": "duration", "vals": [ "60" ], "role": "client" },
+		{ "arg": "duration", "vals": [ "10" ], "role": "client" },
 
 		{ "arg": "ifname", "vals" : [ "eth0" ], "role": "server" }
 	    ]

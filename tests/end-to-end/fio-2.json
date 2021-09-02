@@ -18,7 +18,7 @@
 		{ "arg": "bs", "vals": [ "8K", "16K" ] },
 		{ "arg": "unlink", "vals": [ "1" ] },
 		{ "arg": "filename", "vals": [ "/tmp/fio.foo" ] },
-		{ "arg": "runtime", "vals": [ "30s" ] },
+		{ "arg": "runtime", "vals": [ "10s" ] },
 		{ "arg": "time_based", "vals": [ "1" ] },
 		{ "arg": "norandommap", "vals": [ "ON" ] },
 		{ "arg": "rw", "vals": [ "randrw" ] },
