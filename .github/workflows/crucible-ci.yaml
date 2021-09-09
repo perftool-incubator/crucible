@@ -13,25 +13,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
 
-    - name: Show Environment
-      run: |
-        whoami
-        echo
-        pwd
-        echo
-        ls -la
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
 
-    - name: Git Clone crucible-ci
-      run: |
-        pushd ~/
-        git clone https://github.com/perftool-incubator/crucible-ci.git
-
-    - name: Setup CI Environment
-      run: |
-        sudo ~/crucible-ci/setup-ci-environment --ci-target crucible --ci-target-dir $(pwd)
-
-    - name: Run CI
-      run: |
-        sudo ~/crucible-ci/run-ci
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "crucible"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
