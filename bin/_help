@@ -34,6 +34,7 @@ function help() {
     echo "postprocess           |  Post-process (and index) a result with run-result-dir argument immediately following 'index'"
     echo "es init               |  Completely delete and init ES, leaving ES with only empty indices"
     echo "es rebuild            |  Completely delete and init ES, then post-process and index all runs found in $var_crucible/run"
+    echo "extract run-id <dir>  |  Return the run ID from a result directory"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"

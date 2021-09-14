@@ -153,9 +153,51 @@ function init_es() {
     return ${RC}
 }
 
+function extract_run_id() {
+    local RUN_DIR THIS_ID
+
+    RUN_DIR=${1}
+    shift
+
+    if [ -e ${RUN_DIR} -a -d ${RUN_DIR} ]; then
+        result_dumper=cat
+        run_json="${RUN_DIR}/run/rickshaw-run.json"
+        if [ ! -f $run_json ]; then
+            result_dumper=xzcat
+            run_json="${RUN_DIR}/run/rickshaw-run.json.xz"
+
+            if [ ! -f $run_json ]; then
+                echo "ERROR: Could not find a result json (ricksaw-run.json[.xz])"
+                return 1
+            fi
+        fi
+
+        THIS_ID=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
+        if [ -n "${THIS_ID}" -a "${THIS_ID}" != "null" ]; then
+            echo "${THIS_ID}"
+            return 0
+        else
+            THIS_ID=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"id\"'"`
+            if [ -n "${THIS_ID}" -a "${THIS_ID}" != "null" ]; then
+                echo "${THIS_ID}"
+                return 0
+            else
+                echo "ERROR: Could not find run ID from rickshaw-result.json:, {.id} or {.run-id}"
+                return 1
+            fi
+        fi
+    else
+        echo "ERROR: Could not find run directory at ${RUN_DIR}"
+        return 1
+    fi
+
+    echo "ERROR: unknown error extracting run-id from ${RUN_DIR}"
+    return 1
+}
+
 function post_process_run() {
     local rs_pp_b_cmd ps_pp_t_cmd rs_index_cmd cdm_query_cmd
-    local result_dumper run_json this_id RUN_DIR
+    local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
 
     RUN_DIR=${1}
@@ -204,34 +246,14 @@ function post_process_run() {
         return ${RC}
     fi
 
-    result_dumper=cat
-    run_json="${RUN_DIR}/run/rickshaw-run.json"
-    if [ ! -f $run_json ]; then
-        result_dumper=xzcat
-        run_json="${RUN_DIR}/run/rickshaw-run.json.xz"
-
-        if [ ! -f $run_json ]; then
-            echo "ERROR: Could not find a result json (ricksaw-run.json[.xz])"
-            return 1
-        fi
-    fi
-
     $podman_run --name crucible-rickshaw-index-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_index_cmd
     RC=$?
     if [ ${RC} == 0 ]; then
         echo "Benchmark result now in elastic, localhost:9200"
-        this_id=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
-        if [ -n "${this_id}" -a "${this_id}" != "null" ]; then
-            echo "Found run ID from rickshaw-result.json: {.run-id: $this_id}"
-        else
-            this_id=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"id\"'"`
-            if [ -n "${this_id}" -a "${this_id}" != "null" ]; then
-                echo "Found run ID from rickshaw-result.json: {.id: $this_id}"
-            else
-                echo "ERROR: Could not find run ID from rickshaw-result.json:, {.id} or {.run-id}"
-                RC=1
-            fi
-        fi
+
+        this_id=$(extract_run_id "${RUN_DIR}")
+        RC=$?
+
         if [ ${RC} == 0 ]; then
             cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
             cdm_query_cmd+=" --run=${this_id}"
@@ -248,6 +270,8 @@ function post_process_run() {
                 echo "ERROR: Could not generate benchmark summary"
                 RC=1
             fi
+        else
+            echo "${this_id}"
         fi
     else
         echo "ERROR: Could not index result into elasticsearch [rc=${RC}]"
@@ -330,6 +354,20 @@ elif [ "${1}" == "index" ]; then
         $podman_run --name crucible-rickshaw-index-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
     fi
     EXIT_VAL=$?
+elif [ "${1}" == "extract" ]; then
+    shift
+    case "${1}" in
+        run-id)
+            shift
+            this_id=$(extract_run_id "${1}")
+            EXIT_VAL=$?
+            echo "${this_id}"
+            ;;
+        *)
+            echo "ERROR: Unknown extract command ${1}"
+            EXIT_VAL=1
+            ;;
+    esac
 elif [ "${1}" == "es" ]; then
     shift
     if start_es; then

@@ -16,7 +16,7 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess es" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess es extract" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
@@ -46,9 +46,18 @@ _crucible_completions() {
             es)
                 COMPREPLY=($(compgen -W "init rebuild" -- "${COMP_WORDS[2]}"))
                 ;;
+            extract)
+                COMPREPLY=($(compgen -W "run-id" -- "${COMP_WORDS[2]}"))
+                ;;
             postprocess)
                 . ${CRUCIBLE_HOME}/bin/base
                 COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[2]}"))
+                ;;
+        esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "extract" ]; then
+        case "${COMP_WORDS[2]}" in
+            run-id)
+                COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "repo" ]; then
