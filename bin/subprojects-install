@@ -72,6 +72,35 @@ done
 no_clone=""
 pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change directory to $crucible_repo_dir"
 /bin/mkdir -p subprojects/benchmarks subprojects/tools subprojects/core
+for link in $(find subprojects -type l); do
+    type_dir=$(echo "${link}" | awk -F'/' '{ print $2 }')
+    name_link=$(echo "${link}" | awk -F'/' '{ print $3 }')
+    active=0
+    if [ -n "${subprojects[$name_link]}" ]; then
+        sp_type=`echo ${subprojects[$name_link]} | awk '{print $2}'`
+        case "$sp_type" in
+            "benchmark")
+                if [ "${type_dir}" == "benchmarks" ]; then
+                    active=1
+                fi
+                ;;
+            "tool")
+                if [ "${type_dir}" == "tools" ]; then
+                    active=1
+                fi
+                ;;
+            "core")
+                if [ "${type_dir}" == "core" ]; then
+                    active=1
+                fi
+                ;;
+        esac
+    fi
+    if [ ${active} == 0 ]; then
+        echo "Removing ${link} symbolic link because it is no longer an active subproject"
+        rm -v ${link}
+    fi
+done
 for subproject in "${!subprojects[@]}"; do
     sp_type=`echo ${subprojects[$subproject]} | awk '{print $2}'`
     sp_git_user_host_org_proj=`echo ${subprojects[$subproject]} | awk '{print $3}'`

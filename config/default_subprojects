@@ -5,7 +5,6 @@ rickshaw             core           /rickshaw                                   
 multiplex            core           /multiplex                                      master
 roadblock            core           /roadblock                                      master
 workshop             core           /workshop                                       master
-junk-drawer          core           /junk-drawer                                    main
 CommonDataModel      core           /CommonDataModel                                master
 toolbox              core           /toolbox                                        main
 packrat              core           /packrat                                        master
