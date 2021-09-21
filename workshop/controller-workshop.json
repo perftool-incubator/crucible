@@ -35,7 +35,8 @@
         "java",
         "nodejs",
         "motd",
-        "bc"
+        "bc",
+        "sshpass"
       ]
     },
     {
@@ -68,7 +69,8 @@
         "java",
         "nodejs",
         "motd",
-        "bc"
+        "bc",
+        "sshpass"
       ]
     },
     {
@@ -103,7 +105,8 @@
         "java",
         "nodejs",
         "motd",
-        "bc"
+        "bc",
+        "sshpass"
       ]
     },
     {
@@ -137,7 +140,8 @@
         "java",
         "nodejs",
         "motd",
-        "bc"
+        "bc",
+        "sshpass"
       ]
     }
   ],
@@ -394,6 +398,15 @@
       "distro_info": {
         "packages": [
           "java"
+        ]
+      }
+    },
+    {
+      "name": "sshpass",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "sshpass"
         ]
       }
     },
