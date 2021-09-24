@@ -21,3 +21,4 @@ ftrace               tool           /tool-ftrace                                
 kernel               tool           /tool-kernel                                    master
 ovs                  tool           /tool-ovs                                       master
 tcpdump              tool           /tool-tcpdump                                   main
+flexran              benchmark      /bench-flexran                                  main
