@@ -23,13 +23,18 @@ EC_FAIL_INSTALL=5
 EC_AUTH_FILE_NOT_FOUND=6
 EC_FAIL_DEPENDENCY=7
 EC_FAIL_REGISTRY_UNSET=8
-#9
+EC_TLS_VERIFY_ERROR=9
 EC_INVALID_OPTION=10
 EC_UNEXPECTED_ARG=11
 EC_FAIL_REGISTRY_SET=12
 EC_FAIL_AUTH_SET=13
 EC_FAIL_CHECKOUT=14
 EC_PUSHD_FAIL=15
+
+# remove a previous installation log
+if [ -e ${GIT_INSTALL_LOG} ]; then
+    rm ${GIT_INSTALL_LOG}
+fi
 
 function determine_git_install_source {
     local PWD SCRIPT_DIR
@@ -142,6 +147,7 @@ function usage {
 
     optional:
         --client-server-auth-file <authentication file>
+        --client-server-tls-verify true|false
         --controller-registry <full registry url> (default is ${CRUCIBLE_CONTROLLER_REGISTRY})
         --name <your full name>
         --email <your email address>
@@ -196,7 +202,7 @@ function has_dependency {
 }
 
 longopts="name:,email:,help,verbose"
-longopts+=",client-server-registry:,client-server-auth-file:"
+longopts+=",client-server-registry:,client-server-auth-file:,client-server-tls-verify:"
 longopts+=",controller-registry:,git-repo:,git-branch:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
@@ -205,6 +211,11 @@ fi
 eval set -- "$opts";
 while true; do
     case "$1" in
+        --client-server-tls-verify)
+            shift;
+            CRUCIBLE_CLIENT_SERVER_TLS_VERIFY="$1"
+            shift;
+            ;;
         --client-server-registry)
             shift;
             CRUCIBLE_CLIENT_SERVER_REGISTRY="$1"
@@ -283,6 +294,12 @@ if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
     fi
 fi
 
+if [ ! -z ${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY+x} ]; then
+    if [ "${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}" != "true" -a "${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}" != "false" ]; then
+        exit_error "Incorrect Crucible client server tls verify option [${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}].  See --client-server-tls-verify for details." $EC_TLS_VERIFY_ERROR
+    fi
+fi
+
 if [ -d $INSTALL_PATH ]; then
     old_install_path="/opt/crucible-moved-on-`date +%d-%m-%Y_%H:%M:%S`"
     echo "An existing installation of crucible exists and will be moved to $old_install_path"
@@ -310,8 +327,12 @@ $INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
 
 SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY="${CRUCIBLE_CLIENT_SERVER_REGISTRY}"
 SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH=""
+SYSCONFIG_CRUCIBLE_CLIENT_SERVER_TLS_VERIFY="\"true\""
 if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
     SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH="\"${CRUCIBLE_CLIENT_SERVER_AUTH_FILE}\""
+fi
+if [ ! -z ${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY+x} ]; then
+    SYSCONFIG_CRUCIBLE_CLIENT_SERVER_TLS_VERIFY="\"${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}\""
 fi
 
 # native crucible install script already created this, only append
@@ -321,6 +342,7 @@ CRUCIBLE_USE_LOGGER=1
 CRUCIBLE_CONTAINER_IMAGE=${CRUCIBLE_CONTROLLER_REGISTRY}
 CRUCIBLE_CLIENT_SERVER_REPO=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY}
 CRUCIBLE_CLIENT_SERVER_AUTH=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH}
+CRUCIBLE_CLIENT_SERVER_TLS_VERIFY=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}
 _SYSCFG_
 
 if [ ${VERBOSE} == 1 ]; then

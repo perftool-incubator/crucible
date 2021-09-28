@@ -43,6 +43,7 @@ container_rs_args=()
 container_rs_args+=("-i")
 container_rs_args+=("-e RS_REG_REPO=$CRUCIBLE_CLIENT_SERVER_REPO")
 container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
+container_rs_args+=("-e RS_REG_TLS_VERIFY=$CRUCIBLE_CLIENT_SERVER_TLS_VERIFY")
 container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
 container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 
