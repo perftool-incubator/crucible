@@ -2,6 +2,7 @@
 # By default this is "https://github.com/perftool-incubator" + "/<git-repo-url>"
 #project-name        project-type   git-repo-url                                    branch
 rickshaw             core           /rickshaw                                       master
+engine               core           /engine                                         main
 multiplex            core           /multiplex                                      master
 roadblock            core           /roadblock                                      master
 workshop             core           /workshop                                       master
