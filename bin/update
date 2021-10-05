@@ -114,7 +114,9 @@ case "${repo}" in
         echo
         echo "Checking for new controller image:"
         echo
-        ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
+        if ! ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}; then
+            exit 1
+        fi
         ;;
     *)
         echo
@@ -122,7 +124,9 @@ case "${repo}" in
         echo
 
         if pushd $CRUCIBLE_HOME/subprojects/${repo} > /dev/null; then
-            $CRUCIBLE_HOME/bin/_update-git
+            if ! $CRUCIBLE_HOME/bin/_update-git; then
+                exit 1
+            fi
             popd > /dev/null
             exit
         else
@@ -135,12 +139,15 @@ esac
 if [ "${repo}" == "____all" ]; then
     if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
         for tmp_repo in $(find . -type l | sed 'sX./XX'); do
-            echo
-            echo "Updating ${tmp_repo}:"
-            echo
-
             if pushd ${tmp_repo} > /dev/null; then
-                $CRUCIBLE_HOME/bin/_update-git
+                echo
+                echo "Updating ${tmp_repo}:"
+                echo
+
+                if ! $CRUCIBLE_HOME/bin/_update-git; then
+                    exit 1
+                fi
+
                 popd > /dev/null
             fi
         done
@@ -157,6 +164,10 @@ case "${repo}" in
         echo "Checking for and installing any new subprojects:"
         echo
 
-        ${CRUCIBLE_HOME}/bin/subprojects-install
+        if ! ${CRUCIBLE_HOME}/bin/subprojects-install; then
+            exit 1
+        fi
         ;;
 esac
+
+exit 0
