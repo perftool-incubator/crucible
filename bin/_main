@@ -550,6 +550,7 @@ elif [ "${1}" == "run" ]; then
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
       --bench-dir $benchmark_subproj_dir\
+      --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine\
       --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock\
       --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop\
       --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat\
