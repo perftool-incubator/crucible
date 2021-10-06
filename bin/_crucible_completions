@@ -16,7 +16,7 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess es extract" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess es extract ls tags" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
@@ -49,14 +49,40 @@ _crucible_completions() {
             extract)
                 COMPREPLY=($(compgen -W "run-id" -- "${COMP_WORDS[2]}"))
                 ;;
+            ls)
+                COMPREPLY=($(compgen -W "--type --result-dir --filter-type --filters" -- "${COMP_WORDS[2]}"))
+                ;;
+            tags)
+                COMPREPLY=($(compgen -W "--action" -- "${COMP_WORDS[2]}"))
+                ;;
             postprocess)
                 . ${CRUCIBLE_HOME}/bin/base
                 COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[2]}"))
                 ;;
         esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "ls" ]; then
+        case "${COMP_WORDS[2]}" in
+            --type)
+                COMPREPLY=($(compgen -W "tags run-id short" -- "${COMP_WORDS[3]}"))
+                ;;
+            --result-dir)
+                . ${CRUCIBLE_HOME}/bin/base
+                COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[3]}"))
+                ;;
+            --filter-type)
+                COMPREPLY=($(compgen -W "name tags" -- "${COMP_WORDS[3]}"))
+                ;;
+        esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "tags" ]; then
+        case "${COMP_WORDS[2]}" in
+            --action)
+                COMPREPLY=($(compgen -W "add remove ls" -- "${COMP_WORDS[3]}"))
+                ;;
+        esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "extract" ]; then
         case "${COMP_WORDS[2]}" in
             run-id)
+                . ${CRUCIBLE_HOME}/bin/base
                 COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
