@@ -2,21 +2,12 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
-LOGGER_SESSION_ID="${1}"
-shift
 LOG_DB="${1}"
 shift
 
 if [ -z "${CRUCIBLE_HOME}" -o ! -e "${CRUCIBLE_HOME}" ]; then
     echo "ERROR: Could not find \${CRUCIBLE_HOME} [${CRUCIBLE_HOME}], exiting."
     exit 1
-fi
-
-if [ -z "${LOGGER_SESSION_ID}" ]; then
-    echo "ERROR: You must define a logger session ID."
-    exit 3
-else
-    export LOGGER_SESSION_ID="${LOGGER_SESSION_ID}"
 fi
 
 if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
@@ -122,7 +113,7 @@ function start_es() {
             es_timeout=60
             echo "Waiting for elasticsearch to be available (${es_timeout} seconds maximum)..."
             while [ ${es_available} != 1 -a ${count} -lt ${es_timeout} ]; do
-                pod_name=crucible-es-status-check-$(uuidgen)
+                pod_name=crucible-es-status-check-${SESSION_ID}-$(uuidgen)
                 status_check=$($podman_run --name ${pod_name} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_status_cmd)
                 if echo "${status_check}" | grep -q "Connection refused"; then
                     sleep 1
@@ -146,7 +137,7 @@ function start_es() {
 function init_es() {
     local RC es_init_cmd
     es_init_cmd="${CRUCIBLE_HOME}/config/init-es.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
-    $podman_run --name crucible-init-es-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
+    $podman_run --name crucible-init-es-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Could not init elasticsearch"
@@ -173,12 +164,12 @@ function extract_run_id() {
             fi
         fi
 
-        THIS_ID=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
+        THIS_ID=`$podman_run --name crucible-extract-run-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
         if [ -n "${THIS_ID}" -a "${THIS_ID}" != "null" ]; then
             echo "${THIS_ID}"
             return 0
         else
-            THIS_ID=`$podman_run --name crucible-extract-run-id-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"id\"'"`
+            THIS_ID=`$podman_run --name crucible-extract-run-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"id\"'"`
             if [ -n "${THIS_ID}" -a "${THIS_ID}" != "null" ]; then
                 echo "${THIS_ID}"
                 return 0
@@ -225,13 +216,13 @@ function post_process_run() {
     fi
 
     post_process_fail=0
-    $podman_run --name crucible-rickshaw-pp-bench-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd
+    $podman_run --name crucible-rickshaw-pp-bench-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Failed to post-process the benchmark [rc=${RC}]"
         post_process_fail=1
     fi
-    $podman_run --name crucible-rickshaw-pp-tools-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd
+    $podman_run --name crucible-rickshaw-pp-tools-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_t_cmd
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Failed to post-process the tools [rc=${RC}]"
@@ -247,7 +238,7 @@ function post_process_run() {
         return ${RC}
     fi
 
-    $podman_run --name crucible-rickshaw-index-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_index_cmd
+    $podman_run --name crucible-rickshaw-index-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_index_cmd
     RC=$?
     if [ ${RC} == 0 ]; then
         echo "Benchmark result now in elastic, localhost:9200"
@@ -260,7 +251,7 @@ function post_process_run() {
             cdm_query_cmd+=" --run=${this_id}"
             echo "Generating benchmark summary report"
             result_summary="${RUN_DIR}/run/result-summary.txt"
-            $podman_run --name crucible-get-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd > ${result_summary}
+            $podman_run --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd > ${result_summary}
             RC=$?
             cat ${result_summary}
             if [ ${RC} == 0 ]; then
@@ -329,12 +320,12 @@ elif [ "${1}" == "get" ]; then
         if [ "${1}" == "result" ]; then
             shift
             get_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
-            $podman_run --name crucible-get-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_result_cmd "$@"
+            $podman_run --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_result_cmd "$@"
             EXIT_VAL=$?
         elif [ "${1}" == "metric" ]; then
             shift
             get_metric_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh"
-            $podman_run --name crucible-get-metric-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_metric_cmd "$@"
+            $podman_run --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_metric_cmd "$@"
             EXIT_VAL=$?
         else
             echo "ERROR: unsupported 'get' argument [${1}]"
@@ -345,14 +336,14 @@ elif [ "${1}" == "rm" ]; then
     shift
     if start_es; then
        rm_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh"
-       $podman_run --name crucible-rm-result-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rm_result_cmd "$@"
+       $podman_run --name crucible-rm-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rm_result_cmd "$@"
     fi
     EXIT_VAL=$?
 elif [ "${1}" == "index" ]; then
     shift
     if start_es; then
         index_result_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index"
-        $podman_run --name crucible-rickshaw-index-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
+        $podman_run --name crucible-rickshaw-index-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
     fi
     EXIT_VAL=$?
 elif [ "${1}" == "extract" ]; then
@@ -413,7 +404,8 @@ elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
     shift
-    base_run_dir=""
+    base_run_dir="${var_crucible}/run/${benchmark}-${datetime}-${SESSION_ID}"
+
     bench_params="bench-params.json"
     tool_params="tool-params.json"
     use_mv_params=0
@@ -433,7 +425,6 @@ elif [ "${1}" == "run" ]; then
             "--tags")
                 val=${1}
                 shift
-                base_run_dir="--${val}"
                 passthru_args+=("${arg}")
                 passthru_args+=("${val}")
                 ;;
@@ -452,7 +443,6 @@ elif [ "${1}" == "run" ]; then
                 ;;
         esac
     done
-    base_run_dir="$var_crucible/run/$benchmark-$datetime$base_run_dir"
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
         exit_error "CRUCIBLE_CLIENT_SERVER_REPO is not defined"
     fi
@@ -494,7 +484,7 @@ elif [ "${1}" == "run" ]; then
                 echo "Skipping benchmark requirements validation because there is no ${benchmark_subproj_dir}/multiplex.json"
             fi
 
-            multiplex_cmd="$podman_run -i --name crucible-multiplex-$(uuidgen) "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
+            multiplex_cmd="$podman_run -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
             echo "${multiplex_cmd} > ${bench_params_run_output} 2>&1"
             ${multiplex_cmd} > ${bench_params_run_output} 2>&1
             EXIT_VAL=$?
@@ -549,6 +539,7 @@ elif [ "${1}" == "run" ]; then
 
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
+      --id ${SESSION_ID}\
       --bench-dir $benchmark_subproj_dir\
       --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine\
       --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock\
@@ -557,7 +548,7 @@ elif [ "${1}" == "run" ]; then
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
-    $podman_run --name crucible-rickshaw-run-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" "${container_rs_run_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
+    $podman_run --name crucible-rickshaw-run-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_rs_run_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
     RC=$?
 
     if [ ${RC} == 0 ]; then
@@ -572,7 +563,7 @@ elif [ "${1}" == "run" ]; then
         sleep 1
         logfile="${base_run_dir}/crucible.log.xz"
         echo "Archiving crucible log to ${logfile}"
-        crucible_log view ${LOG_DB} sessionid ${LOGGER_SESSION_ID} | xz -9 -T0 > ${logfile}
+        crucible_log view ${LOG_DB} sessionid ${SESSION_ID} | xz -9 -T0 > ${logfile}
         RC=$(echo ${PIPESTATUS[@]} | sed 's/ /+/g' | bc)
         if [ ${EXIT_VAL} == 0 ]; then
             EXIT_VAL=${RC}
@@ -580,7 +571,7 @@ elif [ "${1}" == "run" ]; then
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-    $podman_run --name crucible-wrapper-$(uuidgen) "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
+    $podman_run --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
     EXIT_VAL=$?
 else
     echo "ERROR: This function has not been implemented"
