@@ -184,6 +184,16 @@ def validate_result_directory(result_directory):
     return 0
 
 
+def log_result_directory(result_directory):
+    if not result_directory.is_symlink():
+        myglobal.log.info("result: %s" % (result_directory.name))
+    else:
+        symlink_target = result_directory.readlink()
+        myglobal.log.info("result: %s -> %s" % (result_directory.name, symlink_target.name))
+
+    return 0
+
+
 def show_tags(data):
     if 'tags' in data:
         tags = ""
@@ -264,7 +274,7 @@ def ls_result_directory(result_directory):
             myglobal.log.debug("result directory '%s' has no rickshaw-run" % (result_directory))
             return 0
 
-    myglobal.log.info("result: %s" % (result_directory.name))
+    log_result_directory(result_directory)
 
     if myglobal.args.type == "short":
         pass
@@ -404,7 +414,7 @@ def run_results_tag_mode():
     if validate_result_directory(run_dir):
         return 1
 
-    myglobal.log.info("result: %s" % (run_dir.name))
+    log_result_directory(run_dir)
 
     data = load_rickshaw_run(run_dir)
 
