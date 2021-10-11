@@ -15,6 +15,11 @@ if [ -z "${HOSTFS_DIR}" ]; then
     export CRUCIBLE_HOSTFS_PWD=$(pwd)
 fi
 
+if [ -z "${SESSION_ID}" -o "${CRUCIBLE_NEW_SESSION_ID}" == "yes" ]; then
+    export SESSION_ID=$(uuidgen)
+    CRUCIBLE_NEW_SESSION_ID="no"
+fi
+
 container_common_args=()
 container_common_args+=("--rm")
 container_common_args+=("-e CRUCIBLE_HOME=$CRUCIBLE_HOME")
@@ -73,7 +78,7 @@ function check_id {
 
 function crucible_log() {
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-        ${podman_run} --name crucible-log-$(uuidgen) ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
+        ${podman_run} --name crucible-log-${SESSION_ID} ${container_log_args[@]} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE $CRUCIBLE_HOME/bin/log $@
     else
         $CRUCIBLE_HOME/bin/log $@
     fi
