@@ -278,10 +278,19 @@ if [ "${1}" == "log" ]; then
     shift
     crucible_log ${1} ${LOG_DB}
     EXIT_VAL=$?
-elif [ "${1}" == "ls" -o "${1}" == "tags" ]; then
+elif [ "${1}" == "ls" -o "${1}" == "tags" -o "${1}" == "result-completion" ]; then
     result_process_cmd="${CRUCIBLE_HOME}/bin/result-processor.py"
-    $podman_run --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${result_process_cmd} ${MODE} "$@"
-    EXIT_VAL=$?
+    case "${1}" in
+        ls|tags)
+            $podman_run --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${result_process_cmd} "$@"
+            EXIT_VAL=$?
+            ;;
+        result-completion)
+            shift
+            $podman_run --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${result_process_cmd} completion "$@"
+            EXIT_VAL=$?
+            ;;
+    esac
 elif [ "${1}" == "repo" ]; then
     shift
     if [ -z "${1}" ]; then

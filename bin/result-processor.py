@@ -47,6 +47,17 @@ def process_options():
                                        required = True)
 
 
+    parser_completion = subparsers.add_parser("completion",
+                                              help = "tab completion listing help")
+
+    parser_completion.add_argument("--type",
+                                   dest = "type",
+                                   help = "What type of listing to return for tab completion usage",
+                                   choices = [ "run-dir", "run-id" ],
+                                   type = str,
+                                   default = "run-dir")
+
+
     parser_ls = subparsers.add_parser("ls",
                                       help = "result listing help")
     parser_ls.add_argument("--type",
@@ -185,11 +196,32 @@ def validate_result_directory(result_directory):
 
 
 def log_result_directory(result_directory):
-    if not result_directory.is_symlink():
-        myglobal.log.info("result: %s" % (result_directory.name))
+    if myglobal.args.mode == "completion":
+        # completion mode uses a very terse output data to feed into a
+        # bash tab completion engine
+        if myglobal.args.type == "run-dir":
+            if not result_directory.is_symlink():
+                myglobal.log.info("%s" % (result_directory))
+            else:
+                symlink_target = result_directory.readlink()
+                myglobal.log.info("%s" % (symlink_target))
     else:
-        symlink_target = result_directory.readlink()
-        myglobal.log.info("result: %s -> %s" % (result_directory.name, symlink_target.name))
+        if not result_directory.is_symlink():
+            myglobal.log.info("result: %s" % (result_directory.name))
+        else:
+            symlink_target = result_directory.readlink()
+            myglobal.log.info("result: %s -> %s" % (result_directory.name, symlink_target.name))
+
+    return 0
+
+
+def log_run_id(run_id):
+    if myglobal.args.mode == "completion":
+        # completion mode uses a very terse output data to feed into a
+        # bash tab completion engine
+        myglobal.log.info("%s" % (run_id))
+    else:
+        myglobal.log.info("run-id: %s" % (run_id))
 
     return 0
 
@@ -254,7 +286,7 @@ def ls_result_directory(result_directory):
 
     data = load_rickshaw_run(result_directory)
 
-    if len(myglobal.args.filters) and myglobal.args.filter_type == "tags":
+    if myglobal.args.mode != "completion" and len(myglobal.args.filters) and myglobal.args.filter_type == "tags":
         if data is not None:
             if 'tags' in data:
                 found_match = False
@@ -290,7 +322,7 @@ def ls_result_directory(result_directory):
         match = re.search(r"^([a-zA-Z0-9]+)--([0-9-]+)_([0-9:]+)--([a-f0-9-]+)$", result_directory.name)
         if match:
             # found the run-id in the directory name
-            myglobal.log.info("run-id: %s" % (match.group(4)))
+            log_run_id(match.group(4))
         else:
             # the result directory is in the "old" name format
             # so we need to load the run-id from the
@@ -303,25 +335,27 @@ def ls_result_directory(result_directory):
                 elif 'run-id' in data:
                     run_id = data['run-id']
                 if run_id is not None:
-                    myglobal.log.info("run-id: %s" % (run_id))
+                    log_run_id(run_id)
                 else:
-                    myglobal.log.error("run-id: Not Found")
+                    if myglobal.args.mode != "completion":
+                        myglobal.log.error("run-id: Not Found")
             else:
                 myglobal.log.error("Could not find a valid rickshaw-run.json[.xz]")
 
-    myglobal.log.info("")
+    if myglobal.args.mode != "completion":
+        myglobal.log.info("")
 
     return 0
 
 
 def run_results_ls_mode():
-    if myglobal.args.result_dir is not None:
+    if myglobal.args.mode != "completion" and myglobal.args.result_dir is not None:
         return ls_result_directory(Path(myglobal.args.result_dir))
     else:
         run_dir = Path(myglobal.run_dir)
         if run_dir.exists() and run_dir.is_dir():
             dir_list = []
-            if len(myglobal.args.filters) and myglobal.args.filter_type == "name":
+            if myglobal.args.mode != "completion" and len(myglobal.args.filters) and myglobal.args.filter_type == "name":
                 for filter in myglobal.args.filters:
                     filter_dir_list = run_dir.glob(filter)
                     dir_list.extend(filter_dir_list)
@@ -443,7 +477,7 @@ def main():
 
     process_options()
 
-    if myglobal.args.mode == "ls":
+    if myglobal.args.mode == "ls" or myglobal.args.mode == "completion":
         return run_results_ls_mode()
     elif myglobal.args.mode == "tags":
         return run_results_tag_mode()

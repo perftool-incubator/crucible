@@ -56,8 +56,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "--action" -- "${COMP_WORDS[2]}"))
                 ;;
             postprocess)
-                . ${CRUCIBLE_HOME}/bin/base
-                COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "ls" ]; then
@@ -66,8 +65,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "tags run-id short" -- "${COMP_WORDS[3]}"))
                 ;;
             --result-dir)
-                . ${CRUCIBLE_HOME}/bin/base
-                COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[3]}"))
                 ;;
             --filter-type)
                 COMPREPLY=($(compgen -W "name tags" -- "${COMP_WORDS[3]}"))
@@ -82,8 +80,7 @@ _crucible_completions() {
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "extract" ]; then
         case "${COMP_WORDS[2]}" in
             run-id)
-                . ${CRUCIBLE_HOME}/bin/base
-                COMPREPLY=($(compgen -W "$(find ${var_crucible}/run -mindepth 1 -maxdepth 1)" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "repo" ]; then
@@ -95,9 +92,7 @@ _crucible_completions() {
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "rm" ]; then
         case "${COMP_WORDS[2]}" in
             --run)
-                . ${CRUCIBLE_HOME}/bin/base
-                run_ids=$(find ${var_crucible}/run -name rickshaw-run.json -print0 -o -name rickshaw-run.json.xz -print0 | xargs -0 -L1 xzcat -f | jq -r '. "run-id"')
-                COMPREPLY=($(compgen -W "${run_ids}" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-id)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 1 -a ${COMP_WORDS[1]} == "log" -a ${COMP_WORDS[2]} == "view" ]; then
