@@ -9,7 +9,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  crucible-ci:
+  crucible-ci-samples-iteration-repeat-runs-fio-remotehost:
+    name: crucible-ci-samples-iteration-repeat-runs-fio-remotehost
     runs-on: ubuntu-latest
 
     steps:
@@ -28,6 +29,146 @@ jobs:
     - name: Run crucible-ci->integration-tests
       uses: ./crucible-ci/.github/actions/integration-tests
       with:
-        artifact_tag: "crucible"
+        artifact_tag: "samples-iteration-repeat-runs-remotehost"
         ci_target: "crucible"
         ci_target_dir: ${{ github.workspace }}/crucible
+        scenarios: "fio"
+        repeat_runs: "yes"
+        run_samples: "3"
+        ci_endpoint: "remotehost"
+
+  crucible-ci-samples-iteration-repeat-runs-fio-k8s:
+    name: crucible-ci-samples-iteration-repeat-runs-fio-k8s
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "samples-iteration-repeat-runs-k8s"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        scenarios: "fio"
+        repeat_runs: "yes"
+        run_samples: "3"
+        ci_endpoint: "k8s"
+
+  crucible-ci-all-userenvs-fio-remotehost:
+    name: crucible-ci-all-userenvs-fio-remotehost
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "fio-remotehost"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        scenarios: "fio"
+        userenvs: "all"
+        ci_endpoint: "remotehost"
+
+  crucible-ci-all-userenvs-fio-k8s:
+    name: crucible-ci-all-userenvs-fio-k8s
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "fio-k8s"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        scenarios: "fio"
+        userenvs: "all"
+        ci_endpoint: "k8s"
+
+  crucible-ci-all-userenvs-uperf-remotehost:
+    name: crucible-ci-all-userenvs-uperf-remotehost
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "uperf-remotehost"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        scenarios: "uperf"
+        userenvs: "all"
+        ci_endpoint: "remotehost"
+
+  crucible-ci-all-userenvs-uperf-k8s:
+    name: crucible-ci-all-userenvs-uperf-k8s
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "uperf-k8s"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        scenarios: "uperf"
+        userenvs: "all"
+        ci_endpoint: "k8s"
