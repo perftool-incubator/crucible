@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  crucible-ci:
+  crucible-ci-iteration-repeat-runs-fio:
     runs-on: ubuntu-latest
 
     steps:
@@ -28,6 +28,33 @@ jobs:
     - name: Run crucible-ci->integration-tests
       uses: ./crucible-ci/.github/actions/integration-tests
       with:
-        artifact_tag: "crucible"
+        artifact_tag: "fio"
         ci_target: "crucible"
         ci_target_dir: ${{ github.workspace }}/crucible
+        repeat_runs: "yes"
+        scenarios: "fio"
+
+  crucible-ci-iteration-repeat-runs-uperf:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "uperf"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        repeat_runs: "yes"
+        scenarios: "uperf"
