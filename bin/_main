@@ -45,12 +45,7 @@ function start_httpd() {
     local RC httpd_cmd
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
     echo -n "Checking for httpd"
-    ${podman_exists} crucible-httpd
-    RC=$?
-    if [ ${RC} == 0 ]; then
-        echo "...appears to be running"
-    else
-        echo "...not present, starting a container for it:"
+    if ! podman_running crucible-httpd; then
         firewall-cmd --zone=public --add-port=8080/tcp >/dev/null 2>&1
         $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd
         RC=$?
@@ -65,12 +60,7 @@ function start_redis() {
     local RC redis_cmd
     redis_cmd="redis-server /etc/redis.conf"
     echo -n "Checking for redis"
-    ${podman_exists} crucible-redis
-    RC=$?
-    if [ ${RC} == 0 ]; then
-        echo "...appears to be running"
-    else
-        echo "...not present, starting a container for it:"
+    if ! podman_running crucible-redis; then
         firewall-cmd --zone=public --add-port=6379/tcp >/dev/null 2>&1
         $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
         RC=$?
@@ -88,12 +78,7 @@ function start_es() {
     es_start_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
     es_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cat/indices"
     echo -n "Checking for elasticsearch"
-    ${podman_exists} crucible-es;
-    RC=$?
-    if [ ${RC} == 0 ]; then
-        echo "...appears to be running"
-    else
-        echo "...not present, starting a container for it:"
+    if ! podman_running crucible-es; then
         firewall-cmd --zone=public --add-port=9200/tcp --add-port=9300/tcp >/dev/null 2>&1
         mkdir -p "$var_crucible/es"
         common_container_args=()
