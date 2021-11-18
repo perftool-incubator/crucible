@@ -290,19 +290,19 @@
     },
     {
       "name": "pip-redis",
-      "type": "manual",
-      "manual_info": {
-        "commands": [
-          "pip3 install redis"
+      "type": "python3",
+      "python3_info": {
+        "packages": [
+          "redis"
         ]
       }
     },
     {
       "name": "pip-jsonschema",
-      "type": "manual",
-      "manual_info": {
-        "commands": [
-          "pip3 install jsonschema"
+      "type": "python3",
+      "python3_info": {
+        "packages": [
+          "jsonschema"
         ]
       }
     },
