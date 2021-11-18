@@ -293,7 +293,8 @@
       "type": "python3",
       "python3_info": {
         "packages": [
-          "redis"
+          "redis",
+          "hiredis"
         ]
       }
     },
