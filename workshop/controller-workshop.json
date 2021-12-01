@@ -51,6 +51,7 @@
         "redis",
         "glibc-langpack-en",
         "perl-App-cpanminus",
+        "perl-modules",
         "git",
         "python3",
         "pip-redis",
@@ -89,6 +90,7 @@
         "pip-redis",
         "pip-jsonschema",
         "cpan-perl-modules",
+        "python3-modules",
         "buildah",
         "podman",
         "skopeo",
@@ -133,7 +135,8 @@
         "java",
         "nodejs",
         "motd",
-        "bc"
+        "bc",
+        "sshpass"
       ]
     }
   ],
@@ -371,7 +374,7 @@
       "type": "distro",
       "distro_info": {
         "packages": [
-          "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.6.2-x86_64.rpm"
+         "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.15.2-x86_64.rpm" 
         ]
       }
     },
@@ -418,6 +421,31 @@
       "distro_info": {
         "packages": [
           "bc"
+        ]
+      }
+    },
+    {
+      "name": "sshpass",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "sshpass"
+        ]
+      }
+    },
+        {
+      "name": "perl-modules",
+      "type": "cpan",
+      "cpan_info": {
+        "packages": [
+          "Coro", "JSON", "JSON::XS",
+          "JSON::Validator", "Data::Dumper",
+          "Data::UUID", "Digest::SHA",
+          "Digest::MD5", "Getopt::Long",
+          "REST::Client", "Time::HiRes",
+          "DBI DBD::SQLite",
+          "IO::Uncompress::UnXz",
+          "IO::Compress::Xz"
         ]
       }
     }
