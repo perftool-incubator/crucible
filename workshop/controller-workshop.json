@@ -6,38 +6,6 @@
   },
   "userenvs": [
     {
-      "name": "default",
-      "requirements": [
-        "bind-utils",
-        "iproute",
-        "xz",
-        "hostname",
-        "procps-ng",
-        "jq",
-        "gcc",
-        "make",
-        "redis",
-        "glibc-langpack-en",
-        "perl-App-cpanminus",
-        "git",
-        "python3",
-        "pip-redis",
-        "pip-jsonschema",
-        "cpan-perl-modules",
-        "buildah",
-        "podman",
-        "skopeo",
-        "container-storage-fuse",
-        "httpd",
-        "elasticsearch_from_es",
-        "elasticsearch_post",
-        "java",
-        "nodejs",
-        "motd",
-        "bc"
-      ]
-    },
-    {
       "name": "fedora33",
       "requirements": [
         "bind-utils",
@@ -50,10 +18,8 @@
         "make",
         "redis",
         "glibc-langpack-en",
-        "perl-App-cpanminus",
         "perl-modules",
         "git",
-        "python3",
         "pip-redis",
         "pip-jsonschema",
         "cpan-perl-modules",
@@ -62,74 +28,6 @@
         "skopeo",
         "container-storage-fuse",
         "httpd",
-        "elasticsearch_from_es",
-        "elasticsearch_post",
-        "java",
-        "nodejs",
-        "motd",
-        "bc"
-      ]
-    },
-    {
-      "name": "opensuse",
-      "requirements": [
-        "zlib-devel",
-        "openssl-devel",
-        "bind-utils",
-        "iproute",
-        "xz",
-        "hostname",
-        "procps",
-        "jq",
-        "gcc",
-        "make",
-        "redis",
-        "perl-App-cpanminus",
-        "git",
-        "python3",
-        "pip-redis",
-        "pip-jsonschema",
-        "cpan-perl-modules",
-        "python3-modules",
-        "buildah",
-        "podman",
-        "skopeo",
-        "container-storage-fuse",
-        "httpd",
-        "elastic_gpg",
-        "elasticsearch_from_es",
-        "elasticsearch_post",
-        "java",
-        "nodejs",
-        "motd",
-        "bc"
-      ]
-    },
-    {
-      "name": "stream8",
-      "requirements": [
-        "bind-utils",
-        "iproute",
-        "xz",
-        "hostname",
-        "procps-ng",
-        "jq",
-        "gcc",
-        "make",
-        "redis",
-        "glibc-langpack-en",
-        "perl-App-cpanminus",
-        "git",
-        "python3",
-        "pip-redis",
-        "pip-jsonschema",
-        "cpan-perl-modules",
-        "buildah",
-        "podman",
-        "skopeo",
-        "container-storage-fuse",
-        "httpd",
-        "elastic_gpg",
         "elasticsearch_from_es",
         "elasticsearch_post",
         "java",
@@ -260,16 +158,6 @@
       }
     },
     {
-      "name": "python3",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "python3",
-          "python3-pip"
-        ]
-      }
-    },
-    {
       "name": "redis",
       "type": "distro",
       "distro_info": {
@@ -288,30 +176,11 @@
       }
     },
     {
-      "name": "pip-redis",
-      "type": "python3",
-      "python3_info": {
-        "packages": [
-          "redis",
-          "hiredis"
-        ]
-      }
-    },
-    {
       "name": "pip-jsonschema",
       "type": "python3",
       "python3_info": {
         "packages": [
           "jsonschema"
-        ]
-      }
-    },
-    {
-      "name": "cpan-perl-modules",
-      "type": "manual",
-      "manual_info": {
-        "commands": [
-          "cpanm Coro JSON JSON::XS JSON::Validator Data::Dumper Data::UUID Digest::SHA Digest::MD5 Getopt::Long DBI DBD::SQLite Time::HiRes REST::Client Time::HiRes IO::Uncompress::UnXz IO::Compress::Xz"
         ]
       }
     },
