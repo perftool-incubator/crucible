@@ -11,16 +11,15 @@ While running crucible-controller is done with almost no software dependencies (
 To build the container image:
 
 ```
-cd $CRUCIBLE_HOME
-./subprojects/core/workshop/workshop.pl --userenv ./subprojects/core/workshop/userenvs/fedora32.json --requirements ./workshop/controller-workshop.json --label crucible-controller
+./build-controller.sh
 ```
 
-This process may take a while, as it is downloading a Linux container and installing many software packages.  The `--userenv` specifies which Linux distribution the container image is based from, and there are alternatives to centos8; however, any software requirements for a different userenv must be documented in the [controller-workshop.json](controller-workshop.json) file.
+This process may take a while, as it is downloading a Linux container and installing many software packages.
 
 To upload a container image run:
 
 ```
-buildah push localhost/workshop/fedora32_crucible-controller your-container-registry/your-crucible-org/your-crucible-controller-project:latest
+./push-controller testing
 ```
 
 You will need write acces to your container registry project, and any users who wish to install this image will need read access.  By default the crucible installer assumes public read access to the crucible-controller image.
