@@ -22,7 +22,6 @@
         "git",
         "pip-redis",
         "pip-jsonschema",
-        "cpan-perl-modules",
         "buildah",
         "podman",
         "skopeo",
@@ -38,7 +37,17 @@
       ]
     }
   ],
-  "requirements": [
+ "requirements": [
+     {
+        "name": "pip-redis",
+        "type": "python3",
+        "python3_info": {
+            "packages": [
+                "redis",
+                "hiredis"
+            ]
+        }
+     },
     {
       "name": "openssl-devel",
       "type": "distro",
