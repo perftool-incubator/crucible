@@ -37,6 +37,7 @@ function help() {
     echo "extract run-id <dir>  |  Return the run ID from a result directory"
     echo "ls                    |  List the run results with optional arguments"
     echo "tags                  |  Manage the tags associated with run results"
+    echo "notify test           |  Check if the notification service is working properly"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
