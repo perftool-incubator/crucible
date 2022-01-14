@@ -73,7 +73,11 @@ function podman_running() {
     fi
 }
 
-datetime=`date +%Y-%m-%d_%H:%M:%S`
+function get_timestamp() {
+    date -u +%Y-%m-%d_%H:%M:%S_%Z
+}
+
+datetime=$(get_timestamp)
 
 function exit_error() {
     echo "ERROR: ${1}"
