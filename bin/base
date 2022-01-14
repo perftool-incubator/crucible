@@ -118,3 +118,26 @@ function root_or_die {
         exit_error "You must run this as root, exiting" $EC_FAIL_USER
     fi
 }
+
+function send_notification {
+    local message="$@"
+    local RC
+
+    if [ ! -e ${USER_STORE}/ntfy.yml ]; then
+        # notifications via ntfy are not configured
+        return 0
+    fi
+
+    ${podman_run} --name crucible-send-notification-${SESSION_ID} ${container_common_args[@]} $CRUCIBLE_CONTAINER_IMAGE \
+                  ntfy \
+                  -c ${USER_STORE}/ntfy.yml \
+                  -t "Crucible Notification from $(hostname) at $(get_timestamp)" \
+                  send "${message}"
+    RC=$?
+
+    if [ ${RC} != 0 ]; then
+        echo "ERROR: Failed to send notification"
+    fi
+
+    return ${RC}
+}
