@@ -381,7 +381,7 @@ def run_results_ls_mode():
 
 
 def split_tag(tag):
-    return re.search(r"^([a-zA-Z0-9-_\s]+):([a-zA-Z0-9-_:\s\\/]+)$", tag)
+    return re.search(r"^([a-zA-Z0-9-_\s]+):([a-zA-Z0-9-_:\s\\/\.]+)$", tag)
 
 
 def add_tags(data):
