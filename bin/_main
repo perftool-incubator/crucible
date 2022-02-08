@@ -509,16 +509,17 @@ elif [ "${1}" == "run" ]; then
 
     tool_params_file=${base_run_dir}/config/tool-params.json
     if [ ! -e ${tool_params} ]; then
+        cp $rs_dir/config/tool-params.json ${tool_params_file}
         echo "You do not have a \"tool-params.json\" in the current directory and have not explicitly"
         echo "specified where to find a tool parameters file with \"--tools-params=<file>\"."
         echo ""
-        echo "Crucible will use the default tools found in $rs_dir/config/tool-params.json."
+        echo "Crucible will use the default tools found in $rs_dir/config/tool-params.json:"
+        cat ${tool_params_file}
         echo ""
         echo "If you wish to use different tools, create a tool parameters file which adheres to"
         echo "the proper schema ($rs_dir/schema/tools/json) and either place that file in the"
         echo "current directory named \"tool-params.json\" or explicitly specify it with"
         echo "\"--tool-params=<file>\"."
-        cp $rs_dir/config/tool-params.json ${tool_params_file}
     else
         cp ${tool_params} ${tool_params_file}
     fi
