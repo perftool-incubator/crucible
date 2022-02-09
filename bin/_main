@@ -409,6 +409,7 @@ elif [ "${1}" == "run" ]; then
     tool_params="tool-params.json"
     use_mv_params=0
     mv_params=""
+    no_tools=0
 
     passthru_args=()
     while [ $# -gt 0 ]; do
@@ -436,6 +437,9 @@ elif [ "${1}" == "run" ]; then
                 val=${1}
                 shift
                 tool_params=${1}
+                ;;
+            "--no-tools")
+                no_tools=1
                 ;;
             *)
                 passthru_args+=("${arg}")
@@ -508,19 +512,27 @@ elif [ "${1}" == "run" ]; then
     fi
 
     tool_params_file=${base_run_dir}/config/tool-params.json
-    if [ ! -e ${tool_params} ]; then
-        echo "You do not have a \"tool-params.json\" in the current directory and have not explicitly"
-        echo "specified where to find a tool parameters file with \"--tools-params=<file>\"."
-        echo ""
-        echo "Crucible will use the default tools found in $rs_dir/config/tool-params.json."
-        echo ""
-        echo "If you wish to use different tools, create a tool parameters file which adheres to"
-        echo "the proper schema ($rs_dir/schema/tools/json) and either place that file in the"
-        echo "current directory named \"tool-params.json\" or explicitly specify it with"
-        echo "\"--tool-params=<file>\"."
-        cp $rs_dir/config/tool-params.json ${tool_params_file}
+    if [ "${no_tools}" == "0" ]; then
+        if [ ! -e ${tool_params} ]; then
+            cp $rs_dir/config/tool-params.json ${tool_params_file}
+            echo "You do not have a \"tool-params.json\" in the current directory and have not explicitly"
+            echo "specified where to find a tool parameters file with \"--tools-params=<file>\"."
+            echo ""
+            echo "Crucible will use the default tools found in $rs_dir/config/tool-params.json:"
+            cat ${tool_params_file}
+            echo ""
+            echo "If you wish to use different tools, create a tool parameters file which adheres to"
+            echo "the proper schema ($rs_dir/schema/tools/json) and either place that file in the"
+            echo "current directory named \"tool-params.json\" or explicitly specify it with"
+            echo "\"--tool-params=<file>\"."
+            echo ""
+            echo "You can also disable tools entirely using the \"--no-tools\" parameter."
+        else
+            cp ${tool_params} ${tool_params_file}
+        fi
     else
-        cp ${tool_params} ${tool_params_file}
+        echo "Disabling all tools due to --no-tools"
+        echo "[]" > ${tool_params_file}
     fi
 
     params_args=""
