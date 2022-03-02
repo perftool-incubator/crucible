@@ -358,7 +358,7 @@ def run_results_ls_mode():
             if myglobal.args.mode != "completion" and len(myglobal.args.filters) and myglobal.args.filter_type == "name":
                 for filter in myglobal.args.filters:
                     filter_dir_list = run_dir.glob(filter)
-                    dir_list.extend(filter_dir_list)
+                    dir_list.extend(sorted(filter_dir_list))
 
                 # remove any duplicate entries by creating a set
                 dir_list = set(dir_list)
@@ -366,7 +366,7 @@ def run_results_ls_mode():
                 # convert from a set back to a list
                 dir_list = list(dir_list)
             else:
-                dir_list.extend(run_dir.iterdir())
+                dir_list.extend(sorted(run_dir.iterdir()))
 
             for result in dir_list:
                 if result.name == "latest":
