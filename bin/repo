@@ -110,7 +110,7 @@ function repo_details() {
     fi
     local section_title_length=$(echo ${section_title} | wc -c)
     local width=80
-    local header_width=$(echo "(${width} - ${section_title_length}) / 2" | bc)
+    local header_width=$(( (${width} - ${section_title_length}) / 2 ))
     local header=$(printf "%0${header_width}d" 0 | sed -e 's/0/#/g')
     local footer=$(printf "%0${width}d" 0 | sed -e 's/0/*/g')
 

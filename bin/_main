@@ -575,7 +575,11 @@ elif [ "${1}" == "run" ]; then
         logfile="${base_run_dir}/crucible.log.xz"
         echo "Archiving crucible log to ${logfile}"
         crucible_log view ${LOG_DB} sessionid ${SESSION_ID} | xz -9 -T0 > ${logfile}
-        RC=$(echo ${PIPESTATUS[@]} | sed 's/ /+/g' | bc)
+        PIPES_RCS=$(echo ${PIPESTATUS[@]})
+        RC=0
+        for PIPE_RC in ${PIPES_RC}; do
+            RC=$(( ${RC} + ${PIPE_RC} ))
+        done
         if [ ${EXIT_VAL} == 0 ]; then
             EXIT_VAL=${RC}
         fi
