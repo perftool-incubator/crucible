@@ -130,6 +130,7 @@ def process_options():
 
 def load_rickshaw_run(result_directory):
     data = None
+    status = "complete"
 
     rickshaw_run_output = result_directory / 'run' / 'rickshaw-run.json.xz'
     if rickshaw_run_output.exists():
@@ -137,48 +138,108 @@ def load_rickshaw_run(result_directory):
         with lzma.open(rickshaw_run_output, 'rt') as json_file:
             data = json.load(json_file)
     else:
+        myglobal.log.debug("did not find %s" % (rickshaw_run_output))
+
         rickshaw_run_output = result_directory / 'run' / 'rickshaw-run.json'
         if rickshaw_run_output.exists():
             myglobal.log.debug("found %s" % (rickshaw_run_output))
             with open(rickshaw_run_output, 'rt') as json_file:
                 data = json.load(json_file)
+        else:
+            myglobal.log.debug("did not find %s" % (rickshaw_run_output))
 
-    return data
+            myglobal.log.debug("incomplete run")
+            status = "incomplete"
+
+            rickshaw_run_output = result_directory / 'config' / 'rickshaw-run.json.xz'
+            if rickshaw_run_output.exists():
+                myglobal.log.debug("found %s" % (rickshaw_run_output))
+                with lzma.open(rickshaw_run_output, 'rt') as json_file:
+                    data = json.load(json_file)
+            else:
+                myglobal.log.debug("did not find %s" % (rickshaw_run_output))
+
+                rickshaw_run_output = result_directory / 'run' / 'rickshaw-run.json'
+                if rickshaw_run_output.exists():
+                    myglobal.log.debug("found %s" % (rickshaw_run_output))
+                    with open(rickshaw_run_output, 'rt') as json_file:
+                        data = json.load(json_file)
+                else:
+                    myglobal.log.debug("did not find %s" % (rickshaw_run_output))
+
+    return data, status
 
 
 def write_json_fp(json_fp, json_data):
     return json.dump(json_data, json_fp, indent = 4, separators = (',', ': '), sort_keys = True)
 
 
-def replace_rickshaw_run(result_directory, data):
+def backup_rickshaw_run(rickshaw_run):
     timestamp = datetime.datetime.fromtimestamp(time.time())
     timestamp = timestamp.strftime(".%Y-%m-%d_%H:%M:%S.%f")
 
+    rickshaw_run_backup = rickshaw_run.parent / (rickshaw_run.name + timestamp)
+    rickshaw_run.rename(rickshaw_run_backup)
+
+    return 0
+
+
+def new_rickshaw_run_xz(rickshaw_run, data):
+    with lzma.open(rickshaw_run, 'wt') as json_file:
+        write_json_fp(json_file, data)
+
+    return 0
+
+
+def new_rickshaw_run(rickshaw_run, data):
+    with open(rickshaw_run, 'wt') as json_file:
+        write_json_fp(json_file, data)
+
+    return 0
+
+
+def replace_rickshaw_run(result_directory, data):
     rickshaw_run_output = result_directory / 'run' / 'rickshaw-run.json.xz'
     if rickshaw_run_output.exists():
         myglobal.log.debug("found %s" % (rickshaw_run_output))
 
-        # backup old file
-        rickshaw_run_output_backup = rickshaw_run_output.parent / (rickshaw_run_output.name + timestamp)
-        rickshaw_run_output.rename(rickshaw_run_output_backup)
+        backup_rickshaw_run(rickshaw_run_output)
 
-        # create new file
-        with lzma.open(rickshaw_run_output, 'wt') as json_file:
-            write_json_fp(json_file, data)
+        new_rickshaw_run_xz(rickshaw_run_output, data)
     else:
+        myglobal.log.debug("did not find %s" % (rickshaw_run_output))
+
         rickshaw_run_output = result_directory / 'run' / 'rickshaw-run.json'
         if rickshaw_run_output.exists():
             myglobal.log.debug("found %s" % (rickshaw_run_output))
 
-            # backup old file
-            rickshaw_run_output_backup = rickshaw_run_output.parent / (rickshaw_run_output.name + timestamp)
-            rickshaw_run_output.rename(rickshaw_run_output_backup)
+            backup_rickshaw_run(rickshaw_run_output)
 
-            # create new file
-            with open(rickshaw_run_output, 'wt') as json_file:
-                write_json_fp(json_file, data)
+            new_rickshaw_run(rickshaw_run_output, data)
         else:
-            return 1
+            myglobal.log.debug("did not find %s" % (rickshaw_run_output))
+
+            rickshaw_run_output = result_directory / 'config' / 'rickshaw-run.json.xz'
+            if rickshaw_run_output.exists():
+                myglobal.log.debug("found %s" % (rickshaw_run_ouput))
+
+                backup_rickshaw_run(rickshaw_run_output)
+
+                new_rickshaw_run_xz(rickshaw_run_output, data)
+            else:
+                myglobal.log.debug("did not find %s" % (rickshaw_run_output))
+
+                rickshaw_run_output = result_directory / 'config' / 'rickshaw-run.json'
+                if rickshaw_run_output.exists():
+                    myglobal.log.debug("found %s" % (rickshaw_run_output))
+
+                    backup_rickshaw_run(rickshaw_run_output)
+
+                    new_rickshaw_run(rickshaw_run_output, data)
+                else:
+                    myglobal.log.debug("did not find %s" % (rickshaw_run_output))
+
+                    return 1
 
     return 0
 
@@ -195,7 +256,7 @@ def validate_result_directory(result_directory):
     return 0
 
 
-def log_result_directory(result_directory):
+def log_result_directory(result_directory, result_status):
     if myglobal.args.mode == "completion":
         # completion mode uses a very terse output data to feed into a
         # bash tab completion engine
@@ -211,6 +272,8 @@ def log_result_directory(result_directory):
         else:
             symlink_target = result_directory.readlink()
             myglobal.log.info("result: %s -> %s" % (result_directory.name, symlink_target.name))
+
+        myglobal.log.info("status: %s" % (result_status))
 
     return 0
 
@@ -284,7 +347,7 @@ def ls_result_directory(result_directory):
     if validate_result_directory(result_directory):
         return 1
 
-    data = load_rickshaw_run(result_directory)
+    data, status = load_rickshaw_run(result_directory)
 
     if myglobal.args.mode != "completion" and len(myglobal.args.filters) and myglobal.args.filter_type == "tags":
         if data is not None:
@@ -306,7 +369,7 @@ def ls_result_directory(result_directory):
             myglobal.log.debug("result directory '%s' has no rickshaw-run" % (result_directory))
             return 0
 
-    log_result_directory(result_directory)
+    log_result_directory(result_directory, status)
 
     if myglobal.args.type == "short":
         pass
@@ -449,9 +512,9 @@ def run_results_tag_mode():
     if validate_result_directory(run_dir):
         return 1
 
-    log_result_directory(run_dir)
+    data, status = load_rickshaw_run(run_dir)
 
-    data = load_rickshaw_run(run_dir)
+    log_result_directory(run_dir, status)
 
     if data is not None:
         if myglobal.args.action == "ls":
