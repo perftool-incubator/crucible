@@ -373,11 +373,11 @@ elif [ "${1}" == "es" ]; then
             fi
         fi
         if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
-            if pushd $var_crucible/run >/dev/null; then
+            if pushd ${var_run_crucible} >/dev/null; then
                 for base_run_dir in `/bin/ls | grep -v latest`; do
                     if [ -d "$base_run_dir" ]; then
                         echo "Going to post-process and index $base_run_dir"
-                        post_process_run "${var_crucible}/run/${base_run_dir}"
+                        post_process_run "${var_run_crucible}/${base_run_dir}"
                         RC=$?
                         if [ ${RC} != 0 ]; then
                             echo "ERROR: Failed to post-process ${base_run_dir} [rc=${RC}]"
@@ -386,7 +386,7 @@ elif [ "${1}" == "es" ]; then
                 done
                 popd >/dev/null
             else
-                echo "ERROR: Could not chdir to $var_crucible/run"
+                echo "ERROR: Could not chdir to ${var_run_crucible}"
                 EXIT_VAL=1
             fi
         fi
@@ -403,7 +403,7 @@ elif [ "${1}" == "run" ]; then
     shift
     benchmark=${1}
     shift
-    base_run_dir="${var_crucible}/run/${benchmark}--${datetime}--${SESSION_ID}"
+    base_run_dir="${var_run_crucible}/${benchmark}--${datetime}--${SESSION_ID}"
 
     bench_params="bench-params.json"
     tool_params="tool-params.json"
@@ -453,10 +453,10 @@ elif [ "${1}" == "run" ]; then
         exit_error "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
     fi
     mkdir -pv "$base_run_dir/config" >/dev/null
-    if [ -e "$var_crucible/run/latest" ]; then
-        /bin/rm "$var_crucible/run/latest"
+    if [ -e "${var_run_crucible}/latest" ]; then
+        /bin/rm "${var_run_crucible}/latest"
     fi
-    ln -sf "$base_run_dir" "$var_crucible/run/latest"
+    ln -sf "$base_run_dir" "${var_run_crucible}/latest"
     benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
 
