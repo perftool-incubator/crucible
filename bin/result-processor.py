@@ -23,6 +23,7 @@ class global_vars:
     log_normal_format = '%(message)s'
     log = None
     run_dir = None
+    archive_dir = None
 
 
 def process_options():
@@ -35,6 +36,12 @@ def process_options():
                         help = "Where are the Crucible run results stored",
                         type = str,
                         default = "/var/lib/crucible/run")
+
+    parser.add_argument("--crucible-archive-dir",
+                        dest = "crucible_archive_dir",
+                        help = "Where are the Crucible run archives stored",
+                        type = str,
+                        default = "/var/lib/crucible/archive")
 
     parser.add_argument("--log-level",
                         dest = "log_level",
@@ -53,7 +60,7 @@ def process_options():
     parser_completion.add_argument("--type",
                                    dest = "type",
                                    help = "What type of listing to return for tab completion usage",
-                                   choices = [ "run-dir", "run-id" ],
+                                   choices = [ "run-dir", "run-id", "archive" ],
                                    type = str,
                                    default = "run-dir")
 
@@ -126,6 +133,7 @@ def process_options():
     # allow for this to eventually be discovered by an environment
     # variable in addition to the CLI argument
     myglobal.run_dir = myglobal.args.crucible_run_dir
+    myglobal.archive_dir = myglobal.args.crucible_archive_dir
 
 
 def load_rickshaw_run(result_directory):
@@ -256,6 +264,18 @@ def validate_result_directory(result_directory):
     return 0
 
 
+def validate_archive(archive):
+    if not archive.exists():
+        myglobal.log.error("The requested archive does not exist [%s]" % (archive))
+        return 1
+
+    if archive.is_dir():
+        myglobal.log.error("The requested archive is a directory [%s]" % (archive))
+        return 1
+
+    return 0
+
+
 def log_result_directory(result_directory, result_status):
     if myglobal.args.mode == "completion":
         # completion mode uses a very terse output data to feed into a
@@ -274,6 +294,21 @@ def log_result_directory(result_directory, result_status):
             myglobal.log.info("result: %s -> %s" % (result_directory.name, symlink_target.name))
 
         myglobal.log.info("status: %s" % (result_status))
+
+    return 0
+
+
+def log_archive(archive):
+    if myglobal.args.mode == "completion":
+        # completion mode uses a very terse output data to feed into a
+        # bash tab completion engine
+        if not archive.is_symlink():
+            myglobal.log.info("%s" % (archive))
+        else:
+            symlink_target = archive.readlink()
+            myglobal.log.info("%s" % (symlink_target))
+    else:
+        return 1
 
     return 0
 
@@ -342,6 +377,14 @@ def check_for_tag_filter(data, tag_filter):
 
     return 1
 
+def ls_archive(archive):
+    if validate_archive(archive):
+        return 1
+
+    log_archive(archive)
+
+    return 0
+
 
 def ls_result_directory(result_directory):
     if validate_result_directory(result_directory):
@@ -407,6 +450,25 @@ def ls_result_directory(result_directory):
 
     if myglobal.args.mode != "completion":
         myglobal.log.info("")
+
+    return 0
+
+
+def archives_ls_mode():
+    archive_dir = Path(myglobal.archive_dir)
+    if archive_dir.exists() and archive_dir.is_dir():
+        archive_list = []
+        archive_list.extend(archive_dir.iterdir())
+
+        archive_list = sorted(archive_list)
+        for archive in archive_list:
+            if archive.name == "latest":
+                continue
+
+            ls_archive(archive)
+    else:
+        myglobal.log.error("Invalid Crucible archive directory '%s'!" % (myglobal.archive_Dir))
+        return 1
 
     return 0
 
@@ -542,7 +604,10 @@ def main():
     process_options()
 
     if myglobal.args.mode == "ls" or myglobal.args.mode == "completion":
-        return run_results_ls_mode()
+        if myglobal.args.type == "archive":
+            return archives_ls_mode()
+        else:
+            return run_results_ls_mode()
     elif myglobal.args.mode == "tags":
         return run_results_tag_mode()
 

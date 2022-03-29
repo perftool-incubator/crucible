@@ -44,6 +44,7 @@ container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
 var_crucible="/var/lib/crucible"
 var_run_crucible="${var_crucible}/run"
+var_archive_crucible="${var_crucible}/archive"
 podman_pull="podman pull"
 podman_stop="podman stop"
 podman_rm="podman rm"

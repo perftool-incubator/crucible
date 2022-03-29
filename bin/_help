@@ -38,6 +38,8 @@ function help() {
     echo "ls                    |  List the run results with optional arguments"
     echo "tags                  |  Manage the tags associated with run results"
     echo "notify test           |  Check if the notification service is working properly"
+    echo "archive <dir>         |  Create an archive of the run result pointed to by <dir> and remove it from the run directory"
+    echo "unarchive <archive>   |  Unpack an archive named <archive> and put it back in the run directory"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
