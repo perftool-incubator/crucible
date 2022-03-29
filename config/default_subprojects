@@ -22,5 +22,6 @@ ftrace               tool           /tool-ftrace                                
 kernel               tool           /tool-kernel                                    master
 ovs                  tool           /tool-ovs                                       master
 tcpdump              tool           /tool-tcpdump                                   main
+rt-trace-bpf         tool           /tool-rt-trace-bpf                              main
 flexran              benchmark      /bench-flexran                                  main
 examples             doc            /crucible-examples                              main
