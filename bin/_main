@@ -299,7 +299,7 @@ function unarchive_run() {
     echo "Unpacking archive:"
     $podman_run --name crucible-unarchive-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${UNARCHIVE_CMD}"
     if [ $? == 0 ]; then
-        echo "${ARCHIVE_FILE} sucessfully unpacked to ${var_run_crucible}/${RUN_NAME}"
+        echo "${ARCHIVE_FILE} successfully unpacked to ${var_run_crucible}/${RUN_NAME}"
 
         echo "Removing archived data:"
         echo -e "\t${ARCHIVE_NAME}"
