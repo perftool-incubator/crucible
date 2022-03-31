@@ -44,6 +44,8 @@ fi
 check_id
 
 /bin/mkdir -p $var_crucible
+/bin/mkdir -p ${var_run_crucible}
+/bin/mkdir -p ${var_archive_crucible}
 
 function setup_pipe() {
     local PIPE=${1}
