@@ -746,12 +746,18 @@ elif [ "${1}" == "notify" ]; then
     fi
 elif [ "${1}" == "archive" ]; then
     shift
-    archive_run "${1}"
-    EXIT_VAL=$?
+    while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
+        archive_run "${1}"
+        EXIT_VAL=$?
+        shift
+    done
 elif [ "${1}" == "unarchive" ]; then
     shift
-    unarchive_run "${1}"
-    EXIT_VAL=$?
+    while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
+        unarchive_run "${1}"
+        EXIT_VAL=$?
+        shift
+    done
 elif [ "${1}" == "wrapper" ]; then
     shift
     $podman_run --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
