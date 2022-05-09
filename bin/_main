@@ -41,12 +41,31 @@ container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 container_rs_run_args=()
 container_rs_run_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
 
+function open_firewall_port() {
+    local port
+    local protocol
+    local firewall_mgmt
+
+    port=${1}; shift
+    protocol=${1}; shift
+    firewall_mgmt="firewall-cmd"
+
+    case "${firewall_mgmt}" in
+        "firewall-cmd"|*)
+            local default_firewall_zone
+
+            default_firewall_zone=$(firewall-cmd --get-default-zone)
+            firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol}
+            ;;
+    esac
+}
+
 function start_httpd() {
     local RC httpd_cmd
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
     echo -n "Checking for httpd"
     if ! podman_running crucible-httpd; then
-        firewall-cmd --zone=public --add-port=8080/tcp >/dev/null 2>&1
+        open_firewall_port 8080 tcp
         $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd
         RC=$?
         if [ ${RC} != 0 ]; then
@@ -61,7 +80,7 @@ function start_redis() {
     redis_cmd="redis-server /etc/redis.conf"
     echo -n "Checking for redis"
     if ! podman_running crucible-redis; then
-        firewall-cmd --zone=public --add-port=6379/tcp >/dev/null 2>&1
+        open_firewall_port 6379 tcp
         $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
         RC=$?
         if [ ${RC} != 0 ]; then
@@ -79,7 +98,8 @@ function start_es() {
     es_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cat/indices"
     echo -n "Checking for elasticsearch"
     if ! podman_running crucible-es; then
-        firewall-cmd --zone=public --add-port=9200/tcp --add-port=9300/tcp >/dev/null 2>&1
+        open_firewall_port 9200 tcp
+        open_firewall_port 9300 tcp
         mkdir -p "$var_crucible/es"
         common_container_args=()
         for arg in "${container_common_args[@]}"; do
