@@ -34,7 +34,10 @@
         "nodejs",
         "motd",
         "bc",
-        "sshpass"
+        "sshpass",
+        "dnf",
+        "gh-cli-repo",
+        "gh-cli"
       ]
     }
   ],
@@ -322,7 +325,7 @@
         ]
       }
     },
-        {
+    {
       "name": "perl-modules",
       "type": "cpan",
       "cpan_info": {
@@ -335,6 +338,33 @@
           "DBI DBD::SQLite",
           "IO::Uncompress::UnXz",
           "IO::Compress::Xz"
+        ]
+      }
+    },
+    {
+      "name": "dnf",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "\"dnf-command(config-manager)\""
+        ]
+      }
+    },
+    {
+      "name": "gh-cli-repo",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo"
+        ]
+      }
+    },
+    {
+      "name": "gh-cli",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "gh"
         ]
       }
     }
