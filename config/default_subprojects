@@ -24,4 +24,5 @@ ovs                  tool           /tool-ovs                                   
 tcpdump              tool           /tool-tcpdump                                   main
 rt-trace-bpf         tool           /tool-rt-trace-bpf                              main
 flexran              benchmark      /bench-flexran                                  main
+iperf                benchmark      /bench-iperf                                    main
 examples             doc            /crucible-examples                              main
