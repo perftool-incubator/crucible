@@ -58,3 +58,28 @@ jobs:
         ci_target_dir: ${{ github.workspace }}/crucible
         repeat_runs: "yes"
         scenarios: "uperf"
+
+  crucible-ci-iteration-repeat-runs-iperf:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "iperf"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        repeat_runs: "yes"
+        scenarios: "iperf"
