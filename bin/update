@@ -139,8 +139,8 @@ case "${repo}" in
 esac
 
 if [ "${repo}" == "____all" ]; then
-    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-        for tmp_repo in $(find . -type l | sed 'sX./XX'); do
+    if pushd ${CRUCIBLE_HOME}/subprojects > /dev/null; then
+        for tmp_repo in $(find . -maxdepth 2 -mindepth 2 -type l | sed 'sX./XX'); do
             echo
             echo "Updating ${tmp_repo}:"
             echo
@@ -151,6 +151,9 @@ if [ "${repo}" == "____all" ]; then
             fi
         done
         popd > /dev/null
+    else
+        echo "Could not pushd to ${CRUCIBLE_HOME}/subprojects"
+        exit 1
     fi
 fi
 
