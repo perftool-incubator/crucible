@@ -117,14 +117,20 @@ case "${repo}" in
         ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
         ;;
     *)
-        echo
-        echo "Updating ${repo}:"
-        echo
+        repo_dir=$(find ${CRUCIBLE_HOME}/subprojects -maxdepth 2 -mindepth 2 -name ${repo} -type l)
+        if [ -n "${repo_dir}" ]; then
+            echo
+            echo "Updating ${repo}:"
+            echo
 
-        if pushd $CRUCIBLE_HOME/subprojects/${repo} > /dev/null; then
-            $CRUCIBLE_HOME/bin/_update-git
-            popd > /dev/null
-            exit
+            if pushd "${repo_dir}" > /dev/null; then
+                $CRUCIBLE_HOME/bin/_update-git
+                popd > /dev/null
+                exit
+            else
+                echo "Could not pushd to ${repo_dir}"
+                exit 1
+            fi
         else
             echo "Invalid repo '${repo}'."
             exit 1
