@@ -40,6 +40,7 @@ function help() {
     echo "notify test           |  Check if the notification service is working properly"
     echo "archive <dir>         |  Create an archive of the run result pointed to by <dir> and remove it from the run directory"
     echo "unarchive <archive>   |  Unpack an archive named <archive> and put it back in the run directory"
+    echo "run-ci                |  Run crucible-ci stage1.  For development testing purposes only!"
     echo ""
     echo "For more detailed help for each command, try:"
     echo "  crucible help <command>"
