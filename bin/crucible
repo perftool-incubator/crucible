@@ -107,6 +107,7 @@ elif [ "${1}" == "run-ci" ]; then
     if [ "${confirm}" == "Y" -o "${confirm}" == "YES" ]; then
 	exec ${CRUCIBLE_HOME}/subprojects/core/crucible-ci/.github/actions/integration-tests/run-ci-stage1 --disable-update-test "$@"
     else
+	echo "Canceling run-ci"
 	exit
     fi
 fi
