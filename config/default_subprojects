@@ -9,6 +9,7 @@ CommonDataModel      core           /CommonDataModel                            
 toolbox              core           /toolbox                                        main
 packrat              core           /packrat                                        master
 registry             core           /registry                                       main
+crucible-ci          core           /crucible-ci                                    main
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
 oslat                benchmark      /bench-oslat                                    master
