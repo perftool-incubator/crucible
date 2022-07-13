@@ -1,18 +1,17 @@
+# as described here: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/troubleshooting-required-status-checks#handling-skipped-but-required-checks
+
 # Basic ci workflow using github actions
 name: CI
 
 # Controls when the action will run.
 on:
   # Triggers the workflow on pull request events but only for the master branch
-  # ignore pull requests that only change documentation/license files
+  # only for pull requests that only change documentation/license files
   pull_request:
     branches: [ master ]
-    paths-ignore:
+    paths:
       - LICENSE
       - '*.md'
-
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -23,8 +22,4 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
-
-      - name: Run install tests
-        run: ./tests/test-installer
+      - run: 'echo "No build required" '

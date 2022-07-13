@@ -1,0 +1,31 @@
+# as described here: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/troubleshooting-required-status-checks#handling-skipped-but-required-checks
+
+name: crucible-ci
+
+on:
+  # run pull request events for the master branch only
+  # only for pull requests that only change documentation/license files
+  pull_request:
+    branches: [ master ]
+    paths:
+      - LICENSE
+      - '*.md'
+
+jobs:
+  crucible-ci-iteration-repeat-runs-fio:
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: 'echo "No build required" '
+
+  crucible-ci-iteration-repeat-runs-uperf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: 'echo "No build required" '
+
+  crucible-ci-iteration-repeat-runs-iperf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: 'echo "No build required" '
