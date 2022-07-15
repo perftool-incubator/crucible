@@ -1,9 +1,13 @@
 name: crucible-ci
 
 on:
-  # run on push or pull request events for the master branch only
+  # run pull request events for the master branch only
+  # ignore pull requests that only change documentation/license files
   pull_request:
     branches: [ master ]
+    paths-ignore:
+      - LICENSE
+      - '*.md'
 
   # allow for manual invocation from the actions tab
   workflow_dispatch:
