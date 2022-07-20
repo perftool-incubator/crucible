@@ -54,8 +54,11 @@ function open_firewall_port() {
         "firewall-cmd"|*)
             local default_firewall_zone
 
-            default_firewall_zone=$(firewall-cmd --get-default-zone)
-            firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol}
+            if firewall-cmd --state > /dev/null 2>&1; then
+                # firewalld is running...
+                default_firewall_zone=$(firewall-cmd --get-default-zone)
+                firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol}
+            fi
             ;;
     esac
 }
