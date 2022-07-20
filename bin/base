@@ -58,7 +58,7 @@ function podman_running() {
     fi
 
     if ${podman_exists} ${pod}; then
-        check_output=$(podman ps --noheading --filter status=running --filter name=${pod})
+        check_output=$(podman ps --filter status=running --filter name=${pod} | grep -v CREATED)
 
         if [ -n "${check_output}" ]; then
             echo "...appears to be running"
