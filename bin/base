@@ -59,6 +59,7 @@ podman_pull="podman_wrapper pull"
 podman_stop="podman_wrapper stop"
 podman_rm="podman_wrapper rm"
 podman_run="podman_wrapper run --pull=missing"
+podman_run_interactive="podman run --pull=missing"
 podman_exists="podman_wrapper container exists"
 podman_ps="podman_wrapper ps"
 
