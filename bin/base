@@ -45,11 +45,22 @@ container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 var_crucible="/var/lib/crucible"
 var_run_crucible="${var_crucible}/run"
 var_archive_crucible="${var_crucible}/archive"
-podman_pull="podman pull"
-podman_stop="podman stop"
-podman_rm="podman rm"
-podman_run="podman run --pull=missing"
-podman_exists="podman container exists"
+
+function podman_wrapper() {
+    local RC
+
+    podman "$@" 2>&1 | grep --line-buffered -v "level=warning"
+    RC=${PIPESTATUS[0]}
+
+    return ${RC}
+}
+
+podman_pull="podman_wrapper pull"
+podman_stop="podman_wrapper stop"
+podman_rm="podman_wrapper rm"
+podman_run="podman_wrapper run --pull=missing"
+podman_exists="podman_wrapper container exists"
+podman_ps="podman_wrapper ps"
 
 function podman_running() {
     pod=${1}
@@ -58,7 +69,7 @@ function podman_running() {
     fi
 
     if ${podman_exists} ${pod}; then
-        check_output=$(podman ps --filter status=running --filter name=${pod} | grep -v CREATED)
+        check_output=$(${podman_ps} --filter status=running --filter name=${pod} | grep -v CREATED)
 
         if [ -n "${check_output}" ]; then
             echo "...appears to be running"
