@@ -460,6 +460,10 @@ elif [ "${1}" == "start" ]; then
         shift
         start_es
         EXIT_VAL=$?
+    elif [ "${1}" == "redis" ]; then
+        shift
+        start_redis
+        EXIT_VAL=$?
     fi
 elif [ "${1}" == "get" ]; then
     shift
