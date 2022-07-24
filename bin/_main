@@ -54,10 +54,10 @@ function open_firewall_port() {
         "firewall-cmd"|*)
             local default_firewall_zone
 
-            if firewall-cmd --state > /dev/null 2>&1; then
+            if firewall-cmd --state --quiet; then
                 # firewalld is running...
                 default_firewall_zone=$(firewall-cmd --get-default-zone)
-                firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol}
+                firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol} --quiet
             fi
             ;;
     esac
@@ -69,7 +69,7 @@ function start_httpd() {
     echo -n "Checking for httpd"
     if ! podman_running crucible-httpd; then
         open_firewall_port 8080 tcp
-        $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd
+        $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start httpd"
@@ -84,7 +84,7 @@ function start_redis() {
     echo -n "Checking for redis"
     if ! podman_running crucible-redis; then
         open_firewall_port 6379 tcp
-        $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
+        $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start redis"
@@ -111,7 +111,7 @@ function start_es() {
                 common_container_args+=("${arg}")
             fi
         done
-        $podman_run --name crucible-es "${common_container_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd
+        $podman_run --name crucible-es "${common_container_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start elasticsearch"
