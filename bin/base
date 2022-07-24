@@ -76,13 +76,13 @@ function podman_running() {
             echo "...appears to be running"
             return 0
         else
-            echo "...appears to be present but not running...fixing:"
+            echo "...appears to be present but not running...removing:"
             ${podman_stop} ${pod}
             ${podman_rm} ${pod}
             return 1
         fi
     else
-        echo "...not present, starting a container for it:"
+        echo "...not present"
         return 1
     fi
 }
