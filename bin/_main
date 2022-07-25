@@ -54,10 +54,10 @@ function open_firewall_port() {
         "firewall-cmd"|*)
             local default_firewall_zone
 
-            if firewall-cmd --state > /dev/null 2>&1; then
+            if firewall-cmd --state --quiet; then
                 # firewalld is running...
                 default_firewall_zone=$(firewall-cmd --get-default-zone)
-                firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol}
+                firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol} --quiet
             fi
             ;;
     esac
@@ -69,10 +69,27 @@ function start_httpd() {
     echo -n "Checking for httpd"
     if ! podman_running crucible-httpd; then
         open_firewall_port 8080 tcp
-        $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd
+        $podman_run --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $httpd_cmd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start httpd"
+        else
+            echo "Successfully started httpd"
+        fi
+    fi
+    return ${RC}
+}
+
+function stop_httpd() {
+    local RC=0
+    echo -n "Checking for httpd"
+    if podman_running crucible-httpd; then
+        ${podman_stop} crucible-httpd > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop httpd"
+        else
+            echo "Successfully stopped httpd"
         fi
     fi
     return ${RC}
@@ -84,10 +101,27 @@ function start_redis() {
     echo -n "Checking for redis"
     if ! podman_running crucible-redis; then
         open_firewall_port 6379 tcp
-        $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd
+        $podman_run --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $redis_cmd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start redis"
+        else
+            echo "Successfully started redis"
+        fi
+    fi
+    return ${RC}
+}
+
+function stop_redis() {
+    local RC=0
+    echo -n "Checking for redis"
+    if podman_running crucible-redis; then
+        ${podman_stop} crucible-redis > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop redis"
+        else
+            echo "Successfully stopped redis"
         fi
     fi
     return ${RC}
@@ -111,7 +145,7 @@ function start_es() {
                 common_container_args+=("${arg}")
             fi
         done
-        $podman_run --name crucible-es "${common_container_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd
+        $podman_run --name crucible-es "${common_container_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start elasticsearch"
@@ -135,8 +169,24 @@ function start_es() {
                 echo "ERROR: Elasticsearch failed to launch properly"
                 RC=1
             else
+                echo "Successfully started elasticsearch"
                 RC=0
             fi
+        fi
+    fi
+    return ${RC}
+}
+
+function stop_es() {
+    local RC=0
+    echo -n "Checking for elasticsearch"
+    if podman_running crucible-es; then
+        ${podman_stop} crucible-es > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop elasticsearch"
+        else
+            echo "Successfully stopped elasticsearch"
         fi
     fi
     return ${RC}
@@ -459,6 +509,25 @@ elif [ "${1}" == "start" ]; then
     elif [ "${1}" == "es" ]; then
         shift
         start_es
+        EXIT_VAL=$?
+    elif [ "${1}" == "redis" ]; then
+        shift
+        start_redis
+        EXIT_VAL=$?
+    fi
+elif [ "${1}" == "stop" ]; then
+    shift
+    if [ "${1}" == "httpd" ]; then
+        shift
+        stop_httpd
+        EXIT_VAL=$?
+    elif [ "${1}" == "es" ]; then
+        shift
+        stop_es
+        EXIT_VAL=$?
+    elif [ "${1}" == "redis" ]; then
+        shift
+        stop_redis
         EXIT_VAL=$?
     fi
 elif [ "${1}" == "get" ]; then
