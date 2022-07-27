@@ -49,7 +49,7 @@ var_archive_crucible="${var_crucible}/archive"
 function podman_wrapper() {
     local RC
 
-    podman "$@" 2>&1 | grep --line-buffered -v "level=warning"
+    podman --log-level error "$@" 2>&1 | grep --line-buffered -v "level=warning\|WARNING: The same type, major and minor should not be used for multiple devices."
     RC=${PIPESTATUS[0]}
 
     return ${RC}
