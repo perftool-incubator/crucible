@@ -41,6 +41,18 @@ container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 container_rs_run_args=()
 container_rs_run_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
 
+function get_firewall_mgmt_tool() {
+    local firewall_tool
+
+    for firewall_tool in firewall-cmd ufw; do
+        command -v ${firewall_tool} > /dev/null
+        if [ $? -eq 0 ]; then
+            echo ${firewall_tool}
+            break
+        fi
+    done
+}
+
 function open_firewall_port() {
     local port
     local protocol
@@ -49,14 +61,7 @@ function open_firewall_port() {
     port=${1}; shift
     protocol=${1}; shift
 
-    firewall_mgmt_tool=""
-    for firewall_tool in firewall-cmd ufw; do
-        command -v ${firewall_tool} > /dev/null
-        if [ $? -eq 0 ]; then
-            firewall_mgmt_tool=${firewall_tool}
-            break
-        fi
-    done
+    firewall_mgmt_tool=$(get_firewall_mgmt_tool)
 
     case "${firewall_mgmt_tool}" in
         "firewall-cmd")
@@ -83,6 +88,41 @@ function open_firewall_port() {
     esac
 }
 
+function close_firewall_port() {
+    local port
+    local protocol
+    local firewall_mgmt_tool
+
+    port=${1}; shift
+    protocol=${1}; shift
+
+    firewall_mgmt_tool=$(get_firewall_mgmt_tool)
+
+    case "${firewall_mgmt_tool}" in
+        "firewall-cmd")
+            local default_firewall_zone
+
+            if firewall-cmd --state --quiet; then
+                # firewalld is running...
+                default_firewall_zone=$(firewall-cmd --get-default-zone)
+                firewall-cmd --zone=${default_firewall_zone} --remove-port=${port}/${protocol} --quiet
+            fi
+            ;;
+        "ufw")
+            if [ "$(ufw status | grep Status | awk '{ print $2 }')" == "active" ]; then
+                ufw delete allow ${port}/${protocol} > /dev/null
+            fi
+            ;;
+        *)
+            if [ -z "${firewall_mgmt_tool}" ]; then
+                echo "Could not determine how to manage the firewall.  Please ensure ${port}/${protocol} is closed on this host."
+            else
+                echo "Unknown firewall management tool '${firewall_mgmt_tool}' encountered.  Please ensure ${port}/${protocol} is closed on this host."
+            fi
+            ;;
+    esac
+}
+
 function start_httpd() {
     local RC httpd_cmd
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
@@ -104,6 +144,7 @@ function stop_httpd() {
     local RC=0
     echo -n "Checking for httpd"
     if podman_running crucible-httpd; then
+        close_firewall_port 8080 tcp
         ${podman_stop} crucible-httpd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
@@ -136,6 +177,7 @@ function stop_redis() {
     local RC=0
     echo -n "Checking for redis"
     if podman_running crucible-redis; then
+        close_firewall_port 6379 tcp
         ${podman_stop} crucible-redis > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
@@ -201,6 +243,8 @@ function stop_es() {
     local RC=0
     echo -n "Checking for elasticsearch"
     if podman_running crucible-es; then
+        close_firewall_port 9200 tcp
+        close_firewall_port 9300 tcp
         ${podman_stop} crucible-es > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
