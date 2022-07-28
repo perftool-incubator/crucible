@@ -44,20 +44,40 @@ container_rs_run_args+=("--mount=type=bind,source=/var/lib/containers,destinatio
 function open_firewall_port() {
     local port
     local protocol
-    local firewall_mgmt
+    local firewall_mgmt_tool
 
     port=${1}; shift
     protocol=${1}; shift
-    firewall_mgmt="firewall-cmd"
 
-    case "${firewall_mgmt}" in
-        "firewall-cmd"|*)
+    firewall_mgmt_tool=""
+    for firewall_tool in firewall-cmd ufw; do
+        command -v ${firewall_tool} > /dev/null
+        if [ $? -eq 0 ]; then
+            firewall_mgmt_tool=${firewall_tool}
+            break
+        fi
+    done
+
+    case "${firewall_mgmt_tool}" in
+        "firewall-cmd")
             local default_firewall_zone
 
             if firewall-cmd --state --quiet; then
                 # firewalld is running...
                 default_firewall_zone=$(firewall-cmd --get-default-zone)
                 firewall-cmd --zone=${default_firewall_zone} --add-port=${port}/${protocol} --quiet
+            fi
+            ;;
+        "ufw")
+            if [ "$(ufw status | grep Status | awk '{ print $2 }')" == "active" ]; then
+                ufw allow ${port}/${protocol} > /dev/null
+            fi
+            ;;
+        *)
+            if [ -z "${firewall_mgmt_tool}" ]; then
+                echo "Could not determine how to manage the firewall.  Please ensure ${port}/${protocol} is open on this host."
+            else
+                echo "Unknown firewall management tool '${firewall_mgmt_tool}' encountered.  Please ensure ${port}/${protocol} is open on this host."
             fi
             ;;
     esac
