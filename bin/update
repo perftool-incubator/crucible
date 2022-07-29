@@ -96,21 +96,9 @@ case "${repo}" in
         echo "Controller update:"
         echo
         echo "Shutting down existing controller pods:"
-        if ${podman_exists} crucible-es; then
-            ${podman_stop} crucible-es
-        else
-            echo "crucible-es is not running"
-        fi
-        if ${podman_exists} crucible-httpd; then
-            ${podman_stop} crucible-httpd
-        else
-            echo "crucible-httpd is not running"
-        fi
-        if ${podman_exists} crucible-redis; then
-            ${podman_stop} crucible-redis
-        else
-            echo "crucible-redis is not running"
-        fi
+        stop_es
+        stop_httpd
+        stop_redis
         echo
         echo "Checking for new controller image:"
         echo
