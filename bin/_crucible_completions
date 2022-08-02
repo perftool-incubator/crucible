@@ -47,7 +47,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "init rebuild" -- "${COMP_WORDS[2]}"))
                 ;;
             extract)
-                COMPREPLY=($(compgen -W "run-id" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "run-id primary-periods" -- "${COMP_WORDS[2]}"))
                 ;;
             ls)
                 COMPREPLY=($(compgen -W "--type --result-dir --filter-type --filters" -- "${COMP_WORDS[2]}"))
@@ -88,7 +88,7 @@ _crucible_completions() {
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "extract" ]; then
         case "${COMP_WORDS[2]}" in
-            run-id)
+            run-id|primary-periods)
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
