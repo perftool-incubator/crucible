@@ -133,6 +133,12 @@ elif [ "${1}" == "extract" ]; then
             EXIT_VAL=$?
             echo "${this_id}"
             ;;
+        primary-periods)
+            shift
+            period_ids=$(extract_primary_periods "${1}")
+            EXIT_VAL=$?
+            echo -e "${period_ids}"
+            ;;
         *)
             echo "ERROR: Unknown extract command ${1}"
             EXIT_VAL=1

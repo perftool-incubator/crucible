@@ -447,6 +447,76 @@ function extract_run_id() {
     return 1
 }
 
+function extract_primary_periods() {
+    local RUN_DIR
+    local json_files
+    local result_dumper
+    local ITERATION_NUM
+    local ITERATION_RC
+    local SAMPLE_NUM
+    local SAMPLE_RC
+    local PRIMARY_PERIOD_ID
+    local PRIMARY_PERIOD_RC
+    local SAMPLE_RC
+    local RC
+
+    RUN_DIR=${1}
+    shift
+
+    if [ -e ${RUN_DIR} -a -d ${RUN_DIR} ]; then
+        json_files=$(find -L "${RUN_DIR}" -name primary-period.json)
+        if [ -n "${json_files}" ]; then
+            result_dumper=cat
+        else
+            json_files=$(find -L "${RUN_DIR}" -name primary-period.json.xz)
+            if [ -n "${json_files}" ]; then
+                result_dumper=xzcat
+            else
+                echo "ERROR: Could not find a primary period json (primary-period.json[.xz])"
+                return 1
+            fi
+        fi
+
+        RC=0
+        for json_file in ${json_files}; do
+            SAMPLE_RC=0
+
+            ITERATION_NUM=$(${podman_run} --name crucible-extract-primary-periods-iteration-num-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"iteration\".\"num\"'")
+            ITERATION_RC=$?
+
+            if [ -z "${ITERATION_NUM}" -o ${ITERATION_RC} != 0 ]; then
+                SAMPLE_RC=1
+            else
+                SAMPLE_NUM=$(${podman_run} --name crucible-extract-primary-periods-sample-num-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"sample\".\"num\"'")
+                SAMPLE_RC=$?
+
+                if [ -z "${SAMPLE_NUM}" -o ${SAMPLE_RC} != 0 ]; then
+                    SAMPLE_RC=1
+                else
+                    PRIMARY_PERIOD_ID=$(${podman_run} --name crucible-extract-primary-periods-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"period\".\"id\"'")
+                    PRIMARY_PERIOD_RC=$?
+
+                    if [ -z "${PRIMARY_PERIOD_ID}" -o ${PRIMARY_PERIOD_RC} != 0 ]; then
+                        SAMPLE_RC=1
+                    fi
+                fi
+            fi
+
+            if [ ${SAMPLE_RC} == 0 ]; then
+                echo "${PRIMARY_PERIOD_ID}   Iteration: ${ITERATION_NUM}   Sample: ${SAMPLE_NUM}"
+            else
+                RC=1
+                echo "ERROR: Failed to extract primary period from ${json_file}"
+            fi
+        done
+
+        return ${RC}
+    else
+        echo "ERROR: Could not find run directory at ${RUN_DIR}"
+        return 1
+    fi
+}
+
 function post_process_run() {
     local rs_pp_b_cmd ps_pp_t_cmd rs_index_cmd cdm_query_cmd
     local run_json this_id RUN_DIR
