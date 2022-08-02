@@ -148,15 +148,7 @@ elif [ "${1}" == "es" ]; then
     shift
     if start_es; then
         if [ "${1}" == "init" -o "${1}" == "rebuild" ]; then
-            delete_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
-            init_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/init.sh"
-            if $podman_run --name crucible-es-delete "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $delete_es_cmd; then
-                if ! $podman_run --name crucible-es-init "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $init_es_cmd; then
-                    EXIT_VAL=$?
-                fi
-            else
-                EXIT_VAL=$?
-            fi
+            init_es
         fi
         if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
             if pushd ${var_run_crucible} >/dev/null; then
