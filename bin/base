@@ -42,6 +42,29 @@ container_log_args=()
 container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
+container_redis_args=()
+container_redis_args+=("-d")
+container_redis_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf")
+
+container_httpd_args=()
+container_httpd_args+=("-d")
+container_httpd_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/httpd/,destination=/etc/httpd/")
+
+container_es_args=()
+container_es_args+=("-d")
+#container_es_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/elasticsearch/,destination=/etc/elasticsearch/")
+
+container_rs_args=()
+container_rs_args+=("-i")
+container_rs_args+=("-e RS_REG_REPO=$CRUCIBLE_CLIENT_SERVER_REPO")
+container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
+container_rs_args+=("-e RS_REG_TLS_VERIFY=$CRUCIBLE_CLIENT_SERVER_TLS_VERIFY")
+container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
+container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
+
+container_rs_run_args=()
+container_rs_run_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
+
 var_crucible="/var/lib/crucible"
 var_run_crucible="${var_crucible}/run"
 var_archive_crucible="${var_crucible}/archive"
@@ -422,6 +445,76 @@ function extract_run_id() {
 
     echo "ERROR: unknown error extracting run-id from ${RUN_DIR}"
     return 1
+}
+
+function extract_primary_periods() {
+    local RUN_DIR
+    local json_files
+    local result_dumper
+    local ITERATION_NUM
+    local ITERATION_RC
+    local SAMPLE_NUM
+    local SAMPLE_RC
+    local PRIMARY_PERIOD_ID
+    local PRIMARY_PERIOD_RC
+    local SAMPLE_RC
+    local RC
+
+    RUN_DIR=${1}
+    shift
+
+    if [ -e ${RUN_DIR} -a -d ${RUN_DIR} ]; then
+        json_files=$(find -L "${RUN_DIR}" -name primary-period.json)
+        if [ -n "${json_files}" ]; then
+            result_dumper=cat
+        else
+            json_files=$(find -L "${RUN_DIR}" -name primary-period.json.xz)
+            if [ -n "${json_files}" ]; then
+                result_dumper=xzcat
+            else
+                echo "ERROR: Could not find a primary period json (primary-period.json[.xz])"
+                return 1
+            fi
+        fi
+
+        RC=0
+        for json_file in ${json_files}; do
+            SAMPLE_RC=0
+
+            ITERATION_NUM=$(${podman_run} --name crucible-extract-primary-periods-iteration-num-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"iteration\".\"num\"'")
+            ITERATION_RC=$?
+
+            if [ -z "${ITERATION_NUM}" -o ${ITERATION_RC} != 0 ]; then
+                SAMPLE_RC=1
+            else
+                SAMPLE_NUM=$(${podman_run} --name crucible-extract-primary-periods-sample-num-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"sample\".\"num\"'")
+                SAMPLE_RC=$?
+
+                if [ -z "${SAMPLE_NUM}" -o ${SAMPLE_RC} != 0 ]; then
+                    SAMPLE_RC=1
+                else
+                    PRIMARY_PERIOD_ID=$(${podman_run} --name crucible-extract-primary-periods-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"period\".\"id\"'")
+                    PRIMARY_PERIOD_RC=$?
+
+                    if [ -z "${PRIMARY_PERIOD_ID}" -o ${PRIMARY_PERIOD_RC} != 0 ]; then
+                        SAMPLE_RC=1
+                    fi
+                fi
+            fi
+
+            if [ ${SAMPLE_RC} == 0 ]; then
+                echo "${PRIMARY_PERIOD_ID}   Iteration: ${ITERATION_NUM}   Sample: ${SAMPLE_NUM}"
+            else
+                RC=1
+                echo "ERROR: Failed to extract primary period from ${json_file}"
+            fi
+        done
+
+        return ${RC}
+    else
+        echo "ERROR: Could not find run directory at ${RUN_DIR}"
+        return 1
+    fi
 }
 
 function post_process_run() {
