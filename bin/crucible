@@ -105,7 +105,12 @@ elif [ "${1}" == "run-ci" ]; then
     read -p "Are you sure you want to run crucible-ci stage1? (Y/N) " confirm
     confirm=$(echo "${confirm}" | tr '[:lower:]' '[:upper:]')
     if [ "${confirm}" == "Y" -o "${confirm}" == "YES" ]; then
-	exec ${CRUCIBLE_HOME}/subprojects/core/crucible-ci/.github/actions/integration-tests/run-ci-stage1 --disable-update-test "$@"
+	ci_cmd="${CRUCIBLE_HOME}/subprojects/core/crucible-ci/.github/actions/integration-tests/run-ci-stage1 --disable-update-test $@"
+	echo
+	echo
+	echo "Execing ${ci_cmd}"
+	echo
+	exec ${ci_cmd}
     else
 	echo "Canceling run-ci"
 	exit
