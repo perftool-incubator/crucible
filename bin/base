@@ -751,3 +751,27 @@ function init_es() {
 
     return ${RC}
 }
+
+function confirm_continue() {
+    local ref
+    local action_message
+    local selection
+
+    typeset -n ref=${1}
+    shift
+    action_message="${1}"
+    shift
+
+    read -p "Are you sure you want to ${action_message}? (Y/N) " selection
+    selection=$(echo "${selection}" | tr '[:lower:]' '[:upper:]')
+    case "${selection}" in
+        "N")
+            selection="NO"
+            ;;
+        "Y")
+            selection="YES"
+            ;;
+    esac
+
+    ref="${selection}"
+}
