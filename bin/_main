@@ -403,6 +403,26 @@ elif [ "${1}" == "unarchive" ]; then
         EXIT_VAL=$?
         shift
     done
+elif [ "${1}" == "reset" ]; then
+    shift
+
+    echo "Initializing ES "
+    if start_es; then
+        init_es
+        RC=$?
+        if [ ${EXIT_VAL} == 0 ]; then
+            EXIT_VAL=${RC}
+
+            if [ -n "${1}" -a "${1}" == "hard" ]; then
+                echo "Hard reset requested, removing all results from ${var_run_crucible}"
+                rm -Rf ${var_run_crucible}/*
+                RC=$?
+                EXIT_VAL=${RC}
+            fi
+        fi
+    else
+        EXIT_VAL=$?
+    fi
 elif [ "${1}" == "wrapper" ]; then
     shift
     $podman_run --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@

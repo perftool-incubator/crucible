@@ -101,6 +101,19 @@ elif [ "$1" == "help" ]; then
     exec ${CRUCIBLE_HOME}/bin/_help ${CRUCIBLE_HOME} "$@"
 elif [ "$1" == "console" ]; then
     exec ${podman_run_interactive} --name crucible-console-${SESSION_ID} --tty --interactive "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
+elif [ "${1}" == "reset" ]; then
+    # this input has to be done outside of the logger redirect scope
+
+    confirm_continue confirm "reset Crucible"
+    if [ "${confirm}" != "YES" ]; then
+        echo "Canceling reset"
+        exit
+    else
+        echo "Clearing Crucible log"
+        if ! crucible_log clear ${LOG_DB}; then
+            exit $?
+        fi
+    fi
 elif [ "${1}" == "run-ci" ]; then
     confirm_continue confirm "run crucible-ci stage 1"
     if [ "${confirm}" == "YES" ]; then
