@@ -18,29 +18,6 @@ fi
 . /etc/sysconfig/crucible
 . $CRUCIBLE_HOME/bin/base
 
-container_redis_args=()
-container_redis_args+=("-d")
-container_redis_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf")
-
-container_httpd_args=()
-container_httpd_args+=("-d")
-container_httpd_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/httpd/,destination=/etc/httpd/")
-
-container_es_args=()
-container_es_args+=("-d")
-#container_es_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/elasticsearch/,destination=/etc/elasticsearch/")
-
-container_rs_args=()
-container_rs_args+=("-i")
-container_rs_args+=("-e RS_REG_REPO=$CRUCIBLE_CLIENT_SERVER_REPO")
-container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
-container_rs_args+=("-e RS_REG_TLS_VERIFY=$CRUCIBLE_CLIENT_SERVER_TLS_VERIFY")
-container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
-container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
-
-container_rs_run_args=()
-container_rs_run_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
-
 EXIT_VAL=0
 
 if [ "${1}" == "log" ]; then
