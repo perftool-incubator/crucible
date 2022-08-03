@@ -16,7 +16,7 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess es extract ls tags notify archive unarchive" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help log repo update run wrapper console start get rm index postprocess es extract ls tags notify archive unarchive reset" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
@@ -47,7 +47,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "init rebuild" -- "${COMP_WORDS[2]}"))
                 ;;
             extract)
-                COMPREPLY=($(compgen -W "run-id" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "run-id primary-periods" -- "${COMP_WORDS[2]}"))
                 ;;
             ls)
                 COMPREPLY=($(compgen -W "--type --result-dir --filter-type --filters" -- "${COMP_WORDS[2]}"))
@@ -66,6 +66,9 @@ _crucible_completions() {
                 ;;
             unarchive)
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type archive)" -- "${COMP_WORDS[2]}"))
+                ;;
+            reset)
+                COMPREPLY=($(compgen -W "hard" -- "${COMP_WORDS[2]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "ls" ]; then
@@ -88,7 +91,7 @@ _crucible_completions() {
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "extract" ]; then
         case "${COMP_WORDS[2]}" in
-            run-id)
+            run-id|primary-periods)
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac

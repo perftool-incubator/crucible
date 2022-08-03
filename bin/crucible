@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 if [ -e /etc/sysconfig/crucible ]; then
     . /etc/sysconfig/crucible
@@ -101,10 +101,22 @@ elif [ "$1" == "help" ]; then
     exec ${CRUCIBLE_HOME}/bin/_help ${CRUCIBLE_HOME} "$@"
 elif [ "$1" == "console" ]; then
     exec ${podman_run_interactive} --name crucible-console-${SESSION_ID} --tty --interactive "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE /bin/bash
+elif [ "${1}" == "reset" ]; then
+    # this input has to be done outside of the logger redirect scope
+
+    confirm_continue confirm "reset Crucible"
+    if [ "${confirm}" != "YES" ]; then
+        echo "Canceling reset"
+        exit
+    else
+        echo "Clearing Crucible log"
+        if ! crucible_log clear ${LOG_DB}; then
+            exit $?
+        fi
+    fi
 elif [ "${1}" == "run-ci" ]; then
-    read -p "Are you sure you want to run crucible-ci stage1? (Y/N) " confirm
-    confirm=$(echo "${confirm}" | tr '[:lower:]' '[:upper:]')
-    if [ "${confirm}" == "Y" -o "${confirm}" == "YES" ]; then
+    confirm_continue confirm "run crucible-ci stage 1"
+    if [ "${confirm}" == "YES" ]; then
 	ci_cmd="${CRUCIBLE_HOME}/subprojects/core/crucible-ci/.github/actions/integration-tests/run-ci-stage1 --disable-update-test $@"
 	echo
 	echo
