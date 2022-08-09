@@ -21,7 +21,6 @@ procstat             tool           /tool-procstat                              
 ftrace               tool           /tool-ftrace                                    master
 kernel               tool           /tool-kernel                                    master
 ovs                  tool           /tool-ovs                                       master
-tcpdump              tool           /tool-tcpdump                                   main
 rt-trace-bpf         tool           /tool-rt-trace-bpf                              main
 forkstat             tool           /tool-forkstat                                  main
 flexran              benchmark      /bench-flexran                                  main
