@@ -12,6 +12,12 @@ on:
       - '*.md'
 
 jobs:
+  crucible-ci-iteration-repeat-runs-oslat:
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: 'echo "No build required" '
+
   crucible-ci-iteration-repeat-runs-fio:
     runs-on: ubuntu-latest
 
