@@ -13,6 +13,31 @@ on:
   workflow_dispatch:
 
 jobs:
+  crucible-ci-iteration-repeat-runs-oslat:
+    runs-on: [self-hosted, cpu-partitioning, remotehost]
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+
+    - name: Checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+
+    - name: Run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "oslat"
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        repeat_runs: "yes"
+        scenarios: "oslat"
+
   crucible-ci-iteration-repeat-runs-fio:
     runs-on: ubuntu-latest
 
