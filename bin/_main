@@ -147,8 +147,10 @@ elif [ "${1}" == "extract" ]; then
 elif [ "${1}" == "es" ]; then
     shift
     if start_es; then
-        if [ "${1}" == "init" -o "${1}" == "rebuild" ]; then
+        if [ "${1}" == "init" ]; then
             init_es
+        elif [ "${1}" == "rebuild" ]; then
+            reinit_es
         fi
         if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
             if pushd ${var_run_crucible} >/dev/null; then
@@ -408,7 +410,7 @@ elif [ "${1}" == "reset" ]; then
 
     echo "Initializing ES "
     if start_es; then
-        init_es
+        reinit_es
         RC=$?
         if [ ${EXIT_VAL} == 0 ]; then
             EXIT_VAL=${RC}
