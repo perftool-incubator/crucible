@@ -749,16 +749,14 @@ function archive_run() {
     return 0
 }
 
-function init_es() {
+function reinit_es() {
     local RC
     RC=0
 
     delete_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
-    init_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/init.sh"
     if ${podman_run} --name crucible-es-delete "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${delete_es_cmd}; then
-        if ! ${podman_run} --name crucible-es-init "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${init_es_cmd}; then
-            RC=${?}
-        fi
+        init_es
+        RC=${?}
     else
         RC=${?}
     fi
