@@ -1,0 +1,23 @@
+{
+  "workshop": {
+    "schema": {
+      "version": "2020.03.02"
+    }
+  },
+  "userenv": {
+    "name": "fedora36",
+    "label": "Fedora 36",
+    "origin": {
+      "image": "registry.fedoraproject.org/fedora",
+      "tag": "36"
+    },
+    "properties": {
+      "packages": {
+        "type": "rpm",
+        "manager": "dnf"
+      }
+    }
+  },
+  "requirements": [
+  ]
+}

@@ -15,7 +15,7 @@ fi
 if pushd ${CRUCIBLE_HOME} > /dev/null; then
     export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
     
-    ./subprojects/core/workshop/workshop.pl --userenv ./subprojects/core/workshop/userenvs/fedora33.json --requirements ./workshop/controller-workshop.json --label crucible-controller
+    ./subprojects/core/workshop/workshop.pl --userenv ./workshop/fedora36.json --requirements ./workshop/controller-workshop.json --label crucible-controller
 
     popd > /dev/null
 else
