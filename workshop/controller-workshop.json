@@ -53,24 +53,6 @@
         }
      },
     {
-      "name": "openssl-devel",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "openssl-devel"
-        ]
-      }
-    },
-    {
-      "name": "zlib-devel",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "zlib-devel"
-        ]
-      }
-    },
-    {
       "name": "bind-utils",
       "type": "distro",
       "distro_info": {
@@ -153,15 +135,6 @@
       }
     },
     {
-      "name": "perl-App-cpanminus",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "perl-App-cpanminus"
-        ]
-      }
-    },
-    {
       "name": "git",
       "type": "distro",
       "distro_info": {
@@ -176,15 +149,6 @@
       "distro_info": {
         "packages": [
           "redis"
-        ]
-      }
-    },
-    {
-      "name": "elastic_gpg",
-      "type": "manual",
-      "manual_info": {
-        "commands": [
-          "rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch"
         ]
       }
     },
@@ -249,15 +213,6 @@
       "distro_info": {
         "packages": [
           "httpd"
-        ]
-      }
-    },
-    {
-      "name": "elasticsearch",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "elasticsearch"
         ]
       }
     },
