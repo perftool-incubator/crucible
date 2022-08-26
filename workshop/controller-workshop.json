@@ -6,167 +6,115 @@
   },
   "userenvs": [
     {
-      "name": "fedora33",
+      "name": "fedora36",
       "requirements": [
-        "bind-utils",
-        "iproute",
-        "xz",
-        "hostname",
-        "procps-ng",
-        "jq",
-        "gcc",
-        "make",
+        "motd",
+        "dnf-tools",
+        "core-utils",
+        "build-libraries",
+        "build-tools",
+        "python39",
+        "distro-python-deps",
+        "non-distro-python-deps",
         "redis",
-        "glibc-langpack-en",
-        "perl-modules",
-        "git",
-        "pip-redis",
-        "pip-jsonschema",
-        "pip-ntfy",
-        "buildah",
-        "podman",
-        "skopeo",
+        "distro-perl-tools",
+        "distro-perl-modules",
+        "container-tools",
         "container-storage-fuse",
         "httpd",
         "elasticsearch_from_es",
         "elasticsearch_post",
         "java",
         "nodejs",
-        "motd",
-        "bc",
-        "sshpass",
-        "dnf",
+        "non-distro-node-deps",
         "gh-cli-repo",
         "gh-cli"
       ]
     }
   ],
- "requirements": [
-     {
-        "name": "pip-redis",
-        "type": "python3",
-        "python3_info": {
-            "packages": [
-                "redis",
-                "hiredis"
-            ]
-        }
-     },
+  "requirements": [
     {
-      "name": "openssl-devel",
+      "name": "core-utils",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "openssl-devel"
-        ]
-      }
-    },
-    {
-      "name": "zlib-devel",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "zlib-devel"
-        ]
-      }
-    },
-    {
-      "name": "bind-utils",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "bind-utils"
-        ]
-      }
-    },
-    {
-      "name": "iproute",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "iproute"
-        ]
-      }
-    },
-    {
-      "name": "xz",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
+          "curl",
+          "tar",
+          "cpio",
           "xz",
-          "xz-devel"
+          "gzip",
+          "jq",
+          "git",
+          "cpio",
+          "findutils",
+          "hostname",
+          "iputils",
+          "iproute",
+          "bind-utils",
+          "procps-ng",
+          "git",
+          "bc",
+          "sshpass"
         ]
       }
     },
     {
-      "name": "hostname",
+      "name": "python39",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "hostname"
+          "python39",
+          "python3-pip"
         ]
       }
     },
     {
-      "name": "jq",
+      "name": "distro-python-deps",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "jq"
+          "python3-numpy",
+          "python3-pandas",
+          "python3-pillow"
         ]
       }
     },
     {
-      "name": "procps-ng",
-      "type": "distro",
-      "distro_info": {
+      "name": "non-distro-python-deps",
+      "type": "python3",
+      "python3_info": {
         "packages": [
-          "procps-ng"
+          "Keras",
+          "Pillow",
+          "redis",
+          "hiredis",
+          "jsonschema",
+          "ntfy",
+          "ntfy[pid,emoji,xmpp,telegram,instapush,slack,rocketchat]"
         ]
       }
     },
     {
-      "name": "gcc",
+      "name": "build-libraries",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "gcc"
-        ]
-      }
-    },
-    {
-      "name": "make",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "make"
-        ]
-      }
-    },
-    {
-      "name": "glibc-langpack-en",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
+          "xz-devel",
           "glibc-langpack-en"
         ]
       }
     },
     {
-      "name": "perl-App-cpanminus",
+      "name": "build-tools",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "perl-App-cpanminus"
-        ]
-      }
-    },
-    {
-      "name": "git",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "git"
+          "diffutils",
+          "gcc",
+          "libtool",
+          "autoconf",
+          "automake",
+          "make"
         ]
       }
     },
@@ -180,65 +128,22 @@
       }
     },
     {
-      "name": "elastic_gpg",
-      "type": "manual",
-      "manual_info": {
-        "commands": [
-          "rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch"
-        ]
-      }
-    },
-    {
-      "name": "pip-jsonschema",
-      "type": "python3",
-      "python3_info": {
-        "packages": [
-          "jsonschema"
-        ]
-      }
-    },
-    {
-      "name": "pip-ntfy",
-      "type": "python3",
-      "python3_info": {
-        "packages": [
-          "ntfy",
-          "ntfy[pid,emoji,xmpp,telegram,instapush,slack,rocketchat]"
-        ]
-      }
-    },
-    {
       "name": "container-storage-fuse",
       "type": "manual",
       "manual_info": {
         "commands": [
+          "cp /usr/share/containers/storage.conf /etc/containers",
           "sed -i -e 's|#mount_program = \"/usr/bin/fuse-overlayfs\"|mount_program = \"/usr/bin/fuse-overlayfs\"|' /etc/containers/storage.conf"
         ]
       }
     },
     {
-      "name": "buildah",
+      "name": "container-tools",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "buildah"
-        ]
-      }
-    },
-    {
-      "name": "podman",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "podman"
-        ]
-      }
-    },
-    {
-      "name": "skopeo",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
+          "buildah",
+          "podman",
           "skopeo"
         ]
       }
@@ -253,20 +158,11 @@
       }
     },
     {
-      "name": "elasticsearch",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "elasticsearch"
-        ]
-      }
-    },
-    {
       "name": "elasticsearch_from_es",
-      "type": "distro",
-      "distro_info": {
+      "type": "distro-manual",
+      "distro-manual_info": {
         "packages": [
-         "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.15.2-x86_64.rpm" 
+         "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.6-x86_64.rpm" 
         ]
       }
     },
@@ -299,6 +195,15 @@
       }
     },
     {
+      "name": "non-distro-node-deps",
+      "type": "node",
+      "node_info": {
+        "packages": [
+          "ansi-regex sax react"
+        ]
+      }
+    },
+    {
       "name": "motd",
       "type": "manual",
       "manual_info": {
@@ -308,41 +213,38 @@
       }
     },
     {
-      "name": "bc",
+      "name": "distro-perl-tools",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "bc"
+          "perl-App-cpanminus"
         ]
       }
     },
     {
-      "name": "sshpass",
+      "name": "distro-perl-modules",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "sshpass"
+          "perl-Coro",
+          "perl-JSON",
+          "perl-JSON-XS",
+          "perl-JSON-Validator",
+          "perl-Data-UUID",
+          "perl-Digest-SHA",
+          "perl-Archive-Extract-xz-IO-Uncompress-UnXz.noarch",
+          "perl-Data-Dumper",
+          "perl-Digest-MD5",
+          "perl-Getopt-Long",
+          "perl-REST-Client",
+          "perl-Time-HiRes",
+          "perl-DBI",
+          "perl-DBD-SQLite"
         ]
       }
     },
     {
-      "name": "perl-modules",
-      "type": "cpan",
-      "cpan_info": {
-        "packages": [
-          "Coro", "JSON", "JSON::XS",
-          "JSON::Validator", "Data::Dumper",
-          "Data::UUID", "Digest::SHA",
-          "Digest::MD5", "Getopt::Long",
-          "REST::Client", "Time::HiRes",
-          "DBI DBD::SQLite",
-          "IO::Uncompress::UnXz",
-          "IO::Compress::Xz"
-        ]
-      }
-    },
-    {
-      "name": "dnf",
+      "name": "dnf-tools",
       "type": "distro",
       "distro_info": {
         "packages": [

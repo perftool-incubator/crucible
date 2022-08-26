@@ -7,7 +7,7 @@ if [ -z "${tag}" ]; then
     exit 1
 fi
 
-source="localhost/workshop/fedora33_crucible-controller"
+source="localhost/workshop/fedora36_crucible-controller"
 destination="quay.io/crucible/controller:${tag}"
 
 cmd="buildah push ${source} ${destination}"
