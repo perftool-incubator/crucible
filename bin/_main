@@ -219,6 +219,15 @@ elif [ "${1}" == "run" ]; then
             "--no-tools")
                 no_tools=1
                 ;;
+            "--from-file")
+                run_file=${1}
+                mv_params=${base_run_dir}/mv_params.json
+                tool_params=${base_run_dir}/tool-params.json
+                python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --mv-params > $mv_params
+                python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --tool-params > $tool_params
+                passthru_args=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --passthru_args)
+                use_mv_params=1
+                ;;
             *)
                 passthru_args+=("${arg}")
                 ;;
