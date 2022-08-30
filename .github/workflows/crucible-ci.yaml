@@ -13,7 +13,35 @@ on:
   workflow_dispatch:
 
 jobs:
+  crucible-ci-check-for-controller-change:
+    runs-on: ubuntu-latest
+
+    outputs:
+      build_controller: ${{ steps.change-check.outputs.answer }}
+
+    steps:
+    - name: Checkout crucible
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 2
+
+    - name: Check for changes in the workshop directory
+      id: change-check
+      run: |
+        diff_cmd="git diff --name-only HEAD^1 HEAD"
+        echo "Files changed:"
+        ${diff_cmd}
+        echo
+        workshop_files_changed=$(${diff_cmd} | grep "^workshop/" | wc -l)
+        echo "workshop_files_changed=${workshop_files_changed}"
+        echo
+        if [ ${workshop_files_changed} -gt 0 ]; then answer="yes"; else answer="no"; fi
+        echo "Setting answer to '${answer}'"
+        echo "::set-output name=answer::${answer}"
+
   crucible-ci-iteration-repeat-runs-oslat:
+    needs: crucible-ci-check-for-controller-change
+
     runs-on: [self-hosted, cpu-partitioning, remotehost]
 
     steps:
@@ -37,8 +65,11 @@ jobs:
         ci_target_dir: ${{ github.workspace }}/crucible
         repeat_runs: "yes"
         scenarios: "oslat"
+        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
 
   crucible-ci-iteration-repeat-runs-fio:
+    needs: crucible-ci-check-for-controller-change
+
     runs-on: ubuntu-latest
 
     steps:
@@ -62,8 +93,11 @@ jobs:
         ci_target_dir: ${{ github.workspace }}/crucible
         repeat_runs: "yes"
         scenarios: "fio"
+        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
 
   crucible-ci-iteration-repeat-runs-uperf:
+    needs: crucible-ci-check-for-controller-change
+
     runs-on: ubuntu-latest
 
     steps:
@@ -87,8 +121,11 @@ jobs:
         ci_target_dir: ${{ github.workspace }}/crucible
         repeat_runs: "yes"
         scenarios: "uperf"
+        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
 
   crucible-ci-iteration-repeat-runs-iperf:
+    needs: crucible-ci-check-for-controller-change
+
     runs-on: ubuntu-latest
 
     steps:
@@ -112,3 +149,4 @@ jobs:
         ci_target_dir: ${{ github.workspace }}/crucible
         repeat_runs: "yes"
         scenarios: "iperf"
+        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
