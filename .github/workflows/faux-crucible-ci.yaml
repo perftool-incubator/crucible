@@ -9,29 +9,10 @@ on:
     branches: [ master ]
     paths:
       - LICENSE
-      - '*.md'
+      - '**.md'
 
 jobs:
-  crucible-ci-iteration-repeat-runs-oslat:
+  crucible-ci-complete:
     runs-on: ubuntu-latest
-
-    steps:
-      - run: 'echo "No build required" '
-
-  crucible-ci-iteration-repeat-runs-fio:
-    runs-on: ubuntu-latest
-
-    steps:
-      - run: 'echo "No build required" '
-
-  crucible-ci-iteration-repeat-runs-uperf:
-    runs-on: ubuntu-latest
-
-    steps:
-      - run: 'echo "No build required" '
-
-  crucible-ci-iteration-repeat-runs-iperf:
-    runs-on: ubuntu-latest
-
     steps:
       - run: 'echo "No build required" '
