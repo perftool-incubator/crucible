@@ -7,146 +7,162 @@ on:
     branches: [ master ]
     paths-ignore:
       - LICENSE
-      - '*.md'
+      - '**.md'
 
   # allow for manual invocation from the actions tab
   workflow_dispatch:
 
 jobs:
-  crucible-ci-check-for-controller-change:
+  generate-job-matrix-parameters:
     runs-on: ubuntu-latest
-
     outputs:
-      build_controller: ${{ steps.change-check.outputs.answer }}
-
+      userenvs: ${{ steps.get-userenvs.outputs.userenvs }}
+      endpoints_github: ${{ steps.get-endpoints-github.outputs.endpoints }}
+      endpoints_self: ${{ steps.get-endpoints-self.outputs.endpoints }}
+      benchmarks_github: ${{ steps.get-benchmarks-github.outputs.benchmarks }}
+      benchmarks_self: ${{ steps.get-benchmarks-self.outputs.benchmarks }}
+      build_controller: ${{ steps.check-controller-build.outputs.build-controller }}
     steps:
-    - name: Checkout crucible
+    - name: checkout
       uses: actions/checkout@v2
       with:
+        path: crucible
         fetch-depth: 2
+    - name: checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+    - name: checkout rickshaw
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/rickshaw
+        ref: master
+        path: rickshaw
+    - name: run get-userenvs
+      id: get-userenvs
+      uses: ./crucible-ci/.github/actions/get-userenvs
+      with:
+        rickshaw-directory: "./rickshaw"
+    - name: run get-endpoints-github
+      id: get-endpoints-github
+      uses: ./crucible-ci/.github/actions/get-endpoints
+      with:
+        runner-type: "github"
+    - name: run get-endpoints-self
+      id: get-endpoints-self
+      uses: ./crucible-ci/.github/actions/get-endpoints
+      with:
+        runner-type: "self"
+    - name: run get-benchmarks-github
+      id: get-benchmarks-github
+      uses: ./crucible-ci/.github/actions/get-benchmarks
+      with:
+        runner-type: "github"
+    - name: run get-benchmarks-self
+      id: get-benchmarks-self
+      uses: ./crucible-ci/.github/actions/get-benchmarks
+      with:
+        runner-type: "self"
+    - name: run check-controller-build
+      id: check-controller-build
+      uses: ./crucible-ci/.github/actions/check-controller-build
+      with:
+        crucible-directory: "./crucible"
 
-    - name: Check for changes in the workshop directory
-      id: change-check
+  display-job-matrix-parameters:
+    runs-on: ubuntu-latest
+    needs: generate-job-matrix-parameters
+    steps:
+    - name: Echo generate-job-matrix-parameters outputs
+      run: echo "${{ toJSON(needs.generate-job-matrix-parameters.outputs) }}"
+
+  crucible-ci-github-runners:
+    runs-on: ubuntu-latest
+    needs:
+    - generate-job-matrix-parameters
+    - display-job-matrix-parameters
+    continue-on-error: true
+    strategy:
+      matrix:
+        endpoint: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.endpoints_github) }}
+        benchmark: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.benchmarks_github) }}
+        userenv: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.userenvs) }}
+    steps:
+    - name: Matrix Parameters => (${{ matrix.endpoint }}, ${{ matrix.benchmark }}, ${{ matrix.userenv }})
       run: |
-        diff_cmd="git diff --name-only HEAD^1 HEAD"
-        echo "Files changed:"
-        ${diff_cmd}
-        echo
-        workshop_files_changed=$(${diff_cmd} | grep "^workshop/" | wc -l)
-        echo "workshop_files_changed=${workshop_files_changed}"
-        echo
-        if [ ${workshop_files_changed} -gt 0 ]; then answer="yes"; else answer="no"; fi
-        echo "Setting answer to '${answer}'"
-        echo "::set-output name=answer::${answer}"
-
-  crucible-ci-iteration-repeat-runs-oslat:
-    needs: crucible-ci-check-for-controller-change
-
-    runs-on: [self-hosted, cpu-partitioning, remotehost]
-
-    steps:
-    - name: Checkout crucible
+        echo "endpoint=${{ matrix.endpoint }}"
+        echo "benchmark=${{ matrix.benchmark }}"
+        echo "userenv=${{ matrix.userenv }}"
+    - name: checkout crucible
       uses: actions/checkout@v2
       with:
         path: crucible
-
-    - name: Checkout crucible-ci
+    - name: checkout crucible-ci
       uses: actions/checkout@v2
       with:
         repository: perftool-incubator/crucible-ci
         ref: main
         path: crucible-ci
-
-    - name: Run crucible-ci->integration-tests
+    - name: run crucible-ci->integration-tests
       uses: ./crucible-ci/.github/actions/integration-tests
       with:
-        artifact_tag: "oslat"
+        artifact_tag: "crucible-ci-github-runners__${{ matrix.endpoint }}-${{ matrix.benchmark }}-${{ matrix.userenv }}"
+        ci_endpoint: "${{ matrix.endpoint }}"
+        scenarios: "${{ matrix.benchmark }}"
+        userenvs: "${{ matrix.userenv }}"
+        run_samples: 3
+        repeat_runs: "yes"
         ci_target: "crucible"
         ci_target_dir: ${{ github.workspace }}/crucible
+        ci_build_controller: ${{ needs.generate-job-matrix-parameters.outputs.build_controller }}
+
+  crucible-ci-self-hosted-runners:
+    runs-on: [ self-hosted ]
+    needs:
+    - generate-job-matrix-parameters
+    - display-job-matrix-parameters
+    continue-on-error: true
+    strategy:
+      matrix:
+        endpoint: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.endpoints_self) }}
+        benchmark: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.benchmarks_self) }}
+        userenv: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.userenvs) }}
+    steps:
+    - name: Matrix Parameters => (${{ matrix.endpoint }}, ${{ matrix.benchmark }}, ${{ matrix.userenv }})
+      run: |
+        echo "endpoint=${{ matrix.endpoint }}"
+        echo "benchmark=${{ matrix.benchmark }}"
+        echo "userenv=${{ matrix.userenv }}"
+    - name: checkout crucible
+      uses: actions/checkout@v2
+      with:
+        path: crucible
+    - name: checkout crucible-ci
+      uses: actions/checkout@v2
+      with:
+        repository: perftool-incubator/crucible-ci
+        ref: main
+        path: crucible-ci
+    - name: run crucible-ci->integration-tests
+      uses: ./crucible-ci/.github/actions/integration-tests
+      with:
+        artifact_tag: "crucible-ci-self-hosted-runners__${{ matrix.endpoint }}-${{ matrix.benchmark }}-${{ matrix.userenv }}"
+        ci_endpoint: "${{ matrix.endpoint }}"
+        scenarios: "${{ matrix.benchmark }}"
+        userenvs: "${{ matrix.userenv }}"
+        run_samples: 3
         repeat_runs: "yes"
-        scenarios: "oslat"
-        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
+        ci_target: "crucible"
+        ci_target_dir: ${{ github.workspace }}/crucible
+        ci_build_controller: ${{ needs.generate-job-matrix-parameters.outputs.build_controller }}
 
-  crucible-ci-iteration-repeat-runs-fio:
-    needs: crucible-ci-check-for-controller-change
-
+  crucible-ci-complete:
     runs-on: ubuntu-latest
-
+    needs:
+    - crucible-ci-github-runners
+    - crucible-ci-self-hosted-runners
     steps:
-    - name: Checkout crucible
-      uses: actions/checkout@v2
-      with:
-        path: crucible
-
-    - name: Checkout crucible-ci
-      uses: actions/checkout@v2
-      with:
-        repository: perftool-incubator/crucible-ci
-        ref: main
-        path: crucible-ci
-
-    - name: Run crucible-ci->integration-tests
-      uses: ./crucible-ci/.github/actions/integration-tests
-      with:
-        artifact_tag: "fio"
-        ci_target: "crucible"
-        ci_target_dir: ${{ github.workspace }}/crucible
-        repeat_runs: "yes"
-        scenarios: "fio"
-        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
-
-  crucible-ci-iteration-repeat-runs-uperf:
-    needs: crucible-ci-check-for-controller-change
-
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout crucible
-      uses: actions/checkout@v2
-      with:
-        path: crucible
-
-    - name: Checkout crucible-ci
-      uses: actions/checkout@v2
-      with:
-        repository: perftool-incubator/crucible-ci
-        ref: main
-        path: crucible-ci
-
-    - name: Run crucible-ci->integration-tests
-      uses: ./crucible-ci/.github/actions/integration-tests
-      with:
-        artifact_tag: "uperf"
-        ci_target: "crucible"
-        ci_target_dir: ${{ github.workspace }}/crucible
-        repeat_runs: "yes"
-        scenarios: "uperf"
-        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
-
-  crucible-ci-iteration-repeat-runs-iperf:
-    needs: crucible-ci-check-for-controller-change
-
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout crucible
-      uses: actions/checkout@v2
-      with:
-        path: crucible
-
-    - name: Checkout crucible-ci
-      uses: actions/checkout@v2
-      with:
-        repository: perftool-incubator/crucible-ci
-        ref: main
-        path: crucible-ci
-
-    - name: Run crucible-ci->integration-tests
-      uses: ./crucible-ci/.github/actions/integration-tests
-      with:
-        artifact_tag: "iperf"
-        ci_target: "crucible"
-        ci_target_dir: ${{ github.workspace }}/crucible
-        repeat_runs: "yes"
-        scenarios: "iperf"
-        ci_build_controller: ${{ needs.crucible-ci-check-for-controller-change.outputs.build_controller }}
+    - name: Confirm Success
+      run: echo "crucible-ci-complete"
