@@ -8,7 +8,6 @@ workshop             core           /workshop                                   
 CommonDataModel      core           /CommonDataModel                                master
 toolbox              core           /toolbox                                        main
 packrat              core           /packrat                                        master
-registry             core           /registry                                       main
 crucible-ci          core           /crucible-ci                                    main
 fio                  benchmark      /bench-fio                                      master
 uperf                benchmark      /bench-uperf                                    master
@@ -22,7 +21,6 @@ procstat             tool           /tool-procstat                              
 ftrace               tool           /tool-ftrace                                    master
 kernel               tool           /tool-kernel                                    master
 ovs                  tool           /tool-ovs                                       master
-tcpdump              tool           /tool-tcpdump                                   main
 rt-trace-bpf         tool           /tool-rt-trace-bpf                              main
 forkstat             tool           /tool-forkstat                                  main
 flexran              benchmark      /bench-flexran                                  main

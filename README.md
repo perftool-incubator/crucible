@@ -41,3 +41,37 @@ Once data is converted to Common Data Model, Crucible plans to store this data i
 Crucible is designed to not be a large monolithic project.  All functionality is broken out into sub-projects, and each of those sub-projects are designed to be loosely coupled, in case another project would like to use one or more of them.  Crucible aggregates these sub-projects in a cohesive experience for the user.  For the Crucible developer or maintainer, this adds flexibility in how one develops, tests, and supports Crucible.
 
 Through the use of containers built at runtime for software distribution (which can be shared via a cache), Crucible does not need to pre-build any binary packages that must be installed by the user.  The only binary product Crucible produces is the container image for the crucible-controller, and that is already provided by the maintainers of this project.  Once installed, updates to Crucible are handled via git, which will be transparent to the user.  Since each sub-project is its own git repository, testing fixes for specific sub-projects becomes much easier to do because each sub-project can be individually modified and/or replaced.  The crucible-controller image may be rebuilt from time to time to upgrade and/or add additional software dependencies; however, obtaining these image updates will be handled transparently when Crucible is updated.  As Crucible builds no binary packages, there is no big "build-a-thon" for a new release -- in fact there is currently not a release concept.  Crucible's deployment model is similar to that of a rolling release, where the latest "stable" code is always available when an installation and/or update is performed from the upstream repositories.  In order to maintain stability in this fast moving development/deployment model, continuous integration testing via Github workflows is used extensively across the many sub-projects and is always being improved upon.
+
+## Subprojects
+
+Type/Project | Description | URL
+-------------|-------------|----
+**Core** | |
+CommonDataModel | Schema definitions and query utilities | https://github.com/perftool-incubator/CommonDataModel
+crucible-ci | Continuous Integration testing framework | https://github.com/perftool-incubator/crucible-ci
+multiplex | Parameter validation and parameter combination creation | https://github.com/perftool-incubator/multiplex
+packrat | System information collector | https://github.com/perftool-incubator/packrat
+rickshaw | Primary orchestration component which contains the endpoint and engine code.  Also contains the userenv definitions. | https://github.com/perftool-incubator/rickshaw
+roadblock | Synchronization and communication framework | https://github.com/perftool-incubator/roadblock
+toolbox | Shared libraries and utility for use by other subprojects | https://github.com/perftool-incubator/toolbox
+workshop | Container build utility | https://github.com/perftool-incubator/workshop
+**Documentation** | |
+examples | Examples of different approaches to running Crucible with the various workloads | https://github.com/perftool-incubator/crucible-examples
+**Benchmarks** | |
+cyclictest | Traditional RT latency measurement tool | https://github.com/perftool-incubator/bench-cyclictest
+fio | Traditional block IO testing | https://github.com/perftool-incubator/bench-fio
+hwlatdetect | Baremetal HW latency spike detector | https://github.com/perftool-incubator/bench-hwlatdetect
+flexran | Radio Access Network (RAN) edge framework testing | https://github.com/perftool-incubator/bench-flexran
+oslat | Latency measurement tool that simulates a continously polling application (ie. DPDK PMD) | https://github.com/perftool-incubator/bench-oslat
+iperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-iperf
+tracer | Framework for Linux kernel latency tracer/workload tools (ie. osnoise & timerlat) | https://github.com/perftool-incubator/bench-tracer
+trafficgen | TRex based high speed packet forwarding througput and loss analysis using binary search logic | https://github.com/perftool-incubator/bench-trafficgen
+uperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-uperf
+**Tools** | |
+forkstat | A tool to capture fork+exec statistics | https://github.com/perftool-incubator/tool-forkstat
+ftrace | Linux kernel tracing | https://github.com/perftool-incubator/tool-ftrace
+kernel | Various kernel tools (turbostat, perf, sst, tracing) | https://github.com/perftool-incubator/tool-kernel
+ovs | Open vSwitch data collection | https://github.com/perftool-incubator/tool-ovs
+procstat | Custom utilities for capturing various /proc information | https://github.com/perftool-incubator/tool-procstat
+rt-trace-bpf | A eBPF based tool used to indentify preemption causers in latency sensitive workloads | https://github.com/perftool-incubator/tool-rt-trace-bpf
+sysstat | Traditional Linux performance tools (sar, mpstat, iostat, etc.) | https://github.com/perftool-incubator/tool-sysstat

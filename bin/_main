@@ -147,8 +147,10 @@ elif [ "${1}" == "extract" ]; then
 elif [ "${1}" == "es" ]; then
     shift
     if start_es; then
-        if [ "${1}" == "init" -o "${1}" == "rebuild" ]; then
+        if [ "${1}" == "init" ]; then
             init_es
+        elif [ "${1}" == "rebuild" ]; then
+            reinit_es
         fi
         if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
             if pushd ${var_run_crucible} >/dev/null; then
@@ -346,7 +348,7 @@ elif [ "${1}" == "run" ]; then
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
-    $podman_run --name crucible-rickshaw-run-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_rs_run_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
+    $podman_run --name crucible-rickshaw-run-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
     RC=$?
 
     if [ ${RC} == 0 ]; then
@@ -417,7 +419,7 @@ elif [ "${1}" == "reset" ]; then
 
     echo "Initializing ES "
     if start_es; then
-        init_es
+        reinit_es
         RC=$?
         if [ ${EXIT_VAL} == 0 ]; then
             EXIT_VAL=${RC}
@@ -434,7 +436,7 @@ elif [ "${1}" == "reset" ]; then
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-    $podman_run --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $@
+    ${podman_run} --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} $@
     EXIT_VAL=$?
 else
     echo "ERROR: This function has not been implemented"
