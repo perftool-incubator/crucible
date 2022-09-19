@@ -89,6 +89,9 @@ jobs:
         endpoint: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.endpoints_github) }}
         benchmark: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.benchmarks_github) }}
         userenv: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.userenvs) }}
+        exclude:
+        - endpoint: "remotehost"
+          benchmark: "oslat"
     steps:
     - name: Matrix Parameters => (${{ matrix.endpoint }}, ${{ matrix.benchmark }}, ${{ matrix.userenv }})
       run: |
