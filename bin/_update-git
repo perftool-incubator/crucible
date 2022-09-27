@@ -6,7 +6,7 @@
 
 if [ -d "./.git" ]; then
     # pull updates from remote(s)
-    git remote update
+    git remote --verbose update --prune
 
     # store any local changes
     stash_output=$(git stash)
