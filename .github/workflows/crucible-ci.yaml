@@ -108,6 +108,11 @@ jobs:
         repository: perftool-incubator/crucible-ci
         ref: main
         path: crucible-ci
+    - name: import secret
+      env:
+        CLIENT_SERVER_REGISTRY_AUTH_SECRET: ${{ secrets.CRUCIBLE_CI_ENGINES_REGISTRY_AUTH }}
+      if: env.CLIENT_SERVER_REGISTRY_AUTH_SECRET != ''
+      run: sudo bash -c "echo \"$CLIENT_SERVER_REGISTRY_AUTH_SECRET\" > /root/crucible-ci-engines-token.json"
     - name: run crucible-ci->integration-tests
       uses: ./crucible-ci/.github/actions/integration-tests
       with:
@@ -148,6 +153,11 @@ jobs:
         repository: perftool-incubator/crucible-ci
         ref: main
         path: crucible-ci
+    - name: import secret
+      env:
+        CLIENT_SERVER_REGISTRY_AUTH_SECRET: ${{ secrets.CRUCIBLE_CI_ENGINES_REGISTRY_AUTH }}
+      if: env.CLIENT_SERVER_REGISTRY_AUTH_SECRET != ''
+      run: sudo bash -c "echo \"$CLIENT_SERVER_REGISTRY_AUTH_SECRET\" > /root/crucible-ci-engines-token.json"
     - name: run crucible-ci->integration-tests
       uses: ./crucible-ci/.github/actions/integration-tests
       with:
