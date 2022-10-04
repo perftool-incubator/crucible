@@ -185,6 +185,8 @@ elif [ "${1}" == "run" ]; then
     shift
     base_run_dir="${var_run_crucible}/${benchmark}--${datetime}--${SESSION_ID}"
 
+    mkdir -pv "$base_run_dir/config" >/dev/null
+
     bench_params="bench-params.json"
     tool_params="tool-params.json"
     use_mv_params=0
@@ -223,8 +225,8 @@ elif [ "${1}" == "run" ]; then
                 ;;
             "--from-file")
                 run_file=${1}
-                mv_params=${base_run_dir}/mv_params.json
-                tool_params=${base_run_dir}/tool-params.json
+                mv_params=${base_run_dir}/config/mv-params.json
+                tool_params=${base_run_dir}/config/${tool_params}
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config mv-params > $mv_params
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config tool-params > $tool_params
                 passthru_args=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru_args)
@@ -241,7 +243,6 @@ elif [ "${1}" == "run" ]; then
     if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
         exit_error "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
     fi
-    mkdir -pv "$base_run_dir/config" >/dev/null
     if [ -e "${var_run_crucible}/latest" ]; then
         /bin/rm "${var_run_crucible}/latest"
     fi
