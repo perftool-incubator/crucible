@@ -229,7 +229,7 @@ elif [ "${1}" == "run" ]; then
                 tool_params=${base_run_dir}/config/${tool_params}
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config mv-params > $mv_params
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config tool-params > $tool_params
-                passthru_args=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru_args)
+                passthru_args=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru-args)
                 use_mv_params=1
                 ;;
             *)
