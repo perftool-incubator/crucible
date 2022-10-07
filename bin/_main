@@ -230,6 +230,7 @@ elif [ "${1}" == "run" ]; then
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config mv-params > $mv_params
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config tool-params > $tool_params
                 passthru_args=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru-args)
+                passthru_args=$(sed -e 's/^"//' -e 's/"$//' <<< "${passthru_args}")
                 use_mv_params=1
                 ;;
             *)
