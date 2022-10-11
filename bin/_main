@@ -224,7 +224,9 @@ elif [ "${1}" == "run" ]; then
                 no_tools=1
                 ;;
             "--from-file")
-                run_file=${1}
+                val=${1}
+                shift
+                run_file=${val}
                 mv_params=${base_run_dir}/config/mv-params.json
                 tool_params=${base_run_dir}/config/${tool_params}
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config mv-params > $mv_params
