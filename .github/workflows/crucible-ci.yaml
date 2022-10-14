@@ -20,18 +20,18 @@ jobs:
       self_hosted_scenarios: ${{ steps.get-scenarios-self.outputs.scenarios }}
     steps:
     - name: checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         path: crucible
         fetch-depth: 2
     - name: checkout crucible-ci
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: perftool-incubator/crucible-ci
         ref: main
         path: crucible-ci
     - name: checkout rickshaw
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: perftool-incubator/rickshaw
         ref: master
@@ -83,11 +83,11 @@ jobs:
         echo "benchmark=${{ matrix.scenario.benchmark }}"
         echo "userenv=${{ matrix.userenv }}"
     - name: checkout crucible
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         path: crucible
     - name: checkout crucible-ci
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: perftool-incubator/crucible-ci
         ref: main
@@ -132,11 +132,11 @@ jobs:
         echo "benchmark=${{ matrix.scenario.benchmark }}"
         echo "userenv=${{ matrix.userenv }}"
     - name: checkout crucible
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         path: crucible
     - name: checkout crucible-ci
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: perftool-incubator/crucible-ci
         ref: main
