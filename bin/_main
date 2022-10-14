@@ -236,7 +236,11 @@ elif [ "${1}" == "run" ]; then
                 use_mv_params=1
                 ;;
             *)
-                passthru_args+=("${arg}")
+                if [ -z ${run_file+x} ]; then
+                    passthru_args+=("${arg}")
+                else
+                    echo "'${arg}' was ignored. Specify passthru args with --from-file <run-file>."
+                fi
                 ;;
         esac
     done
