@@ -15,11 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       userenvs: ${{ steps.get-userenvs.outputs.userenvs }}
-      endpoints_github: ${{ steps.get-endpoints-github.outputs.endpoints }}
-      endpoints_self: ${{ steps.get-endpoints-self.outputs.endpoints }}
-      benchmarks_github: ${{ steps.get-benchmarks-github.outputs.benchmarks }}
-      benchmarks_self: ${{ steps.get-benchmarks-self.outputs.benchmarks }}
       build_controller: ${{ steps.check-controller-build.outputs.build-controller }}
+      github_hosted_scenarios: ${{ steps.get-scenarios-github.outputs.scenarios }}
+      self_hosted_scenarios: ${{ steps.get-scenarios-self.outputs.scenarios }}
     steps:
     - name: checkout
       uses: actions/checkout@v2
@@ -38,31 +36,22 @@ jobs:
         repository: perftool-incubator/rickshaw
         ref: master
         path: rickshaw
+    - name: run get-scenarios-github
+      id: get-scenarios-github
+      uses: ./crucible-ci/.github/actions/get-scenarios
+      with:
+        runner-type: "github"
+    - name: run get-scenarios-self
+      id: get-scenarios-self
+      uses: ./crucible-ci/.github/actions/get-scenarios
+      with:
+        runner-type: "self"
+        runner-tags: "cpu-partitioning,remotehost"
     - name: run get-userenvs
       id: get-userenvs
       uses: ./crucible-ci/.github/actions/get-userenvs
       with:
         rickshaw-directory: "./rickshaw"
-    - name: run get-endpoints-github
-      id: get-endpoints-github
-      uses: ./crucible-ci/.github/actions/get-endpoints
-      with:
-        runner-type: "github"
-    - name: run get-endpoints-self
-      id: get-endpoints-self
-      uses: ./crucible-ci/.github/actions/get-endpoints
-      with:
-        runner-type: "self"
-    - name: run get-benchmarks-github
-      id: get-benchmarks-github
-      uses: ./crucible-ci/.github/actions/get-benchmarks
-      with:
-        runner-type: "github"
-    - name: run get-benchmarks-self
-      id: get-benchmarks-self
-      uses: ./crucible-ci/.github/actions/get-benchmarks
-      with:
-        runner-type: "self"
     - name: run check-controller-build
       id: check-controller-build
       uses: ./crucible-ci/.github/actions/check-controller-build
@@ -84,17 +73,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        endpoint: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.endpoints_github) }}
-        benchmark: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.benchmarks_github) }}
+        scenario: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.github_hosted_scenarios) }}
         userenv: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.userenvs) }}
-        exclude:
-        - endpoint: "remotehost"
-          benchmark: "oslat"
     steps:
-    - name: Matrix Parameters => (${{ matrix.endpoint }}, ${{ matrix.benchmark }}, ${{ matrix.userenv }})
+    - name: Matrix Parameters => (${{ matrix.scenario.enabled }}, ${{ matrix.scenario.endpoint }}, ${{ matrix.scenario.benchmark }}, ${{ matrix.userenv }})
       run: |
-        echo "endpoint=${{ matrix.endpoint }}"
-        echo "benchmark=${{ matrix.benchmark }}"
+        echo "enabled=${{ matrix.scenario.enabled }}"
+        echo "endpoint=${{ matrix.scenario.endpoint }}"
+        echo "benchmark=${{ matrix.scenario.benchmark }}"
         echo "userenv=${{ matrix.userenv }}"
     - name: checkout crucible
       uses: actions/checkout@v2
@@ -112,34 +98,38 @@ jobs:
       if: env.CLIENT_SERVER_REGISTRY_AUTH_SECRET != ''
       run: sudo bash -c "echo \"$CLIENT_SERVER_REGISTRY_AUTH_SECRET\" > /root/crucible-ci-engines-token.json"
     - name: run crucible-ci->integration-tests
+      if: ${{ matrix.scenario.enabled }}
       uses: ./crucible-ci/.github/actions/integration-tests
       with:
-        artifact_tag: "crucible-ci-github-runners__${{ matrix.endpoint }}-${{ matrix.benchmark }}-${{ matrix.userenv }}"
-        ci_endpoint: "${{ matrix.endpoint }}"
-        scenarios: "${{ matrix.benchmark }}"
+        artifact_tag: "crucible-ci-github-runners__${{ matrix.scenario.endpoint }}-${{ matrix.scenario.benchmark }}-${{ matrix.userenv }}"
+        ci_endpoint: "${{ matrix.scenario.endpoint }}"
+        scenarios: "${{ matrix.scenario.benchmark }}"
         userenvs: "${{ matrix.userenv }}"
         run_samples: 3
         repeat_runs: "yes"
         ci_target: "crucible"
         ci_target_dir: ${{ github.workspace }}/crucible
         ci_build_controller: ${{ needs.generate-job-matrix-parameters.outputs.build_controller }}
+    - name: skip crucible-ci->integration-tests
+      if: ${{ ! matrix.scenario.enabled }}
+      run: echo "crucible-ci->integration-tests not enabled"
 
   crucible-ci-self-hosted-runners:
-    runs-on: [ self-hosted ]
+    runs-on: [ self-hosted, cpu-partitioning, remotehost ]
     needs:
     - generate-job-matrix-parameters
     - display-job-matrix-parameters
     strategy:
       fail-fast: false
       matrix:
-        endpoint: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.endpoints_self) }}
-        benchmark: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.benchmarks_self) }}
+        scenario: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.self_hosted_scenarios) }}
         userenv: ${{ fromJSON(needs.generate-job-matrix-parameters.outputs.userenvs) }}
     steps:
-    - name: Matrix Parameters => (${{ matrix.endpoint }}, ${{ matrix.benchmark }}, ${{ matrix.userenv }})
+    - name: Matrix Parameters => (${{ matrix.scenario.enabled }}, ${{ matrix.scenario.endpoint }}, ${{ matrix.scenario.benchmark }}, ${{ matrix.userenv }})
       run: |
-        echo "endpoint=${{ matrix.endpoint }}"
-        echo "benchmark=${{ matrix.benchmark }}"
+        echo "enabled=${{ matrix.scenario.enabled }}"
+        echo "endpoint=${{ matrix.scenario.endpoint }}"
+        echo "benchmark=${{ matrix.scenario.benchmark }}"
         echo "userenv=${{ matrix.userenv }}"
     - name: checkout crucible
       uses: actions/checkout@v2
@@ -157,17 +147,21 @@ jobs:
       if: env.CLIENT_SERVER_REGISTRY_AUTH_SECRET != ''
       run: sudo bash -c "echo \"$CLIENT_SERVER_REGISTRY_AUTH_SECRET\" > /root/crucible-ci-engines-token.json"
     - name: run crucible-ci->integration-tests
+      if: ${{ matrix.scenario.enabled }}
       uses: ./crucible-ci/.github/actions/integration-tests
       with:
-        artifact_tag: "crucible-ci-self-hosted-runners__${{ matrix.endpoint }}-${{ matrix.benchmark }}-${{ matrix.userenv }}"
-        ci_endpoint: "${{ matrix.endpoint }}"
-        scenarios: "${{ matrix.benchmark }}"
+        artifact_tag: "crucible-ci-self-hosted-runners__${{ matrix.scenario.endpoint }}-${{ matrix.scenario.benchmark }}-${{ matrix.userenv }}"
+        ci_endpoint: "${{ matrix.scenario.endpoint }}"
+        scenarios: "${{ matrix.scenario.benchmark }}"
         userenvs: "${{ matrix.userenv }}"
         run_samples: 3
         repeat_runs: "yes"
         ci_target: "crucible"
         ci_target_dir: ${{ github.workspace }}/crucible
         ci_build_controller: ${{ needs.generate-job-matrix-parameters.outputs.build_controller }}
+    - name: skip crucible-ci->integration-tests
+      if: ${{ ! matrix.scenario.enabled }}
+      run: echo "crucible-ci->integration-tests not enabled"
 
   crucible-ci-complete:
     runs-on: ubuntu-latest
