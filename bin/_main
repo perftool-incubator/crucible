@@ -231,16 +231,13 @@ elif [ "${1}" == "run" ]; then
                 tool_params=${base_run_dir}/config/${tool_params}
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config mv-params > $mv_params
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config tool-params > $tool_params
-                passthru_args=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru-args)
-                passthru_args=$(sed -e 's/^"//' -e 's/"$//' <<< "${passthru_args}")
+                passthru_blk=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru-args)
+                passthru_str=$(sed -e 's/^"//' -e 's/"$//' <<< ${passthru_blk})
+                passthru_args+=("${passthru_str}")
                 use_mv_params=1
                 ;;
             *)
-                if [ -z ${run_file+x} ]; then
-                    passthru_args+=("${arg}")
-                else
-                    echo "'${arg}' was ignored. Specify passthru args with --from-file <run-file>."
-                fi
+                passthru_args+=("${arg}")
                 ;;
         esac
     done
