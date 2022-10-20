@@ -182,8 +182,9 @@ elif [ "${1}" == "run" ]; then
     arg_list="$@"
     shift
     benchmark=${1}
+    benchmarks=`echo ${benchmark} | sed -e 's/,/-and-/g'`
     shift
-    base_run_dir="${var_run_crucible}/${benchmark}--${datetime}--${SESSION_ID}"
+    base_run_dir="${var_run_crucible}/${benchmarks}--${datetime}--${SESSION_ID}"
 
     mkdir -pv "$base_run_dir/config" >/dev/null
 
@@ -251,49 +252,64 @@ elif [ "${1}" == "run" ]; then
         /bin/rm "${var_run_crucible}/latest"
     fi
     ln -sf "$base_run_dir" "${var_run_crucible}/latest"
-    benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$benchmark
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
 
-    if [ ! -e "$benchmark_subproj_dir" ]; then
-        echo "ERROR: Running benchmark ${benchmark} requires that the subproject be"
-        echo "located in "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark"
-        echo "This directory could not be found.  Here are the benchmark"
-        echo "subproject directories:"
-        /bin/ls "${CRUCIBLE_HOME}"/subprojects/bench/$benchmark
-        exit 1
-    fi
+    for this_benchmark in `echo $benchmark | sed -e 's/,/ /'`; do
+        this_benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$this_benchmark
+        if [ ! -e "$this_benchmark_subproj_dir" ]; then
+            echo "ERROR: Running benchmark ${this_benchmark} requires that the subproject be"
+            echo "located in "${CRUCIBLE_HOME}"/subprojects/bench/$this_benchmark"
+            echo "This directory could not be found.  Here are the benchmark"
+            echo "subproject directories:"
+            /bin/ls "${CRUCIBLE_HOME}"/subprojects/benchmarks
+            exit 1
+        fi
+        benchmark_subproj_dir+=",${this_benchmark_subproj_dir}"
+    done
+    benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | sed -e 's/^,//'`
 
     if [ ${use_mv_params} == 1 ]; then
-        if [ ! -e "${mv_params}" ]; then
-            exit_error "The multi-value params file you specified with --mv-params (${mv_params}) does not exist!"
-        else
-            echo "Generating --bench-params from --mv-params..."
-
-            mv_params_run_dir=${base_run_dir}/config/mv-params.json
-            cp ${mv_params} ${mv_params_run_dir}
-            bench_params_run_file=${base_run_dir}/config/bench-params.json
-            bench_params_run_output=${base_run_dir}/config/bench-params.txt
-
-            multiplex_cmd="${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${mv_params_run_dir} --output ${bench_params_run_file}"
-            if [ -e ${benchmark_subproj_dir}/multiplex.json ]; then
-                multiplex_cmd+=" --requirements ${benchmark_subproj_dir}/multiplex.json"
+        count=1
+        bench_params=""
+        for this_mv_params in `echo ${mv_params} | sed -e 's/,/ /'`; do
+            echo "this_mv_params: [$this_mv_params]"
+            if [ ! -e "${this_mv_params}" ]; then
+                exit_error "The multi-value params file you specified with --mv-params (${this_mv_params}) does not exist!"
             else
-                echo "Skipping benchmark requirements validation because there is no ${benchmark_subproj_dir}/multiplex.json"
+                this_benchmark=`echo ${benchmark} | cut -d, -f$count`
+                echo "this_benchmark: [$this_benchmark]"
+                this_benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | cut -d, -f$count`
+                echo "this_benchmark_subproject_dir: [$this_benchmark_subproject_dir]"
+                echo "Generating --bench-params from --mv-params..."
+                this_mv_params_run_dir=${base_run_dir}/config/${this_benchmark}-mv-params.json
+                cp ${this_mv_params} ${this_mv_params_run_dir}
+                bench_params_run_file=${base_run_dir}/config/${this_benchmark}-bench-params.json
+                bench_params_run_output=${base_run_dir}/config/${this_benchmark}-bench-params.txt
+    
+                multiplex_cmd="${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${this_mv_params_run_dir} --output ${bench_params_run_file}"
+                if [ -e ${this_benchmark_subproj_dir}/multiplex.json ]; then
+                    multiplex_cmd+=" --requirements ${this_benchmark_subproj_dir}/multiplex.json"
+                else
+                    echo "Skipping benchmark requirements validation because there is no ${this_benchmark_subproj_dir}/multiplex.json"
+                fi
+    
+                multiplex_cmd="$podman_run -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
+                echo "${multiplex_cmd} > ${bench_params_run_output} 2>&1"
+                ${multiplex_cmd} > ${bench_params_run_output} 2>&1
+                EXIT_VAL=$?
+                if [ ${EXIT_VAL} != 0 ]; then
+                    echo "ERROR: multiplex failed with an error and returned rc=$rc"
+                    echo "multiplex output is:"
+                    cat ${bench_params_run_output}
+                    exit ${EXIT_VAL}
+                fi
+                this_bench_params=${bench_params_run_file}
+                bench_params+=",${this_bench_params}"
             fi
+            let count=${count}+1
+        done
+        bench_params=`echo ${bench_params} | sed -e 's/^,//'`
 
-            multiplex_cmd="$podman_run -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
-            echo "${multiplex_cmd} > ${bench_params_run_output} 2>&1"
-            ${multiplex_cmd} > ${bench_params_run_output} 2>&1
-            EXIT_VAL=$?
-            if [ ${EXIT_VAL} != 0 ]; then
-                echo "ERROR: multiplex failed with an error and returned rc=$rc"
-                echo "multiplex output is:"
-                cat ${bench_params_run_output}
-                exit ${EXIT_VAL}
-            fi
-
-            bench_params=${bench_params_run_file}
-        fi
     elif [ ! -e ${bench_params} ]; then
         echo "ERROR:"
         echo "Make sure you have defined the benchmark parameters and put them in a file \"./bench-params.json\""
@@ -450,5 +466,6 @@ else
     echo "ERROR: This function has not been implemented"
     EXIT_VAL=1
 fi
+
 
 exit ${EXIT_VAL}
