@@ -4,6 +4,11 @@
 
 # update a git repository from the current working directory
 
+# git outputs to both STDOUT and STDERR; lets force everything to
+# STDOUT so that the output makes more sense when run many times
+# (since it keeps the relevant output together)
+exec 2>&1
+
 if [ -d "./.git" ]; then
     # pull updates from remote(s)
     git remote --verbose update --prune
