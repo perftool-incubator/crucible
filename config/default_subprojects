@@ -26,3 +26,4 @@ forkstat             tool           /tool-forkstat                              
 flexran              benchmark      /bench-flexran                                  main
 iperf                benchmark      /bench-iperf                                    main
 examples             doc            /crucible-examples                              main
+testing              doc            /testing-repo                                   master
