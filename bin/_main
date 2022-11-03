@@ -232,6 +232,8 @@ elif [ "${1}" == "run" ]; then
                 tool_params=${base_run_dir}/config/${tool_params}
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config mv-params > $mv_params
                 python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config tool-params > $tool_params
+                tags_str=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config tags)
+                endpoint_str=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config endpoint)
                 passthru_blk=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru-args)
                 passthru_str=$(sed -e 's/^"//' -e 's/"$//' <<< ${passthru_blk})
                 passthru_args+=("${passthru_str}")
@@ -242,6 +244,17 @@ elif [ "${1}" == "run" ]; then
                 ;;
         esac
     done
+
+    if [ -n "$tags_str" ]; then
+        tags_str = " --tags " + $tags_str
+        passthru_args+=$tags_str
+    fi
+
+    if [ -n "$endpoint_str" ]; then
+        endpoint_str = " --endpoint " + $endpoint_str
+        passthru_args+=$endpoint_str
+    fi
+
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
         exit_error "CRUCIBLE_CLIENT_SERVER_REPO is not defined"
     fi
