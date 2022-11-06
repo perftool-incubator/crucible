@@ -236,7 +236,6 @@ elif [ "${1}" == "run" ]; then
                 endpoint_str=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config endpoint)
                 passthru_blk=$(python3 ${TOOLBOX_HOME}/bin/get-json-config.py --json ${run_file} --config passthru-args)
                 passthru_str=$(sed -e 's/^"//' -e 's/"$//' <<< ${passthru_blk})
-                passthru_args+=("${passthru_str}")
                 use_mv_params=1
                 ;;
             *)
@@ -244,6 +243,11 @@ elif [ "${1}" == "run" ]; then
                 ;;
         esac
     done
+
+    # merge passthru args from json file
+    if [ -n "$passthru_str" ]; then
+        passthru_args+=("${passthru_str}")
+    fi
 
     if [ -n "$tags_str" ]; then
         tags_str = " --tags " + $tags_str
