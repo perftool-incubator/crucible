@@ -250,12 +250,12 @@ elif [ "${1}" == "run" ]; then
     fi
 
     if [ -n "$tags_str" ]; then
-        tags_str = " --tags " + $tags_str
+        tags_str = " --tags ${tags_str}"
         passthru_args+=$tags_str
     fi
 
     if [ -n "$endpoint_str" ]; then
-        endpoint_str = " --endpoint " + $endpoint_str
+        endpoint_str = " --endpoint ${endpoint_str}"
         passthru_args+=$endpoint_str
     fi
 
