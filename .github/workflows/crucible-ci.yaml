@@ -109,8 +109,6 @@ jobs:
         ci_endpoint: "${{ matrix.scenario.endpoint }}"
         scenarios: "${{ matrix.scenario.benchmark }}"
         userenvs: "${{ matrix.userenv }}"
-        run_samples: 3
-        repeat_runs: "yes"
         ci_target: "crucible"
         ci_target_dir: ${{ github.workspace }}/crucible
         ci_build_controller: ${{ needs.generate-job-matrix-parameters.outputs.build_controller }}
@@ -158,8 +156,6 @@ jobs:
         ci_endpoint: "${{ matrix.scenario.endpoint }}"
         scenarios: "${{ matrix.scenario.benchmark }}"
         userenvs: "${{ matrix.userenv }}"
-        run_samples: 3
-        repeat_runs: "yes"
         ci_target: "crucible"
         ci_target_dir: ${{ github.workspace }}/crucible
         ci_build_controller: ${{ needs.generate-job-matrix-parameters.outputs.build_controller }}
