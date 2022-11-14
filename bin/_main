@@ -245,18 +245,18 @@ elif [ "${1}" == "run" ]; then
     done
 
     # merge passthru args from json file
-    if [ -n "$passthru_str" ]; then
-        passthru_args+=("${passthru_str}")
+    if [ -n "${passthru_str}" ]; then
+        passthru_args="${passthru_args[*]} ${passthru_str}"
     fi
 
-    if [ -n "$tags_str" ]; then
-        tags_str = " --tags ${tags_str}"
-        passthru_args+=$tags_str
+    if [ -n "${tags_str}" ]; then
+        tags_str=" --tags ${tags_str}"
+        passthru_args="${tags_str} ${passthru_args}"
     fi
 
-    if [ -n "$endpoint_str" ]; then
-        endpoint_str = " --endpoint ${endpoint_str}"
-        passthru_args+=$endpoint_str
+    if [ -n "${endpoint_str}" ]; then
+        endpoint_str=" --endpoint ${endpoint_str}"
+        passthru_args="${endpoint_str} ${passthru_args}"
     fi
 
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
