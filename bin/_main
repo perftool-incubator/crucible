@@ -97,8 +97,7 @@ elif [ "${1}" == "get" ]; then
     if [ $EXIT_VAL == 0 ]; then
         if [ "${1}" == "result" ]; then
             shift
-            get_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
-            $podman_run --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_result_cmd "$@"
+            get_result "$@"
             EXIT_VAL=$?
         elif [ "${1}" == "metric" ]; then
             shift
@@ -120,8 +119,8 @@ elif [ "${1}" == "rm" ]; then
 elif [ "${1}" == "index" ]; then
     shift
     if start_es; then
-        index_result_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index"
-        $podman_run --name crucible-rickshaw-index-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $index_result_cmd "$@"
+        base_run_dir=$(echo "$@" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
+        index_run "$base_run_dir"
     fi
     EXIT_VAL=$?
 elif [ "${1}" == "extract" ]; then
@@ -158,6 +157,9 @@ elif [ "${1}" == "es" ]; then
                     if [ -d "$base_run_dir" ]; then
                         echo "Going to post-process and index $base_run_dir"
                         post_process_run "${var_run_crucible}/${base_run_dir}"
+                        index_run "${var_run_crucible}/${base_run_dir}"
+                        this_id=$(extract_run_id "${var_run_crucible}/${base_run_dir}")
+                        get_result --run $this_id
                         RC=$?
                         if [ ${RC} != 0 ]; then
                             echo "ERROR: Failed to post-process ${base_run_dir} [rc=${RC}]"
@@ -393,7 +395,9 @@ elif [ "${1}" == "run" ]; then
     RC=$?
 
     if [ ${RC} == 0 ]; then
-        post_process_run ${base_run_dir}
+        post_process_run ${base_run_dir} &&\
+        index_run ${base_run_dir} &&\
+        get_result --run $(extract_run_id "${base_run_dir}")
         EXIT_VAL=$?
     else
         echo "Skipping run post-processing due to error(s) [rc=${RC}]"
