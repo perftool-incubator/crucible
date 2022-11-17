@@ -537,6 +537,8 @@ function post_process_run() {
     local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
 
+    start_es
+
     RUN_DIR=${1}
     echo "Benchmark result is in ${RUN_DIR}"
     shift
