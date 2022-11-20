@@ -537,8 +537,6 @@ function post_process_run() {
     local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
 
-    start_es
-
     RUN_DIR=${1}
     echo "Benchmark result is in ${RUN_DIR}"
     shift
@@ -588,6 +586,11 @@ function index_run() {
 
     start_es
     RC=$?
+    if [ ${RC} != 0 ]; then
+        return ${RC}
+    fi
+
+    init_es
     if [ ${RC} != 0 ]; then
         return ${RC}
     fi
