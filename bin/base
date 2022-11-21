@@ -533,7 +533,7 @@ function extract_primary_periods() {
 }
 
 function post_process_run() {
-    local rs_pp_b_cmd ps_pp_t_cmd rs_index_cmd cdm_query_cmd
+    local rs_pp_b_cmd ps_pp_t_cmd
     local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
 
@@ -545,20 +545,6 @@ function post_process_run() {
       --base-run-dir=${RUN_DIR}"
     rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools\
       --base-run-dir=${RUN_DIR}"
-    rs_index_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index\
-      --base-run-dir=${RUN_DIR}"
-
-    start_httpd
-    RC=$?
-    if [ ${RC} != 0 ]; then
-        return ${RC}
-    fi
-
-    start_es
-    RC=$?
-    if [ ${RC} != 0 ]; then
-        return ${RC}
-    fi
 
     post_process_fail=0
     $podman_run --name crucible-rickshaw-pp-bench-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_pp_b_cmd
@@ -577,8 +563,34 @@ function post_process_run() {
         return 1
     fi
 
-    init_es
+    return ${RC}
+}
+
+function index_run() {
+    local rs_index_cmd cdm_query_cmd
+    local run_json this_id RUN_DIR
+    local post_process_fail RC result_summary
+
+    RUN_DIR=${1}
+    echo "Benchmark result is in ${RUN_DIR}"
+    shift
+
+    rs_index_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index\
+      --base-run-dir=${RUN_DIR}"
+
+    start_httpd
     RC=$?
+    if [ ${RC} != 0 ]; then
+        return ${RC}
+    fi
+
+    start_es
+    RC=$?
+    if [ ${RC} != 0 ]; then
+        return ${RC}
+    fi
+
+    init_es
     if [ ${RC} != 0 ]; then
         return ${RC}
     fi
@@ -587,33 +599,30 @@ function post_process_run() {
     RC=$?
     if [ ${RC} == 0 ]; then
         echo "Benchmark result now in elastic, localhost:9200"
-
-        this_id=$(extract_run_id "${RUN_DIR}")
         RC=$?
-
-        if [ ${RC} == 0 ]; then
-            cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh"
-            cdm_query_cmd+=" --run=${this_id}"
-            echo "Generating benchmark summary report"
-            result_summary="${RUN_DIR}/run/result-summary.txt"
-            $podman_run --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd > ${result_summary}
-            RC=$?
-            cat ${result_summary}
-            if [ ${RC} == 0 ]; then
-                echo
-                echo "Benchmark summary is complete and can be found in:"
-                echo "${RUN_DIR}/run/result-summary.txt"
-            else
-                echo "ERROR: Could not generate benchmark summary"
-                RC=1
-            fi
-        else
-            echo "${this_id}"
-        fi
     else
         echo "ERROR: Could not index result into elasticsearch [rc=${RC}]"
     fi
 
+    return ${RC}
+}
+
+function get_result() {
+
+    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@"
+    echo "Generating benchmark summary report"
+    result_summary="${RUN_DIR}/run/result-summary.txt"
+    $podman_run --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd > ${result_summary}
+    RC=$?
+    cat ${result_summary}
+    if [ ${RC} == 0 ]; then
+        echo
+        echo "Benchmark summary is complete and can be found in:"
+        echo "${RUN_DIR}/run/result-summary.txt"
+    else
+        echo "ERROR: Could not generate benchmark summary"
+        RC=1
+    fi
     return ${RC}
 }
 
