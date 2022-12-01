@@ -607,22 +607,48 @@ function index_run() {
     return ${RC}
 }
 
-function get_result() {
+function get_result_backend() {
+    local RC
 
     cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@"
-    echo "Generating benchmark summary report"
-    result_summary="${RUN_DIR}/run/result-summary.txt"
-    $podman_run --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd > ${result_summary}
+    $podman_run --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $cdm_query_cmd
     RC=$?
-    cat ${result_summary}
+    return ${RC}
+}
+
+function get_result_to_file() {
+    local RC
+
+    local output_file="$1/run/result-summary.txt"; shift
+
+    echo "Generating benchmark summary report:"
+    get_result_backend "$@" > ${output_file}
+    RC=$?
+    cat ${output_file}
     if [ ${RC} == 0 ]; then
         echo
         echo "Benchmark summary is complete and can be found in:"
-        echo "${RUN_DIR}/run/result-summary.txt"
+        echo "${output_file}"
     else
         echo "ERROR: Could not generate benchmark summary"
         RC=1
     fi
+
+    return ${RC}
+}
+
+function get_result() {
+    local RC
+
+    echo "Generating benchmark summary report:"
+    get_result_backend "$@"
+    RC=$?
+
+    if [ ${RC} != 0 ]; then
+        echo "ERROR: Could not generate benchmark summary"
+        RC=1
+    fi
+
     return ${RC}
 }
 
