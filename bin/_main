@@ -246,9 +246,12 @@ elif [ "${1}" == "run" ]; then
         esac
     done
 
-    # merge passthru args from json file
+    if [ -n "${passthru_str}" && -n "${passthru_args}" ]; then
+        exit_error "Error: --from-file option cannot be used with --tags or passthru args."
+    fi
+
     if [ -n "${passthru_str}" ]; then
-        passthru_args="${passthru_args[*]} ${passthru_str}"
+        passthru_args="${passthru_str}"
     fi
 
     if [ -n "${tags_str}" ]; then
