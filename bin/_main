@@ -291,14 +291,11 @@ elif [ "${1}" == "run" ]; then
         count=1
         bench_params=""
         for this_mv_params in `echo ${mv_params} | sed -e 's/,/ /'`; do
-            echo "this_mv_params: [$this_mv_params]"
             if [ ! -e "${this_mv_params}" ]; then
                 exit_error "The multi-value params file you specified with --mv-params (${this_mv_params}) does not exist!"
             else
                 this_benchmark=`echo ${benchmark} | cut -d, -f$count`
-                echo "this_benchmark: [$this_benchmark]"
                 this_benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | cut -d, -f$count`
-                echo "this_benchmark_subproject_dir: [$this_benchmark_subproject_dir]"
                 echo "Generating --bench-params from --mv-params..."
                 this_mv_params_run_dir=${base_run_dir}/config/${this_benchmark}-mv-params.json
                 cp ${this_mv_params} ${this_mv_params_run_dir}
