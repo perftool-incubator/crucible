@@ -310,7 +310,6 @@ elif [ "${1}" == "run" ]; then
                 fi
     
                 multiplex_cmd="$podman_run -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
-                echo "${multiplex_cmd} > ${bench_params_run_output} 2>&1"
                 ${multiplex_cmd} > ${bench_params_run_output} 2>&1
                 EXIT_VAL=$?
                 if [ ${EXIT_VAL} != 0 ]; then
@@ -386,8 +385,6 @@ elif [ "${1}" == "run" ]; then
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
 
-    echo "rickshaw run command: ${rs_run_cmd}"
-    echo "podman_run --name crucible-rickshaw-run-${SESSION_ID} \"${container_common_args[@]}\" \"${container_rs_args[@]}\" \"${container_build_args[@]}\" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd"
     $podman_run --name crucible-rickshaw-run-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
     RC=$?
 
