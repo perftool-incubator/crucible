@@ -246,7 +246,7 @@ elif [ "${1}" == "run" ]; then
         esac
     done
 
-    if [ -n "${passthru_str}" && -n "${passthru_args}" ]; then
+    if [ -n "${passthru_str}" -a -n "${passthru_args}" ]; then
         exit_error "Error: --from-file option cannot be used with --tags or passthru args."
     fi
 
