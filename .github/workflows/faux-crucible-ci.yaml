@@ -10,7 +10,5 @@ on:
     - 'docs/**'
 
 jobs:
-  crucible-ci-complete:
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required" '
+  call-core-crucible-ci:
+    uses: perftool-incubator/crucible-ci/.github/workflows/faux-core-crucible-ci.yaml@main
