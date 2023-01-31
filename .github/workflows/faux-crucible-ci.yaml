@@ -7,6 +7,7 @@ on:
     - LICENSE
     - '**.md'
     - .github/workflows/faux-crucible-ci.yaml
+    - .github/workflows/faux-ci.yaml
     - 'docs/**'
 
 jobs:
