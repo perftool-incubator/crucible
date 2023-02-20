@@ -172,4 +172,7 @@ case "${repo}" in
         ;;
 esac
 
+echo
+${CRUCIBLE_HOME}/bin/repo info
+
 exit ${RC}
