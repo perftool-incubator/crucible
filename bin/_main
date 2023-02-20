@@ -55,36 +55,9 @@ elif [ "${1}" == "update" ]; then
         ${CRUCIBLE_HOME}/bin/update ${1}
         EXIT_VAL=$?
     fi
-elif [ "${1}" == "start" ]; then
-    shift
-    if [ "${1}" == "httpd" ]; then
-        shift
-        start_httpd
-        EXIT_VAL=$?
-    elif [ "${1}" == "es" ]; then
-        shift
-        start_es
-        EXIT_VAL=$?
-    elif [ "${1}" == "redis" ]; then
-        shift
-        start_redis
-        EXIT_VAL=$?
-    fi
-elif [ "${1}" == "stop" ]; then
-    shift
-    if [ "${1}" == "httpd" ]; then
-        shift
-        stop_httpd
-        EXIT_VAL=$?
-    elif [ "${1}" == "es" ]; then
-        shift
-        stop_es
-        EXIT_VAL=$?
-    elif [ "${1}" == "redis" ]; then
-        shift
-        stop_redis
-        EXIT_VAL=$?
-    fi
+elif [ "${1}" == "start" -o "${1}" == "stop" ]; then
+    service_control "$@"
+    EXIT_VAL=$?
 elif [ "${1}" == "get" ]; then
     shift
     if start_httpd; then
