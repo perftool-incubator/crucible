@@ -11,17 +11,30 @@ exec 2>&1
 
 if [ -d "./.git" ]; then
     # pull updates from remote(s)
-    git remote --verbose update --prune
+    if ! git remote --verbose update --prune; then
+	echo "ERROR: could not git-update"
+	exit 1
+    fi
 
     # store any local changes
     stash_output=$(git stash)
+    if [ $? != 0 ]; then
+	echo "ERROR: could not git-stash"
+	exit 1
+    fi
     echo -e ${stash_output}
 
     # merge any changes from the remote branch
-    git pull --verbose --ff-only
+    if ! git pull --verbose --ff-only; then
+	echo "ERROR: could not git-pull"
+	exit 1
+    fi
 
     if ! echo "${stash_output}" | grep -q "No local changes to save"; then
         # reapply local changes
-        git stash pop
+        if ! git stash pop; then
+	    echo "ERROR: could not git-stash pop"
+	    exit 1
+	fi
     fi
 fi

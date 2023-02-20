@@ -48,6 +48,8 @@ else
     repo="$1"
 fi
 
+RC=0
+
 case "${repo}" in
     "all"|"__all"|"crucible"|"__crucible")
         case "${repo}" in
@@ -66,18 +68,21 @@ case "${repo}" in
         # ensure that updates can be done to the crucible repository
         # in a manner which does not break the update process
 
-        pushd $CRUCIBLE_HOME > /dev/null
+        if pushd ${CRUCIBLE_HOME} > /dev/null; then
+            # create and execute a temporary script so that changes to the
+            # "real" script do not break the updating process while it is
+            # running -- ie. handle bash does not behave when the script
+            # is changed while it is running
+            TMP_SCRIPT=$(mktemp)
+            cp -a ${CRUCIBLE_HOME}/bin/_update-git ${TMP_SCRIPT}
+            echo "rm ${TMP_SCRIPT}" >> ${TMP_SCRIPT}
+            echo "exec ${CRUCIBLE_HOME}/bin/update __${repo}" >> ${TMP_SCRIPT}
 
-        # create and execute a temporary script so that changes to the
-        # "real" script do not break the updating process while it is
-        # running -- ie. handle bash does not behave when the script
-        # is changed while it is running
-        TMP_SCRIPT=$(mktemp)
-        cp -a $CRUCIBLE_HOME/bin/_update-git ${TMP_SCRIPT}
-        echo "rm ${TMP_SCRIPT}" >> ${TMP_SCRIPT}
-        echo "exec ${CRUCIBLE_HOME}/bin/update __${repo}" >> ${TMP_SCRIPT}
-
-        exec ${TMP_SCRIPT}
+            exec ${TMP_SCRIPT}
+        else
+            echo "ERROR: failed to pushd to ${CRUCIBLE_HOME}"
+            exit 1
+        fi
         ;;
 esac
 
@@ -96,13 +101,15 @@ case "${repo}" in
         echo "Controller update:"
         echo
         echo "Shutting down existing controller pods:"
-        stop_es
-        stop_httpd
-        stop_redis
+        if ! service_control stop es httpd redis; then
+            RC=1
+        fi
         echo
         echo "Checking for new controller image:"
         echo
-        ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}
+        if ! ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}; then
+            RC=1
+        fi
         ;;
     *)
         repo_dir=$(find ${CRUCIBLE_HOME}/subprojects -maxdepth 2 -mindepth 2 -name ${repo} -type l)
@@ -112,9 +119,11 @@ case "${repo}" in
             echo
 
             if pushd "${repo_dir}" > /dev/null; then
-                $CRUCIBLE_HOME/bin/_update-git
-                popd > /dev/null
-                exit
+                if $CRUCIBLE_HOME/bin/_update-git; then
+                    exit 0
+                else
+                    exit 1
+                fi
             else
                 echo "Could not pushd to ${repo_dir}"
                 exit 1
@@ -134,8 +143,11 @@ if [ "${repo}" == "____all" ]; then
             echo
 
             if pushd ${tmp_repo} > /dev/null; then
-                $CRUCIBLE_HOME/bin/_update-git
-                popd > /dev/null
+                if $CRUCIBLE_HOME/bin/_update-git; then
+                    popd > /dev/null
+                else
+                    RC=1
+                fi
             fi
         done
         popd > /dev/null
@@ -154,6 +166,10 @@ case "${repo}" in
         echo "Checking for and installing any new subprojects:"
         echo
 
-        ${CRUCIBLE_HOME}/bin/subprojects-install
+        if ! ${CRUCIBLE_HOME}/bin/subprojects-install; then
+            RC=1
+        fi
         ;;
 esac
+
+exit ${RC}
