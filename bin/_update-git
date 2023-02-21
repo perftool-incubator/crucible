@@ -11,17 +11,45 @@ exec 2>&1
 
 if [ -d "./.git" ]; then
     # pull updates from remote(s)
-    git remote --verbose update --prune
-
-    # store any local changes
-    stash_output=$(git stash)
-    echo -e ${stash_output}
-
-    # merge any changes from the remote branch
-    git pull --verbose --ff-only
-
-    if ! echo "${stash_output}" | grep -q "No local changes to save"; then
-        # reapply local changes
-        git stash pop
+    if ! git remote --verbose update --prune; then
+	echo "ERROR: could not git-update"
+	exit 1
     fi
+
+    git_status=$(git status --porcelain=2 --untracked-files=no --branch)
+    git_tracking=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+
+    if [ -n "${git_tracking}" -a "${git_tracking}" != "(detached)" ]; then
+	# store any local changes
+	stash_output=$(git stash)
+	if [ $? != 0 ]; then
+	    echo "ERROR: could not git-stash"
+	    exit 1
+	fi
+	echo -e ${stash_output}
+
+	# merge any changes from the remote branch
+	if ! git pull --verbose --ff-only; then
+	    echo "ERROR: could not git-pull"
+	    exit 1
+	fi
+
+	if ! echo "${stash_output}" | grep -q "No local changes to save"; then
+            # reapply local changes
+            if ! git stash pop; then
+		echo "ERROR: could not git-stash pop"
+		exit 1
+	    fi
+	fi
+    else
+	if [ "${git_tracking}" == "(detached)" ]; then
+	    echo "WARNING: This git repo is in a detached state, not modifying the active contents"
+	else
+	    echo "ERROR: This git repo is in an unknown state"
+	    exit 1
+	fi
+    fi
+else
+    echo "ERROR: this is not a valid git repo"
+    exit 1
 fi

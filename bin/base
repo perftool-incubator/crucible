@@ -822,3 +822,47 @@ function confirm_continue() {
 
     ref="${selection}"
 }
+
+function service_control() {
+    local action
+    local service
+    local action_rc
+    local service_rc
+    local function_name
+
+    function_name="service_control"
+
+    action="${1}"
+    shift
+
+    case "${action}" in
+        "start"|"stop")
+            ;;
+        *)
+            echo "ERROR: ${function_name}: invalid action [${action}]"
+            return 1
+            ;;
+    esac
+
+    action_rc=0
+
+    while [ $# -gt 0 ]; do
+        service="${1}"
+        shift
+
+        case "${service}" in
+            "httpd"|"es"|"redis")
+                ${action}_${service}
+                service_rc=$?
+                ;;
+            *)
+                echo "ERROR: ${function_name}: unknown service [${service}]"
+                service_rc=1
+                ;;
+        esac
+
+        action_rc=$(( action_rc + service_rc ))
+    done
+
+    return ${action_rc}
+}
