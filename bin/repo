@@ -74,12 +74,19 @@ function repo_info() {
 
         local current_commit=$(git rev-parse --short HEAD)
 
+        local git_delta_behind=$(echo "${git_status}" | grep "branch\.ab" | awk '{ print $4 }' | sed -e "s/^-//" )
+        if [ "${git_delta_behind}" == "0" ]; then
+            updates_available="-"
+        else
+            updates_available="${git_delta_behind}"
+        fi
+
         popd > /dev/null
     else
         echo "ERROR: Failed to pushd to ${dir}"
     fi
 
-    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}" "${current_commit}"
+    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}" "${current_commit}" "${updates_available}"
 }
 
 function repo_details() {
@@ -199,8 +206,8 @@ fi
 
 case "${command}" in
     info)
-        fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-13s"
-        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit"
+        fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-14s  %-13s"
+        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit" "Updates"
 
         handle_scope info ${scope}
         ;;
