@@ -10,7 +10,7 @@
 exec 2>&1
 
 if [ -d "./.git" ]; then
-    # pull updates from remote(s)
+    # fetch updates from remote(s)
     if ! git remote --verbose update --prune; then
 	echo "ERROR: could not git-update"
 	exit 1
