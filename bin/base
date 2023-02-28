@@ -867,3 +867,55 @@ function service_control() {
 
     return ${action_rc}
 }
+
+function git_get_status() {
+    git status --porcelain=2 --untracked-files=no --branch
+
+    # returns
+    # # branch.oid <commit> | (initial)        Current commit.
+    # # branch.head <branch> | (detached)      Current branch.
+    # # branch.upstream <upstream_branch>      If upstream is set.
+    # # branch.ab +<ahead> -<behind>           If upstream is set and the commit is present.
+    # <list of modified files>
+    #
+    # for example:
+    # # branch.oid 315fb8994310011b6773af3010b2333aadef1ff5
+    # # branch.head master
+    # # branch.upstream origin/master
+    # # branch.ab +0 -0
+    # 1 .M N... 100755 100755 100755 c43e7fede957184824553c428d3dbeb3f91030f9 c43e7fede957184824553c428d3dbeb3f91030f9 bin/_update-git
+    # 1 .M N... 100644 100644 100644 e7235f36dca770e60d40912986937bdaa57be9a2 e7235f36dca770e60d40912986937bdaa57be9a2 bin/base
+    # 1 .M N... 100755 100755 100755 4543d7681d45bc8e21a7c6ebe363b271443f55b7 4543d7681d45bc8e21a7c6ebe363b271443f55b7 bin/crucible
+    # 1 .M N... 100755 100755 100755 7975ea7d2d4b8fa0b5c2872a99f3572535ed9731 7975ea7d2d4b8fa0b5c2872a99f3572535ed9731 bin/repo
+    # 1 .M N... 100755 100755 100755 5ce86d116566594258efb014c0d17efd172ad23d 5ce86d116566594258efb014c0d17efd172ad23d bin/update
+}
+
+# from output of git_get_status
+function git_get_tracking() {
+    echo "${1}" | grep "branch\.upstream" | awk '{ print $3 }'
+}
+
+# from output of git_get_status
+function git_get_delta_behind() {
+    echo "${1}" | grep "branch\.ab" | awk '{ print $4 }' | sed -e "s/^-//"
+}
+
+# from output of git_get_status
+function git_get_tracked_entries() {
+    echo "${1}" | grep -v "^#" | wc -l
+}
+
+# from output of git_get_status
+function git_get_local_branch() {
+    echo "${1}" | grep "branch\.head" | awk '{ print $3 }'
+}
+
+# from output git_get_tracking
+function git_get_remote_name() {
+    echo "${1}" | awk -F'/' '{ print $1 }'
+}
+
+# from output git_get_tracking
+function git_get_remote_branch() {
+    echo "${1}" | awk -F'/' '{ print $2 }'
+}

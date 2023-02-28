@@ -50,11 +50,11 @@ fi
                 if [ -d "./.git" ]; then
                     git remote --verbose update --prune
 
-                    git_status=$(git status --porcelain=2 --untracked-files=no --branch)
-                    git_tracking=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+                    git_status=$(git_get_status)
+                    git_tracking=$(git_get_tracking "${git_status}")
 
                     if [ -n "${git_tracking}" -a "${git_tracking}" != "(detached)" ]; then
-                        git_delta_behind=$(echo "${git_status}" | grep "branch\.ab" | awk '{ print $4 }' | sed -e "s/^-//" )
+                        git_delta_behind=$(git_get_delta_behind "${git_status}")
                         if [ "${git_delta_behind}" != "0" ]; then
                             (( UPDATE_COUNT += git_delta_behind ))
                         fi
