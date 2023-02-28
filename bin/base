@@ -10,6 +10,7 @@ if [ ! -d ${USER_STORE} ]; then
     mkdir -v ${USER_STORE}
 fi
 LOG_DB=${USER_STORE}/log.db
+UPDATE_STATUS_FILE="${USER_STORE}/update-status"
 
 if [ -z "${HOSTFS_DIR}" ]; then
     export CRUCIBLE_HOSTFS_PWD=$(pwd)

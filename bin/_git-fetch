@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# fetch git updates for all remotes
+
+. /etc/sysconfig/crucible
+
+if [ -z "${CRUCIBLE_HOME}" ]; then
+    echo "CRUCIBLE_HOME not defined, exiting."
+    exit 1
+fi
+
+if [ ! -e ${CRUCIBLE_HOME} ]; then
+    echo "Could not find ${CRUCIBLE_HOME}, exiting."
+    exit 1
+fi
+
+source ${CRUCIBLE_HOME}/bin/base
+
+LOCK_FILE="${UPDATE_STATUS_FILE}.lock"
+
+if [ -e "${LOCK_FILE}" ]; then
+    exit 0
+fi
+
+touch "${LOCK_FILE}"
+
+if [ -e "${UPDATE_STATUS_FILE}" ]; then
+    read FETCH_TIMESTAMP OTHER < "${UPDATE_STATUS_FILE}"
+
+    CURRENT_TIMESTAMP=$(date +%s)
+
+    # re-run every 24 hours
+    INVALID_TIMESTAMP=$(( FETCH_TIMESTAMP + 24*60*60 ))
+
+    if [ ${INVALID_TIMESTAMP} -gt ${CURRENT_TIMESTAMP} ]; then
+        rm "${LOCK_FILE}"
+        exit 0
+    fi
+fi
+
+{
+    UPDATE_COUNT=0
+
+    if pushd ${CRUCIBLE_HOME}/subprojects > /dev/null; then
+        for tmp_repo in $(find . -maxdepth 2 -mindepth 2 -type l | sed 'sX./XX'); do
+            echo "REPO: ${tmp_repo}"
+            if pushd ${tmp_repo} > /dev/null; then
+                if [ -d "./.git" ]; then
+                    git remote --verbose update --prune
+
+                    git_status=$(git status --porcelain=2 --untracked-files=no --branch)
+                    git_tracking=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+
+                    if [ -n "${git_tracking}" -a "${git_tracking}" != "(detached)" ]; then
+                        git_delta_behind=$(echo "${git_status}" | grep "branch\.ab" | awk '{ print $4 }' | sed -e "s/^-//" )
+                        if [ "${git_delta_behind}" != "0" ]; then
+                            (( UPDATE_COUNT += git_delta_behind ))
+                        fi
+                    fi
+                else
+                    echo "ERROR: not a git repo"
+                fi
+                popd > /dev/null
+            fi
+            echo
+        done
+        popd > /dev/null
+    else
+        echo "ERROR: Could not pushd to ${CRUCIBLE_HOME}/subprojects"
+        exit 1
+    fi
+
+    CURRENT_TIMESTAMP=$(date +%s)
+    echo "${CURRENT_TIMESTAMP} ${UPDATE_COUNT}" > "${UPDATE_STATUS_FILE}"
+} > "${UPDATE_STATUS_FILE}.log" 2>&1
+
+rm "${LOCK_FILE}"
