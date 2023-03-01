@@ -156,15 +156,25 @@ for subproject in "${!subprojects[@]}"; do
                 exit_error "Could not clone repo ${sp_git_proj}"
             fi
         fi
+        if pushd "${clone_user_host_org_proj_dir}" >/dev/null; then
+            cmd="git checkout ${sp_branch}"
+            echo "${cmd}"
+            if ! ${cmd}; then
+                exit_error "Could not checkout ${sp_branch} for ${sp_git_user_host_org}/${sp_git_proj}"
+            fi
+            popd >/dev/null
+        else
+            exit_error "Could not chdir to ${clone_user_host_org_proj_dir}"
+        fi
+        if ! /bin/rm -f "${subproject_dir}"; then
+            exit_error "Could not rm ${subproject_dir}"
+        fi
+        if ! /bin/ln -sf "../../${clone_user_host_org_proj_dir}" "${subproject_dir}"; then
+            exit_error "Symlinking ${subproject_dir} to ../../${clone_user_host_org_proj_dir} failed"
+        fi
     else
         no_clone="$no_clone $subproject"
     fi
-    pushd "$clone_user_host_org_proj_dir" >/dev/null || exit_error "Could not chdir to $clone_user_host_org_proj_dir"
-    git checkout $sp_branch >/dev/null 2>&1 || exit_error "Could not checkout $sp_branch for $sp_git_user_host_org/$sp_git_proj"
-    popd >/dev/null
-    /bin/rm -f "$subproject_dir" || exit_error "Could not rm $subproject_dir"
-    /bin/ln -sf "../../$clone_user_host_org_proj_dir" "$subproject_dir" || \
-        exit_error "Symlinking $subproject_dir to ../../$clone_user_host_org_proj_dir failed"
 done
 if [ ! -z "$no_clone" ]; then
     echo "Not cloning these subprojects as they already exist:"
