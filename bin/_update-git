@@ -25,7 +25,7 @@ source "${CRUCIBLE_HOME}/bin/base"
 
 if [ -d "./.git" ]; then
     # fetch updates from remote(s)
-    if ! git remote --verbose update --prune; then
+    if ! git remote --verbose update --prune > /dev/null 2>&1; then
 	echo "ERROR: could not git-update"
 	exit 1
     fi
@@ -41,17 +41,17 @@ if [ -d "./.git" ]; then
 	    echo "ERROR: could not git-stash"
 	    exit 1
 	fi
-	echo -e ${stash_output}
 
 	# merge any changes from the remote branch
-	if ! git pull --verbose --ff-only; then
+	if ! git pull --verbose --ff-only 2> /dev/null; then
 	    echo "ERROR: could not git-pull"
 	    exit 1
 	fi
 
 	if ! echo "${stash_output}" | grep -q "No local changes to save"; then
             # reapply local changes
-            if ! git stash pop; then
+            if ! git stash pop > /dev/null; then
+		echo -e "${stash_output}"
 		echo "ERROR: could not git-stash pop"
 		exit 1
 	    fi
