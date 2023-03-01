@@ -66,22 +66,22 @@ function repo_info() {
             local git_remote_name=$(git_get_remote_name "${git_tracking}")
             local git_remote_branch=$(git_get_remote_branch "${git_tracking}")
             local git_remote_url=$(git remote get-url ${git_remote_name})
+            local git_delta_behind=$(git_get_delta_behind "${git_status}")
+            if [ "${git_delta_behind}" == "0" ]; then
+                local updates_available="-"
+            else
+                local updates_available="${git_delta_behind}"
+            fi
         else
             # this likely means the branch is not tracking any
             # upstream repository branch (yet)
             local git_remote_name="N/A"
             local git_remote_branch="N/A"
             local git_remote_url="N/A"
+            local updates_available="N/A"
         fi
 
         local current_commit=$(git rev-parse --short HEAD)
-
-        local git_delta_behind=$(git_get_delta_behind "${git_status}")
-        if [ "${git_delta_behind}" == "0" ]; then
-            updates_available="-"
-        else
-            updates_available="${git_delta_behind}"
-        fi
 
         popd > /dev/null
     else
