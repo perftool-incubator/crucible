@@ -9,6 +9,8 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     exit 1
 fi
 
+source "${CRUCIBLE_HOME}/bin/base"
+
 function help() {
     echo "Usage:"
     echo "  repo <command> [command-specific-options]"
@@ -51,25 +53,32 @@ function repo_info() {
     fi
 
     if pushd ${dir} > /dev/null; then
-        local git_status=$(git status --porcelain=2 --untracked-files=no --branch)
-        local git_tracked_entries=$(echo "${git_status}" | grep -v "^#" | wc -l)
+        local git_status=$(git_get_status)
+        local git_tracked_entries=$(git_get_tracked_entries "${git_status}")
         if [ "${git_tracked_entries}" == "0" ]; then
             local_changes="N"
         else
             local_changes="Y"
         fi
-        local git_tracking=$(echo "${git_status}" | grep "branch\.upstream" | awk '{ print $3 }')
-        local git_local_branch=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+        local git_tracking=$(git_get_tracking "${git_status}")
+        local git_local_branch=$(git_get_local_branch "${git_status}")
         if [ -n "${git_tracking}" ]; then
-            local git_remote_name=$(echo "${git_tracking}" | awk -F'/' '{ print $1 }')
-            local git_remote_branch=$(echo "${git_tracking}" | awk -F'/' '{ print $2 }')
+            local git_remote_name=$(git_get_remote_name "${git_tracking}")
+            local git_remote_branch=$(git_get_remote_branch "${git_tracking}")
             local git_remote_url=$(git remote get-url ${git_remote_name})
+            local git_delta_behind=$(git_get_delta_behind "${git_status}")
+            if [ "${git_delta_behind}" == "0" ]; then
+                local updates_available="-"
+            else
+                local updates_available="${git_delta_behind}"
+            fi
         else
             # this likely means the branch is not tracking any
             # upstream repository branch (yet)
             local git_remote_name="N/A"
             local git_remote_branch="N/A"
             local git_remote_url="N/A"
+            local updates_available="N/A"
         fi
 
         local current_commit=$(git rev-parse --short HEAD)
@@ -79,7 +88,7 @@ function repo_info() {
         echo "ERROR: Failed to pushd to ${dir}"
     fi
 
-    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}" "${current_commit}"
+    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}" "${current_commit}" "${updates_available}"
 }
 
 function repo_details() {
@@ -199,8 +208,8 @@ fi
 
 case "${command}" in
     info)
-        fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-13s"
-        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit"
+        fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-14s  %-13s"
+        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit" "Updates"
 
         handle_scope info ${scope}
         ;;

@@ -50,6 +50,10 @@ fi
 
 RC=0
 
+if [ -e "${UPDATE_STATUS_FILE}" ]; then
+    rm "${UPDATE_STATUS_FILE}" "${UPDATE_STATUS_FILE}.log"
+fi
+
 case "${repo}" in
     "all"|"__all"|"crucible"|"__crucible")
         case "${repo}" in
