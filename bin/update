@@ -147,11 +147,10 @@ if [ "${repo}" == "____all" ]; then
             echo
 
             if pushd ${tmp_repo} > /dev/null; then
-                if $CRUCIBLE_HOME/bin/_update-git; then
-                    popd > /dev/null
-                else
+                if ! $CRUCIBLE_HOME/bin/_update-git; then
                     RC=1
                 fi
+                popd > /dev/null
             fi
         done
         popd > /dev/null
