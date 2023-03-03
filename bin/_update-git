@@ -9,40 +9,55 @@
 # (since it keeps the relevant output together)
 exec 2>&1
 
+source /etc/sysconfig/crucible
+
+if [ -z "${CRUCIBLE_HOME}" ]; then
+    echo "CRUCIBLE_HOME not defined, exiting."
+    exit 1
+fi
+
+if [ ! -e "${CRUCIBLE_HOME}" ]; then
+    echo "Could not find ${CRUCIBLE_HOME}, exiting."
+    exit 1
+fi
+
+source "${CRUCIBLE_HOME}/bin/base"
+
 if [ -d "./.git" ]; then
-    # pull updates from remote(s)
-    if ! git remote --verbose update --prune; then
+    # fetch updates from remote(s)
+    if ! git remote --verbose update --prune > /dev/null 2>&1; then
 	echo "ERROR: could not git-update"
 	exit 1
     fi
 
-    git_status=$(git status --porcelain=2 --untracked-files=no --branch)
-    git_tracking=$(echo "${git_status}" | grep "branch\.head" | awk '{ print $3 }')
+    git_status=$(git_get_status)
+    git_local_branch=$(git_get_local_branch "${git_status}")
+    git_tracking=$(git_get_tracking "${git_status}")
 
-    if [ -n "${git_tracking}" -a "${git_tracking}" != "(detached)" ]; then
+    if [ -n "${git_tracking}" -a "${git_local_branch}" != "(detached)" ]; then
 	# store any local changes
 	stash_output=$(git stash)
 	if [ $? != 0 ]; then
 	    echo "ERROR: could not git-stash"
 	    exit 1
 	fi
-	echo -e ${stash_output}
 
 	# merge any changes from the remote branch
-	if ! git pull --verbose --ff-only; then
+	if ! git pull --verbose --ff-only 2> /dev/null; then
 	    echo "ERROR: could not git-pull"
 	    exit 1
 	fi
 
 	if ! echo "${stash_output}" | grep -q "No local changes to save"; then
             # reapply local changes
-            if ! git stash pop; then
+            if ! git stash pop > /dev/null; then
+		echo -e "${stash_output}"
 		echo "ERROR: could not git-stash pop"
 		exit 1
 	    fi
 	fi
     else
-	if [ "${git_tracking}" == "(detached)" ]; then
+	if [ "${git_local_branch}" == "(detached)" ]; then
 	    echo "WARNING: This git repo is in a detached state, not modifying the active contents"
 	else
 	    echo "ERROR: This git repo is in an unknown state"

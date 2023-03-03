@@ -53,6 +53,17 @@ function setup_pipe() {
     mknod ${PIPE} p
 }
 
+if [ "${1}" != "update" ]; then
+    ${CRUCIBLE_HOME}/bin/_git-fetch &
+    if [ -e "${UPDATE_STATUS_FILE}" ]; then
+        read OTHER UPDATE_COUNT < "${UPDATE_STATUS_FILE}"
+        if [ "${UPDATE_COUNT}" != "0" ]; then
+            echo "*** NOTICE: Crucible is at least ${UPDATE_COUNT} commits behind.  See 'crucible repo info' for details. ***"
+            echo
+        fi
+    fi
+fi
+
 # special case some log operations so they don't happen under log
 # redirection
 log_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"

@@ -50,6 +50,10 @@ fi
 
 RC=0
 
+if [ -e "${UPDATE_STATUS_FILE}" ]; then
+    rm "${UPDATE_STATUS_FILE}" "${UPDATE_STATUS_FILE}.log"
+fi
+
 case "${repo}" in
     "all"|"__all"|"crucible"|"__crucible")
         case "${repo}" in
@@ -143,11 +147,10 @@ if [ "${repo}" == "____all" ]; then
             echo
 
             if pushd ${tmp_repo} > /dev/null; then
-                if $CRUCIBLE_HOME/bin/_update-git; then
-                    popd > /dev/null
-                else
+                if ! $CRUCIBLE_HOME/bin/_update-git; then
                     RC=1
                 fi
+                popd > /dev/null
             fi
         done
         popd > /dev/null
