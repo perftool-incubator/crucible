@@ -159,6 +159,7 @@ function usage {
 _USAGE_
 }
 
+# set name and email address
 function identity {
 
     if [ -z $CRUCIBLE_NAME ] && [ -z $CRUCIBLE_EMAIL ]; then
@@ -183,7 +184,7 @@ function identity {
     echo "CRUCIBLE_EMAIL=\"$CRUCIBLE_EMAIL\"" >> $IDENTITY
 }
 
-
+# check for dependencies and attempt to install any missing
 function has_dependency {
     has_dep=0
     echo "Checking for $1"
