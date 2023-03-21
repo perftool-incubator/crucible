@@ -10,7 +10,7 @@ Crucible is a performance tool harness that integrates [multiple performance too
 
 ### Zero-touch Installation
 
-Crucible can be installed on a single Linux system (the crucible-controller), and does not require installation on any target host, cluster, or cloud that needs  testing. Crucible uses container images to satisfy software dependencies. The crucible-controller system only needs to have [podman](https://podman.io) software installed. Endpoints (systems, clusters, clouds that are "under-test") only need the ability to pull container images. Most clusters/clouds have this ability already, and non-clouds (like a remote-host) only need podman.
+Crucible can be installed on a single Linux system (the crucible-controller), and does not require installation on any target host, cluster, or cloud that needs  testing. Crucible uses container images to satisfy software dependencies. The crucible-controller system only needs to have [git](https://git-scm.com) and [podman](https://podman.io) software installed. Endpoints (systems, clusters, clouds that are "under-test") only need the ability to pull container images. Most clusters/clouds have this ability already, and non-clouds (like a remote-host) only need podman.
 
 ### Hybrid/Multi-cloud Capable
 
