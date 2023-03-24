@@ -24,6 +24,7 @@ if [ ! -e $CRUCIBLE_HOME ]; then
 fi
 export CRUCIBLE_HOME
 export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
+export RICKSHAW_HOME=${CRUCIBLE_HOME}/subprojects/core/rickshaw
 CRUCIBLE_NEW_SESSION_ID="yes"
 . $CRUCIBLE_HOME/bin/base
 

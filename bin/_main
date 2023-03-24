@@ -205,11 +205,11 @@ elif [ "${1}" == "run" ]; then
                 run_file=${val}
                 mv_params=${base_run_dir}/config/mv-params.json
                 tool_params=${base_run_dir}/config/${tool_params}
-                python3 ${TOOLBOX_HOME}/bin/getjsonconfig.py --json ${run_file} --config mv-params > $mv_params
-                python3 ${TOOLBOX_HOME}/bin/getjsonconfig.py --json ${run_file} --config tool-params > $tool_params
-                tags_str=$(python3 ${TOOLBOX_HOME}/bin/getjsonconfig.py --json ${run_file} --config tags)
-                endpoint_str=$(python3 ${TOOLBOX_HOME}/bin/getjsonconfig.py --json ${run_file} --config endpoint)
-                passthru_blk=$(python3 ${TOOLBOX_HOME}/bin/getjsonconfig.py --json ${run_file} --config passthru-args)
+                python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config mv-params > $mv_params
+                python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config tool-params > $tool_params
+                tags_str=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config tags)
+                endpoint_str=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config endpoint)
+                passthru_blk=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config passthru-args)
                 passthru_str=$(sed -e 's/^"//' -e 's/"$//' <<< ${passthru_blk})
                 use_mv_params=1
                 ;;
