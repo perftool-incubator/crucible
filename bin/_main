@@ -2,6 +2,9 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
+# run file name when copied into base_run_dir
+run_file_json="run-file.json"
+
 LOG_DB="${1}"
 shift
 
@@ -165,8 +168,8 @@ elif [ "${1}" == "run" ]; then
 
     passthru_args=()
 
-    if [[ "${1}" == "--from-file" ]]; then
-        # use the crucible run file aka "all-in-one" / single json file
+    if [ "${1}" == "--from-file" ]; then
+        # use the crucible run file aka 'all-in-one' / single json file
         # crucible run --from-file <all-in-one-json>
         shift
         run_file=${1}
@@ -178,51 +181,101 @@ elif [ "${1}" == "run" ]; then
             exit_error "No other options must be speicifed with '--from-file <All-in-One-JSON>'."
         fi
 
-        # extracts benchmark(s) from the json and convert to stream
-        # e.g. oslat,iperf,uperf,oslat
-        benchmark_ids=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config benchmarks)
-        IFS=','; read -ra bench <<< "$benchmark_ids"; IFS=' '
+        # Create base_run_dir with benchmark name extracted from one-json
+        json_info=$(jq '.benchmarks[].name' $run_file)
+        benchmark_names=$(echo ${json_info} | sed -e 's/"//g')
+        CIFS=$IFS
+        IFS=$' '
+        benchmark_names=($benchmark_names)
+        IFS=$CIFS
+        benchmarks=`echo ${benchmark_names[@]} | sed -e 's/ /-and-/g'`
+        base_run_dir="${var_run_crucible}/${benchmarks}--${datetime}--${SESSION_ID}"
+        mkdir -pv "$base_run_dir/config" >/dev/null
+
+        # Copy the all-in-one json inside the temp base run dir / config
+        # so containers can access on blockbreaker commands
+        cp ${run_file} ${base_run_dir}/config/${run_file_json}
+
+        # TODO: consolidate the next following blocks into one single
+        # function to extract data from the run file for different inputs
+
+        ### benchmarks
+        # convert to stream e.g. oslat,iperf,uperf,oslat
+        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config benchmarks"
+        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
+        blockbreaker_output=$(${blockbreaker_cmd})
+        EXIT_VAL=$?
+        if [ ${EXIT_VAL} != 0 ]; then
+                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
+        fi
+        IFS=','; read -ra bench <<< "$blockbreaker_output"; IFS=' '
         for b in "${bench[@]}"; do
            benchmark+=$(echo ",$b" | cut -f1 -d:)
         done
         bench_list=$(sed -e 's/^,//' <<< $benchmark)
-        # convert from oslat,iperf to oslat-and-iperf
-        benchmarks=`echo ${bench_list} | sed -e 's/,/-and-/g'`
-
-        base_run_dir="${var_run_crucible}/${benchmarks}--${datetime}--${SESSION_ID}"
-        mkdir -pv "$base_run_dir/config" >/dev/null
         
+        ### mv-params
+        # dump json output to a file
         for bench in ${bench_list}; do
-            mv_params="${base_run_dir}/config/${bench}-mv-params.json"
-            bb_stdout=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config mv-params --benchmark ${bench})
-            if [ $? != 0 ]; then
-                exit_error "Error: blockbreaker rc=$? stdout=$bb_stdout"
+            blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config mv-params --benchmark ${bench}"
+            blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
+            blockbreaker_output=$(${blockbreaker_cmd})
+            EXIT_VAL=$?
+            if [ ${EXIT_VAL} != 0 ]; then
+                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
             fi
-            echo $bb_stdout > $mv_params
+            mv_params="${base_run_dir}/config/${bench}-mv-params.json"
+            echo ${blockbreaker_output} > $mv_params
         done
 
-        bb_stdout=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config tool-params)
-        if [ $? != 0 ]; then
-            exit_error "Error: blockbreaker rc=$? stdout=$bb_stdout"
+        ### tool-params
+        # dump output json to a file
+        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config tool-params"
+        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
+        blockbreaker_output=$(${blockbreaker_cmd})
+        EXIT_VAL=$?
+        if [ ${EXIT_VAL} != 0 ]; then
+                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
         fi
         tool_params="${base_run_dir}/config/${tool_params}"
-        echo $bb_stdout > $tool_params
+        echo $blockbreaker_output > $tool_params
 
-        tags_str=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config tags)
-        if [ $? != 0 ]; then
-            exit_error "Error: blockbreaker rc=$? stdout=$tags_str"
+        ### tags
+        # extract tags stream key1:val1,key2:val2...
+        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config tags"
+        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
+        blockbreaker_output=$(${blockbreaker_cmd})
+        EXIT_VAL=$?
+        if [ ${EXIT_VAL} != 0 ]; then
+                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
         fi
+        tags_str=${blockbreaker_output}
+ 
+        ### endpoints
+        # extract endpoints stream
+        count=0
+        for bench in ${bench_list}; do
+            blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config endpoints --index ${count}"
+            blockbreaker_cmd="$podman_run --workdir ${base_run_dir}/config -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
+            blockbreaker_output=$(${blockbreaker_cmd})
+            EXIT_VAL=$?
+            if [ ${EXIT_VAL} != 0 ]; then
+                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
+            fi
+            endpoints_stream+=("${blockbreaker_output}")
+            let count=${count}+1
+        done
 
-        endpoint_str=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config endpoint)
-        if [ $? != 0 ]; then
-            exit_error "Error: blockbreaker rc=$? stdout=$endoint_str"
+        ### passthru-args
+        # extract passthru-args e.g. --samples 2
+        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config passthru-args"
+        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
+        blockbreaker_output=$(${blockbreaker_cmd})
+        EXIT_VAL=$?
+        if [ ${EXIT_VAL} != 0 ]; then
+            exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
         fi
-
-        passthru_blk=$(python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${run_file} --config passthru-args)
-        if [ $? != 0 ]; then
-            exit_error "Error: blockbreaker rc=$? stdout=$passthru_blk"
-        fi
-        passthru_str=$(sed -e 's/^"//' -e 's/"$//' <<< ${passthru_blk})
+        passthru_str=$(sed -e 's/^"//' -e 's/"$//' <<< ${blockbreaker_output})
 
         use_mv_params=1
     else
@@ -233,7 +286,10 @@ elif [ "${1}" == "run" ]; then
         if [ -z "$benchmark" ]; then
             exit_error "No benchmark specified."
         fi
-        benchmarks=`echo ${benchmark} | sed -e 's/,/-and-/g'`
+
+        # Create base_run_dir with benchmark name extracted from cli
+        benchmark_names=($(echo ${benchmark} | sed -e 's/,/ /g'))
+        benchmarks=`echo ${benchmark_names[@]} | sed -e 's/ /-and-/g'`
         base_run_dir="${var_run_crucible}/${benchmarks}--${datetime}--${SESSION_ID}"
         mkdir -pv "$base_run_dir/config" >/dev/null
 
@@ -286,9 +342,12 @@ elif [ "${1}" == "run" ]; then
         passthru_args="${tags_str} ${passthru_args}"
     fi
 
-    if [ -n "${endpoint_str}" ]; then
-        endpoint_str=" --endpoint ${endpoint_str}"
-        passthru_args="${endpoint_str} ${passthru_args}"
+    endpoints_str=""
+    if [ -n "${endpoints_stream}" ]; then
+        for eps in ${endpoints_stream}; do
+            endpoints_str+=" --endpoint ${eps}"
+        done
+        passthru_args="${endpoints_str} ${passthru_args}"
     fi
 
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
@@ -330,7 +389,7 @@ elif [ "${1}" == "run" ]; then
         mv_params=`echo ${mv_params} | sed -e 's/^,//' | sed -e 's/,/ /g'`
         for this_mv_params in ${mv_params}; do
             if [ ! -e "${this_mv_params}" ]; then
-                exit_error "The multi-value params file you specified with --mv-params (${this_mv_params}) does not exist!"
+                exit_error "The multi-value params file you specified with '--mv-params ${this_mv_params}' does not exist!"
             else
                 this_benchmark=`echo ${benchmark} | cut -d, -f$count`
                 this_benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | cut -d, -f$count`
@@ -354,7 +413,7 @@ elif [ "${1}" == "run" ]; then
                 ${multiplex_cmd} > ${bench_params_run_output} 2>&1
                 EXIT_VAL=$?
                 if [ ${EXIT_VAL} != 0 ]; then
-                    echo "ERROR: multiplex failed with an error and returned rc=$rc"
+                    echo "ERROR: multiplex failed with an error and returned rc=${EXIT_VAL}"
                     echo "multiplex output is:"
                     cat ${bench_params_run_output}
                     exit ${EXIT_VAL}
