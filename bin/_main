@@ -250,7 +250,7 @@ elif [ "${1}" == "run" ]; then
                 exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
         fi
         tags_str=${blockbreaker_output}
- 
+
         ### endpoints
         # extract endpoints stream
         count=0
@@ -266,16 +266,16 @@ elif [ "${1}" == "run" ]; then
             let count=${count}+1
         done
 
-        ### passthru-args
-        # extract passthru-args e.g. --samples 2
-        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config passthru-args"
+        ### run-params
+        # extract run-params stream --key1 val1 --key2 val2 ...
+        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config run-params"
         blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
         blockbreaker_output=$(${blockbreaker_cmd})
         EXIT_VAL=$?
         if [ ${EXIT_VAL} != 0 ]; then
             exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
         fi
-        passthru_str=$(sed -e 's/^"//' -e 's/"$//' <<< ${blockbreaker_output})
+        run_params_str=${blockbreaker_output}
 
         use_mv_params=1
     else
@@ -333,8 +333,8 @@ elif [ "${1}" == "run" ]; then
 
     fi
 
-    if [ -n "${passthru_str}" ]; then
-        passthru_args="${passthru_str}"
+    if [ -n "${run_params_str}" ]; then
+        passthru_args="${run_params_str}"
     fi
 
     if [ -n "${tags_str}" ]; then
