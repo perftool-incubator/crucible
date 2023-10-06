@@ -224,8 +224,9 @@ elif [ "${1}" == "run" ]; then
             if [ ${EXIT_VAL} != 0 ]; then
                 exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
             fi
-            mv_params="${base_run_dir}/config/${bench}-mv-params.json"
-            echo ${blockbreaker_output} > $mv_params
+            bench_mv_params="${base_run_dir}/config/${bench}-mv-params.json"
+            echo ${blockbreaker_output} > $bench_mv_params
+            mv_params+=",${bench_mv_params}"
         done
 
         ### tool-params
