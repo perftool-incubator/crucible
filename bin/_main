@@ -213,6 +213,7 @@ elif [ "${1}" == "run" ]; then
            benchmark+=$(echo ",$b" | cut -f1 -d:)
         done
         bench_list=$(sed -e 's/^,//' <<< $benchmark)
+        bench_list=$(echo $bench_list | sed -e 's/,/ /g')
         
         ### mv-params
         # dump json output to a file
@@ -228,6 +229,7 @@ elif [ "${1}" == "run" ]; then
             echo ${blockbreaker_output} > $bench_mv_params
             mv_params+=",${bench_mv_params}"
         done
+        mv_params=$(sed -e 's/^,//' <<< $mv_params)
 
         ### tool-params
         # dump output json to a file
