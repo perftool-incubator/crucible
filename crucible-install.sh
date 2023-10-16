@@ -5,7 +5,7 @@
 # Installer Settings
 IDENTITY="/root/.crucible/identity"
 SYSCONFIG="/etc/sysconfig/crucible"
-DEPENDENCIES="podman git"
+DEPENDENCIES="podman git jq"
 INSTALL_PATH="/opt/crucible"
 GIT_INSTALL_LOG="/tmp/crucible-git-install.log"
 CRUCIBLE_CONTROLLER_REGISTRY="quay.io/crucible/controller:latest"
