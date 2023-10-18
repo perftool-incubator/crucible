@@ -208,6 +208,7 @@ elif [ "${1}" == "run" ]; then
         if [ ${EXIT_VAL} != 0 ]; then
                 exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
         fi
+        bench_ids_str=$blockbreaker_output
         IFS=','; read -ra bench <<< "$blockbreaker_output"; IFS=' '
         for b in "${bench[@]}"; do
            benchmark+=$(echo ",$b" | cut -f1 -d:)
@@ -321,7 +322,12 @@ elif [ "${1}" == "run" ]; then
                 "--tool-params")
                     val=${1}
                     shift
-                    tool_params=${1}
+                    tool_params=${val}
+                    ;;
+                "--bench-ids")
+                    val=${1}
+                    shift
+                    bench_ids_str=${val}
                     ;;
                 "--no-tools")
                     no_tools=1
@@ -467,6 +473,10 @@ elif [ "${1}" == "run" ]; then
     params_args=""
     params_args+=" --bench-params ${bench_params}"
     params_args+=" --tool-params ${tool_params_file}"
+
+    if [ -n "${bench_ids_str}" ]; then
+      params_args+=" --bench-ids ${bench_ids_str}"
+    fi
 
     ${CRUCIBLE_HOME}/bin/repo info > ${base_run_dir}/config/crucible.repo.info
     ${CRUCIBLE_HOME}/bin/repo details > ${base_run_dir}/config/crucible.repo.details
