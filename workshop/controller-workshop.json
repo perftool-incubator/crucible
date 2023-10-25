@@ -14,7 +14,6 @@
         "build-libraries",
         "build-tools",
         "python39",
-        "distro-python-deps",
         "non-distro-python-deps",
         "redis",
         "distro-perl-tools",
@@ -69,23 +68,10 @@
       }
     },
     {
-      "name": "distro-python-deps",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "python3-numpy",
-          "python3-pandas",
-          "python3-pillow"
-        ]
-      }
-    },
-    {
       "name": "non-distro-python-deps",
       "type": "python3",
       "python3_info": {
         "packages": [
-          "Keras",
-          "Pillow",
           "redis",
           "hiredis",
           "jsonschema"
