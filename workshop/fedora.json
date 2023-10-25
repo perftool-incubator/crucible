@@ -1,0 +1,31 @@
+{
+  "workshop": {
+    "schema": {
+      "version": "2020.03.02"
+    }
+  },
+  "userenv": {
+    "name": "fedora38",
+    "label": "Fedora 38",
+    "origin": {
+      "image": "registry.fedoraproject.org/fedora",
+      "tag": "38"
+    },
+    "properties": {
+      "platform": [
+        {
+          "architecture": "x86_64"
+        },
+        {
+          "architecture": "aarch64"
+        }
+      ],
+      "packages": {
+        "type": "rpm",
+        "manager": "dnf"
+      }
+    }
+  },
+  "requirements": [
+  ]
+}
