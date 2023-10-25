@@ -533,33 +533,6 @@ elif [ "${1}" == "run" ]; then
             EXIT_VAL=${RC}
         fi
     fi
-
-    send_notification "Finished run command '${arg_list}' with return value '${EXIT_VAL}'.  Results are available in '${base_run_dir}'."
-    RC=$?
-    if [ ${EXIT_VAL} == 0 ]; then
-        EXIT_VAL=${RC}
-    fi
-elif [ "${1}" == "notify" ]; then
-    shift
-    ntfy_doc_url="https://github.com/dschep/ntfy"
-    if [ "${1}" == "config" ]; then
-        shift
-        echo "Currently notification configuration is a manual process where the user must create ${USER_STORE}/ntfy.yml with at least one backend.  See ${ntfy_doc_url} for details."
-        EXIT_VAL=0
-    elif [ "${1}" == "test" ]; then
-        shift
-
-        if [ ! -e ${USER_STORE}/ntfy.yml ]; then
-            echo "ERROR: You must configure at least one notification backend in ${USER_STORE}/ntfy.yml.  See ${ntfy_doc_url} for details."
-            EXIT_VAL=1
-        else
-            send_notification "notification test"
-            EXIT_VAL=$?
-        fi
-    else
-        echo "ERROR: unsupported 'notify' argument [${1}]"
-        EXIT_VAL=1
-    fi
 elif [ "${1}" == "archive" ]; then
     shift
     while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do

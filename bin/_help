@@ -39,7 +39,6 @@ function help() {
     echo "  primary-periods <dir>  |    - Or a list of the primary period IDs"
     echo "ls                       |  List the run results with optional arguments"
     echo "tags                     |  Manage the tags associated with run results"
-    echo "notify test              |  Check if the notification service is working properly"
     echo "archive <dir>            |  Create an archive of the run result pointed to by <dir> and remove it from the run directory"
     echo "unarchive <archive>      |  Unpack an archive named <archive> and put it back in the run directory"
     echo "start es|httpd|redis     |  Start the specified service(s) manually.  Not required, Crucible will start the services it needs when it needs them."
