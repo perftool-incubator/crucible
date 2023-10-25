@@ -13,9 +13,11 @@ if [ -z "${CRUCIBLE_HOME}" ]; then
 fi
 
 if pushd ${CRUCIBLE_HOME} > /dev/null; then
+    source ./workshop/controller.conf
+
     export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
     
-    exec ./subprojects/core/workshop/workshop.pl --userenv ./workshop/fedora36.json --requirements ./workshop/controller-workshop.json --label crucible-controller "$@"
+    exec ./subprojects/core/workshop/workshop.pl --userenv ./workshop/${controller_userenv_file} --requirements ./workshop/controller-workshop.json --label crucible-controller "$@"
 else
     echo "ERROR: Failed to pushd to \$CRUCIBLE_HOME [${CRUCIBLE_HOME}]"
     exit 1
