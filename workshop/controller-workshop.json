@@ -88,9 +88,7 @@
           "Pillow",
           "redis",
           "hiredis",
-          "jsonschema",
-          "ntfy",
-          "ntfy[pid,emoji,xmpp,telegram,instapush,slack,rocketchat]"
+          "jsonschema"
         ]
       }
     },
