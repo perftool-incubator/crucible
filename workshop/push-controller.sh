@@ -27,7 +27,7 @@ if pushd ${CRUCIBLE_HOME} > /dev/null; then
     source ./workshop/controller.conf
 
     source="localhost/workshop/${controller_userenv}_crucible-controller"
-    destination="quay.io/crucible/controller:${TAG}"
+    destination="${controller_repo}:${TAG}"
 
     cmd="buildah push ${source} ${destination}"
 
