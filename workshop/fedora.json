@@ -5,11 +5,11 @@
     }
   },
   "userenv": {
-    "name": "fedora36",
-    "label": "Fedora 36",
+    "name": "fedora38",
+    "label": "Fedora 38",
     "origin": {
       "image": "registry.fedoraproject.org/fedora",
-      "tag": "36"
+      "tag": "38"
     },
     "properties": {
       "platform": [
