@@ -24,7 +24,22 @@ To upload a container image run (you may need to log in to your container regist
 crucible console
 cd /opt/crucible/workshop
 podman login <registry>
-./push-controller testing
+./push-controller.sh
 ```
 
-You will need write acces to your container registry project, and any users who wish to install this image will need read access.  By default the crucible installer assumes public read access to the crucible-controller image.
+The container image that is uploaded is tagged with the date, the current Crucible commit hash, and the system architecture which it applies to (ie. x86_64).  Currently we are building and uploading controller images for two architectures, x86_64 and aarch64 (ie. arm64) -- note that right now these are the only two supported architectures because we are installing binary builds of Elasticsearch.
+
+The `build-controller.sh` and `push-controller.sh` scripts need to be executed on a system for each architecture that support is required for.  After the images are generated and uploaded for all desired architectures a manifest needs to be created that "indexes" all of the images under a single tag.
+
+To build this manifest run (again you may need to log in to your container registry service first):
+
+```
+crucible console
+cd /opt/crucible/workshop
+podman login <registry>
+./create-manifest.sh <tag>
+```
+
+When Crucible pulls the controller image to a system, podman will load the manifest and determine the appropriate image that it indexes and download it.  The manifest allows Crucible (via podman) to use the proper architecture's image transparently -- meaning the scripts do not need to be aware of these details.
+
+NOTE: You will need write access to your container registry project, and any users who wish to install this image will need read access.  By default the crucible installer assumes public read access to the crucible-controller image.
