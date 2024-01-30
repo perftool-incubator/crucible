@@ -119,7 +119,7 @@ elif [ "${1}" == "extract" ]; then
             EXIT_VAL=1
             ;;
     esac
-elif [ "${1}" == "opensearch" ]; then
+elif [ "${1}" == "opensearch" -o "${1}" == "es" ]; then
     shift
     if start_opensearch; then
         if [ "${1}" == "init" ]; then
@@ -550,7 +550,7 @@ elif [ "${1}" == "unarchive" ]; then
 elif [ "${1}" == "reset" ]; then
     shift
 
-    echo "Initializing ES "
+    echo "Initializing OpenSearch "
     if start_opensearch; then
         reinit_opensearch
         RC=$?
