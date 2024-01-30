@@ -21,6 +21,11 @@ if [ -z "${SESSION_ID}" -o "${CRUCIBLE_NEW_SESSION_ID}" == "yes" ]; then
     CRUCIBLE_NEW_SESSION_ID="no"
 fi
 
+var_crucible="/var/lib/crucible"
+var_run_crucible="${var_crucible}/run"
+var_archive_crucible="${var_crucible}/archive"
+opensearch_dir="${var_crucible}/opensearch"
+
 container_common_args=()
 container_common_args+=("--rm")
 container_common_args+=("-e CRUCIBLE_HOME=$CRUCIBLE_HOME")
@@ -52,9 +57,9 @@ container_httpd_args=()
 container_httpd_args+=("-d")
 container_httpd_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/httpd/,destination=/etc/httpd/")
 
-container_es_args=()
-container_es_args+=("-d")
-#container_es_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/elasticsearch/,destination=/etc/elasticsearch/")
+container_opensearch_args=()
+container_opensearch_args+=("-d")
+container_opensearch_args+=("--mount=type=bind,source=${opensearch_dir}/,destination=/usr/share/opensearch/data/")
 
 container_rs_args=()
 container_rs_args+=("-i")
@@ -66,10 +71,6 @@ container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 
 container_build_args=()
 container_build_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
-
-var_crucible="/var/lib/crucible"
-var_run_crucible="${var_crucible}/run"
-var_archive_crucible="${var_crucible}/archive"
 
 function podman_wrapper() {
     local RC
@@ -306,39 +307,39 @@ function stop_redis() {
     return ${RC}
 }
 
-function start_es() {
-    local es_available count status_check es_timeout pod_name
-    local es_start_cmd es_status_cmd common_container_args
+function start_opensearch() {
+    local opensearch_available count status_check opensearch_timeout pod_name
+    local opensearch_start_cmd opensearch_status_cmd common_container_args
     local RC stage
-    es_start_cmd="${CRUCIBLE_HOME}/config/start-es.sh $var_crucible/es"
-    es_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cluster/health"
-    echo -n "Checking for elasticsearch"
-    if ! podman_running crucible-es; then
+    opensearch_start_cmd="${CRUCIBLE_HOME}/config/start-opensearch.sh ${opensearch_dir}"
+    opensearch_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cluster/health"
+    echo -n "Checking for OpenSearch"
+    if ! podman_running crucible-opensearch; then
         open_firewall_port 9200 tcp
         open_firewall_port 9300 tcp
-        mkdir -p "$var_crucible/es"
+        mkdir -p "${opensearch_dir}"
         common_container_args=()
         for arg in "${container_common_args[@]}"; do
-            # remove the hostfs mount from the ES container due to cgroup issues with ES/java
+            # remove the hostfs mount from the opensearch container due to cgroup issues with opensearch/java
             if ! echo "${arg}" | grep -q "hostfs"; then
                 common_container_args+=("${arg}")
             fi
         done
-        $podman_run --name crucible-es "${common_container_args[@]}" "${container_es_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_start_cmd > /dev/null
+        $podman_run --name crucible-opensearch "${common_container_args[@]}" "${container_opensearch_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${opensearch_start_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
-            echo "ERROR: Could not start elasticsearch"
+            echo "ERROR: Could not start OpenSearch"
         else
-            es_available=0
+            opensearch_available=0
             count=1
-            es_timeout=60
-            echo "Waiting for elasticsearch to be available (${es_timeout} seconds maximum)..."
+            opensearch_timeout=60
+            echo "Waiting for OpenSearch to be available (${opensearch_timeout} seconds maximum)..."
             stage=1
-            while [ ${es_available} != 1 -a ${count} -lt ${es_timeout} ]; do
+            while [ ${opensearch_available} != 1 -a ${count} -lt ${opensearch_timeout} ]; do
                 case "${stage}" in
                     1)
-                        pod_name=crucible-es-status-check-${SESSION_ID}-$(uuidgen)
-                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${es_status_cmd})
+                        pod_name=crucible-opensearch-status-check-${SESSION_ID}-$(uuidgen)
+                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${opensearch_status_cmd})
                         if echo "${status_check}" | grep -q "Connection refused"; then
                             sleep 1
                         else
@@ -346,11 +347,11 @@ function start_es() {
                         fi
                         ;;
                     2)
-                        pod_name=crucible-es-status-check-json-query-${SESSION_ID}-$(uuidgen)
-                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${es_status_cmd} | jq -r '. \"status\"'")
+                        pod_name=crucible-opensearch-status-check-json-query-${SESSION_ID}-$(uuidgen)
+                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} /bin/bash -c "${opensearch_status_cmd} | jq -r '. \"status\"'")
                         if [ "${status_check}" == "yellow" -o "${status_check}" == "green" ]; then
-                            echo "Elasticsearch is online after ${count} seconds"
-                            es_available=1
+                            echo "OpenSearch is online after ${count} seconds"
+                            opensearch_available=1
                         else
                             sleep 1
                         fi
@@ -358,11 +359,11 @@ function start_es() {
                 esac
                 (( count += 1 ))
             done
-            if [ ${es_available} -eq 0 ]; then
-                echo "ERROR: Elasticsearch failed to launch properly"
+            if [ ${opensearch_available} -eq 0 ]; then
+                echo "ERROR: OpenSearch failed to launch properly"
                 RC=1
             else
-                echo "Successfully started elasticsearch"
+                echo "Successfully started OpenSearch"
                 RC=0
             fi
         fi
@@ -370,30 +371,30 @@ function start_es() {
     return ${RC}
 }
 
-function stop_es() {
+function stop_opensearch() {
     local RC=0
-    echo -n "Checking for elasticsearch"
-    if podman_running crucible-es; then
+    echo -n "Checking for OpenSearch"
+    if podman_running crucible-opensearch; then
         close_firewall_port 9200 tcp
         close_firewall_port 9300 tcp
-        ${podman_stop} crucible-es > /dev/null
+        ${podman_stop} crucible-opensearch > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
-            echo "ERROR: Could not stop elasticsearch"
+            echo "ERROR: Could not stop OpenSearch"
         else
-            echo "Successfully stopped elasticsearch"
+            echo "Successfully stopped OpenSearch"
         fi
     fi
     return ${RC}
 }
 
-function init_es() {
-    local RC es_init_cmd
-    es_init_cmd="${CRUCIBLE_HOME}/config/init-es.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
-    $podman_run --name crucible-init-es-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $es_init_cmd
+function init_opensearch() {
+    local RC opensearch_init_cmd
+    opensearch_init_cmd="${CRUCIBLE_HOME}/config/init-opensearch.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
+    ${podman_run} --name crucible-init-opensearch-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${opensearch_init_cmd}
     RC=$?
     if [ ${RC} != 0 ]; then
-        echo "ERROR: Could not init elasticsearch"
+        echo "ERROR: Could not init OpenSearch"
     fi
     return ${RC}
 }
@@ -562,13 +563,13 @@ function index_run() {
         return ${RC}
     fi
 
-    start_es
+    start_opensearch
     RC=$?
     if [ ${RC} != 0 ]; then
         return ${RC}
     fi
 
-    init_es
+    init_opensearch
     if [ ${RC} != 0 ]; then
         return ${RC}
     fi
@@ -576,10 +577,10 @@ function index_run() {
     $podman_run --name crucible-rickshaw-index-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_index_cmd
     RC=$?
     if [ ${RC} == 0 ]; then
-        echo "Benchmark result now in elastic, localhost:9200"
+        echo "Benchmark result now in OpenSearch, localhost:9200"
         RC=$?
     else
-        echo "ERROR: Could not index result into elasticsearch [rc=${RC}]"
+        echo "ERROR: Could not index result into OpenSearch [rc=${RC}]"
     fi
 
     return ${RC}
@@ -763,13 +764,13 @@ function archive_run() {
     return 0
 }
 
-function reinit_es() {
+function reinit_opensearch() {
     local RC
     RC=0
 
-    delete_es_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
-    if ${podman_run} --name crucible-es-delete "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${delete_es_cmd}; then
-        init_es
+    delete_opensearch_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
+    if ${podman_run} --name crucible-opensearch-delete "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${delete_opensearch_cmd}; then
+        init_opensearch
         RC=${?}
     else
         RC=${?}
@@ -830,7 +831,7 @@ function service_control() {
         shift
 
         case "${service}" in
-            "httpd"|"es"|"redis")
+            "httpd"|"opensearch"|"redis")
                 ${action}_${service}
                 service_rc=$?
                 ;;

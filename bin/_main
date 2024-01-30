@@ -64,7 +64,7 @@ elif [ "${1}" == "start" -o "${1}" == "stop" ]; then
 elif [ "${1}" == "get" ]; then
     shift
     if start_httpd; then
-        if ! start_es; then
+        if ! start_opensearch; then
             EXIT_VAL=$?
         fi
     else
@@ -87,14 +87,14 @@ elif [ "${1}" == "get" ]; then
     fi
 elif [ "${1}" == "rm" ]; then
     shift
-    if start_es; then
+    if start_opensearch; then
        rm_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh"
        $podman_run --name crucible-rm-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rm_result_cmd "$@"
     fi
     EXIT_VAL=$?
 elif [ "${1}" == "index" ]; then
     shift
-    if start_es; then
+    if start_opensearch; then
         base_run_dir=$(echo "$@" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
         index_run "$base_run_dir"
     fi
@@ -119,13 +119,13 @@ elif [ "${1}" == "extract" ]; then
             EXIT_VAL=1
             ;;
     esac
-elif [ "${1}" == "es" ]; then
+elif [ "${1}" == "opensearch" ]; then
     shift
-    if start_es; then
+    if start_opensearch; then
         if [ "${1}" == "init" ]; then
-            init_es
+            init_opensearch
         elif [ "${1}" == "rebuild" ]; then
-            reinit_es
+            reinit_opensearch
         fi
         if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
             if pushd ${var_run_crucible} >/dev/null; then
@@ -551,8 +551,8 @@ elif [ "${1}" == "reset" ]; then
     shift
 
     echo "Initializing ES "
-    if start_es; then
-        reinit_es
+    if start_opensearch; then
+        reinit_opensearch
         RC=$?
         if [ ${EXIT_VAL} == 0 ]; then
             EXIT_VAL=${RC}
