@@ -830,6 +830,12 @@ function service_control() {
         service="${1}"
         shift
 
+        # temporary hack to map es to opensearch as we transition from
+        # one to another
+        if [ "${service}" == "es" ]; then
+            service="opensearch"
+        fi
+
         case "${service}" in
             "httpd"|"opensearch"|"redis")
                 ${action}_${service}
