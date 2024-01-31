@@ -27,7 +27,7 @@ podman login <registry>
 ./push-controller.sh
 ```
 
-The container image that is uploaded is tagged with the date, the current Crucible commit hash, and the system architecture which it applies to (ie. x86_64).  Currently we are building and uploading controller images for two architectures, x86_64 and aarch64 (ie. arm64) -- note that right now these are the only two supported architectures because we are installing binary builds of Elasticsearch.
+The container image that is uploaded is tagged with the date, the current Crucible commit hash, and the system architecture which it applies to (ie. x86_64).  Currently we are building and uploading controller images for two architectures, x86_64 and aarch64 (ie. arm64) -- note that right now these are the only two supported architectures because we are installing binary builds of OpenSearch.
 
 The `build-controller.sh` and `push-controller.sh` scripts need to be executed on a system for each architecture that support is required for.  After the images are generated and uploaded for all desired architectures a manifest needs to be created that "indexes" all of the images under a single tag.
 

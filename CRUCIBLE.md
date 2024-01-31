@@ -46,7 +46,7 @@ subprojects       none          benchmark execution        per-benchmark status
                                                            uperf: fully integrated
                                                            fio: fully integrated
 
-CommonDataModel   <TBD>         Data storage, query        Elastic instance
+CommonDataModel   <TBD>         Data storage, query        OpenSearch instance
                                                            automatically created
                                                            and indices created.
 ```
