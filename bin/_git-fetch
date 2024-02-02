@@ -18,62 +18,64 @@ fi
 
 source ${CRUCIBLE_HOME}/bin/base
 
-LOCK_FILE="${UPDATE_STATUS_FILE}.lock"
-
-if [ -e "${LOCK_FILE}" ]; then
-    exit 0
-fi
-
-touch "${LOCK_FILE}"
-
-if [ -e "${UPDATE_STATUS_FILE}" ]; then
-    read FETCH_TIMESTAMP OTHER < "${UPDATE_STATUS_FILE}"
-
-    CURRENT_TIMESTAMP=$(date +%s)
-
-    # re-run every 24 hours
-    INVALID_TIMESTAMP=$(( FETCH_TIMESTAMP + 24*60*60 ))
-
-    if [ ${INVALID_TIMESTAMP} -gt ${CURRENT_TIMESTAMP} ]; then
-        rm "${LOCK_FILE}"
-        exit 0
-    fi
-fi
+PROCESS_LOCK_FILE="${UPDATE_STATUS_FILE}.process-lock"
+touch "${PROCESS_LOCK_FILE}"
 
 {
-    UPDATE_COUNT=0
+    flock --nonblock --exclusive 9 || exit 0
+    chmod 666 "${PROCESS_LOCK_FILE}"
 
-    if pushd ${CRUCIBLE_HOME}/subprojects > /dev/null; then
-        for tmp_repo in $(find . -maxdepth 2 -mindepth 2 -type l | sed 'sX./XX'); do
-            echo "REPO: ${tmp_repo}"
-            if pushd ${tmp_repo} > /dev/null; then
-                if [ -d "./.git" ]; then
-                    git remote --verbose update --prune
+    if [ -e "${UPDATE_STATUS_FILE}" ]; then
+        read FETCH_TIMESTAMP OTHER < "${UPDATE_STATUS_FILE}"
 
-                    git_status=$(git_get_status)
-                    git_tracking=$(git_get_tracking "${git_status}")
+        CURRENT_TIMESTAMP=$(date +%s)
 
-                    if [ -n "${git_tracking}" -a "${git_tracking}" != "(detached)" ]; then
-                        git_delta_behind=$(git_get_delta_behind "${git_status}")
-                        if [ "${git_delta_behind}" != "0" ]; then
-                            (( UPDATE_COUNT += git_delta_behind ))
-                        fi
-                    fi
-                else
-                    echo "ERROR: not a git repo"
-                fi
-                popd > /dev/null
-            fi
-            echo
-        done
-        popd > /dev/null
-    else
-        echo "ERROR: Could not pushd to ${CRUCIBLE_HOME}/subprojects"
-        exit 1
+        # re-run every 24 hours
+        INVALID_TIMESTAMP=$(( FETCH_TIMESTAMP + 24*60*60 ))
+
+        if [ ${INVALID_TIMESTAMP} -gt ${CURRENT_TIMESTAMP} ]; then
+            exit 0
+        fi
     fi
 
-    CURRENT_TIMESTAMP=$(date +%s)
-    echo "${CURRENT_TIMESTAMP} ${UPDATE_COUNT}" > "${UPDATE_STATUS_FILE}"
-} > "${UPDATE_STATUS_FILE}.log" 2>&1
+    {
+        UPDATE_COUNT=0
 
-rm "${LOCK_FILE}"
+        if pushd ${CRUCIBLE_HOME}/subprojects > /dev/null; then
+            for tmp_repo in $(find . -maxdepth 2 -mindepth 2 -type l | sed 'sX./XX'); do
+                echo "REPO: ${tmp_repo}"
+                if pushd ${tmp_repo} > /dev/null; then
+                    if [ -d "./.git" ]; then
+                        git remote --verbose update --prune
+
+                        git_status=$(git_get_status)
+                        git_tracking=$(git_get_tracking "${git_status}")
+
+                        if [ -n "${git_tracking}" -a "${git_tracking}" != "(detached)" ]; then
+                            git_delta_behind=$(git_get_delta_behind "${git_status}")
+                            if [ "${git_delta_behind}" != "0" ]; then
+                                (( UPDATE_COUNT += git_delta_behind ))
+                            fi
+                        fi
+                    else
+                        echo "ERROR: not a git repo"
+                    fi
+                    popd > /dev/null
+                fi
+                echo
+            done
+            popd > /dev/null
+        else
+            echo "ERROR: Could not pushd to ${CRUCIBLE_HOME}/subprojects"
+            exit 1
+        fi
+
+        CURRENT_TIMESTAMP=$(date +%s)
+        {
+            flock --timeout 10 --exclusive 9 || exit 0
+
+            echo "${CURRENT_TIMESTAMP} ${UPDATE_COUNT}" > "${UPDATE_STATUS_FILE}"
+        } 9<"${UPDATE_STATUS_LOCK_FILE}"
+    } > "${UPDATE_STATUS_FILE}.log" 2>&1
+
+} 9<"${PROCESS_LOCK_FILE}"
