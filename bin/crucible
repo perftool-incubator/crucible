@@ -57,11 +57,15 @@ function setup_pipe() {
 if [ "${1}" != "update" ]; then
     ${CRUCIBLE_HOME}/bin/_git-fetch &
     if [ -e "${UPDATE_STATUS_FILE}" ]; then
-        read OTHER UPDATE_COUNT < "${UPDATE_STATUS_FILE}"
-        if [ "${UPDATE_COUNT}" != "0" ]; then
-            echo "*** NOTICE: Crucible is at least ${UPDATE_COUNT} commits behind.  See 'crucible repo info' for details. ***"
-            echo
-        fi
+        {
+            flock --timeout 2 --shared 9 || exit 0
+
+            read OTHER UPDATE_COUNT < "${UPDATE_STATUS_FILE}"
+            if [ "${UPDATE_COUNT}" != "0" ]; then
+                echo "*** NOTICE: Crucible is at least ${UPDATE_COUNT} commits behind.  See 'crucible repo info' for details. ***"
+                echo
+            fi
+        } 9<"${UPDATE_STATUS_LOCK_FILE}"
     fi
 fi
 
