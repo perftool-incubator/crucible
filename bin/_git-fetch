@@ -26,7 +26,11 @@ touch "${PROCESS_LOCK_FILE}"
     chmod 666 "${PROCESS_LOCK_FILE}"
 
     if [ -e "${UPDATE_STATUS_FILE}" ]; then
-        read FETCH_TIMESTAMP OTHER < "${UPDATE_STATUS_FILE}"
+        {
+            flock --timeout 2 --shared 9 || exit_error "Failed to shared acquire ${UPDATE_STATUS_LOCK_FILE} in _git-fetch"
+
+            read FETCH_TIMESTAMP OTHER < "${UPDATE_STATUS_FILE}"
+        } 9<"${UPDATE_STATUS_LOCK_FILE}"
 
         CURRENT_TIMESTAMP=$(date +%s)
 
@@ -72,7 +76,7 @@ touch "${PROCESS_LOCK_FILE}"
 
         CURRENT_TIMESTAMP=$(date +%s)
         {
-            flock --timeout 10 --exclusive 9 || exit 0
+            flock --timeout 10 --exclusive 9 || exit_error "Failed to exclusively acquire ${UPDATE_STATUS_LOCK_FILE}"
 
             echo "${CURRENT_TIMESTAMP} ${UPDATE_COUNT}" > "${UPDATE_STATUS_FILE}"
         } 9<"${UPDATE_STATUS_LOCK_FILE}"
