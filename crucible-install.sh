@@ -3,6 +3,7 @@
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 # Installer Settings
+USER_DIR="/root/.crucible"
 IDENTITY="/root/.crucible/identity"
 SYSCONFIG="/etc/sysconfig/crucible"
 DEPENDENCIES="podman git jq"
@@ -159,6 +160,18 @@ function usage {
 _USAGE_
 }
 
+# cleanup previous installation
+function clean_old_install {
+    if [ -d $INSTALL_PATH ]; then
+        old_install_path="/opt/crucible-moved-on-`date +%d-%m-%Y_%H:%M:%S`"
+        echo "An existing installation of crucible exists and will be moved to $old_install_path"
+        /bin/mv "$INSTALL_PATH" "$old_install_path"
+    fi
+
+    # reset the update tracker if there is any existing state
+    rm -f "${USER_DIR}/update-status*" > /dev/null
+}
+
 # set name and email address
 function identity {
 
@@ -301,11 +314,7 @@ if [ ! -z ${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY+x} ]; then
     fi
 fi
 
-if [ -d $INSTALL_PATH ]; then
-    old_install_path="/opt/crucible-moved-on-`date +%d-%m-%Y_%H:%M:%S`"
-    echo "An existing installation of crucible exists and will be moved to $old_install_path"
-    /bin/mv "$INSTALL_PATH" "$old_install_path"
-fi
+clean_old_install
 
 echo "Installing crucible in $INSTALL_PATH"
 echo "Using Git repo:   ${GIT_REPO}"
