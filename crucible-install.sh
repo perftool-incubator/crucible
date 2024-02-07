@@ -31,6 +31,7 @@ EC_FAIL_REGISTRY_SET=12
 EC_FAIL_AUTH_SET=13
 EC_FAIL_CHECKOUT=14
 EC_PUSHD_FAIL=15
+EC_PULL_FAIL=16
 
 # remove a previous installation log
 if [ -e ${GIT_INSTALL_LOG} ]; then
@@ -359,6 +360,10 @@ if [ ${VERBOSE} == 1 ]; then
     cat ${GIT_INSTALL_LOG}
     echo
 fi
+
+echo "Pulling Crucible controller container image:"
+podman --log-level error pull ${CRUCIBLE_CONTROLLER_REGISTRY} ||
+    exit_error "Failed to pull controller image ${CRUCIBLE_CONTROLLER_REGISTRY}" ${EC_PULL_FAIL}
 
 echo "Installation is complete.  Run \"crucible help\" to see what's possible"
 echo "You can also source /etc/profile.d/crucible_completions.sh (or re-login) to use tab completion for crucible"
