@@ -119,7 +119,7 @@ elif [ "${1}" == "extract" ]; then
             EXIT_VAL=1
             ;;
     esac
-elif [ "${1}" == "opensearch" -o "${1}" == "es" ]; then
+elif [ "${1}" == "opensearch" ]; then
     shift
     if start_opensearch; then
         if [ "${1}" == "init" ]; then
