@@ -257,19 +257,13 @@ elif [ "${1}" == "run" ]; then
 
         ### endpoints
         # extract endpoints stream
-        count=0
-        endpoint_count=$(jq '.endpoints | length' ${base_run_dir}/config/${run_file_json})
-        while [ ${count} -lt ${endpoint_count} ]; do
-            blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config endpoints --index ${count}"
-            blockbreaker_cmd="$podman_run --workdir ${base_run_dir}/config -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
-            blockbreaker_output=$(${blockbreaker_cmd})
-            EXIT_VAL=$?
-            if [ ${EXIT_VAL} != 0 ]; then
-                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
-            fi
-            endpoints_stream+=" ${blockbreaker_output}"
-            let count=${count}+1
-        done
+        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config endpoints"
+        blockbreaker_cmd="$podman_run --workdir ${base_run_dir}/config -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
+	endpoints_stream=$(${blockbreaker_cmd})
+        EXIT_VAL=$?
+        if [ ${EXIT_VAL} != 0 ]; then
+            exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${endpoints_stream}"
+        fi
 
         ### run-params
         # extract run-params stream --key1 val1 --key2 val2 ...
