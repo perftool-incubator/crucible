@@ -70,6 +70,7 @@ container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
 container_rs_args+=("-e RS_REG_TLS_VERIFY=$CRUCIBLE_CLIENT_SERVER_TLS_VERIFY")
 container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
 container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
+container_rs_args+=("-e MULTIPLEX_HOME=${CRUCIBLE_HOME}/subprojects/core/multiplex")
 
 container_build_args=()
 container_build_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
