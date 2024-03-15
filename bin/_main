@@ -160,13 +160,8 @@ elif [ "${1}" == "run" ]; then
     arg_list="$@"
     shift
 
-    bench_params="bench-params.json"
-    tool_params="tool-params.json"
-    use_mv_params=0
-    mv_params=""
-    no_tools=0
-
     passthru_args=()
+    from_file_arg=0
 
     if [ "${1}" == "--from-file" ]; then
         # use the crucible run file aka 'all-in-one' / single json file
@@ -181,9 +176,27 @@ elif [ "${1}" == "run" ]; then
             exit_error "No other options must be speicifed with '--from-file <All-in-One-JSON>'."
         fi
 
-        # Create base_run_dir with benchmark name extracted from one-json
+        # extract the list of benchmarks from the run file
         json_info=$(jq '.benchmarks[].name' $run_file)
         benchmark_names=$(echo ${json_info} | sed -e 's/"//g')
+
+        # validate the benchmarks and create the list of their directories
+        benchmark_subproj_dir=""
+        for this_benchmark in $benchmark_names; do
+            this_benchmark_subproj_dir="${CRUCIBLE_HOME}/subprojects/benchmarks/${this_benchmark}"
+            if [ ! -e "$this_benchmark_subproj_dir" ]; then
+                echo "ERROR: Running benchmark ${this_benchmark} requires that the subproject be"
+                echo "located in "${CRUCIBLE_HOME}"/subprojects/bench/$this_benchmark"
+                echo "This directory could not be found.  Here are the benchmark"
+                echo "subproject directories:"
+                /bin/ls "${CRUCIBLE_HOME}"/subprojects/benchmarks
+                exit 1
+            fi
+            benchmark_subproj_dir+=",${this_benchmark_subproj_dir}"
+        done
+        benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | sed -e 's/^,//'`
+
+        # Create base_run_dir with benchmark name extracted from one-json
         CIFS=$IFS
         IFS=$' '
         benchmark_names=($benchmark_names)
@@ -196,88 +209,16 @@ elif [ "${1}" == "run" ]; then
         # so containers can access on blockbreaker commands
         cp ${run_file} ${base_run_dir}/config/${run_file_json}
 
-        # TODO: consolidate the next following blocks into one single
-        # function to extract data from the run file for different inputs
-
-        ### benchmarks
-        # convert to stream e.g. oslat,iperf,uperf,oslat
-        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config benchmarks"
-        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
-        blockbreaker_output=$(${blockbreaker_cmd})
-        EXIT_VAL=$?
-        if [ ${EXIT_VAL} != 0 ]; then
-                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
-        fi
-        bench_ids_str=$blockbreaker_output
-        IFS=','; read -ra bench <<< "$blockbreaker_output"; IFS=' '
-        for b in "${bench[@]}"; do
-           benchmark+=$(echo ",$b" | cut -f1 -d:)
-        done
-        bench_list=$(sed -e 's/^,//' <<< $benchmark)
-        bench_list=$(echo $bench_list | sed -e 's/,/ /g')
-        
-        ### mv-params
-        # dump json output to a file
-        for bench in ${bench_list}; do
-            blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config mv-params --benchmark ${bench}"
-            blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
-            blockbreaker_output=$(${blockbreaker_cmd})
-            EXIT_VAL=$?
-            if [ ${EXIT_VAL} != 0 ]; then
-                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
-            fi
-            bench_mv_params="${base_run_dir}/config/${bench}-mv-params.json"
-            echo ${blockbreaker_output} > $bench_mv_params
-            mv_params+=",${bench_mv_params}"
-        done
-        mv_params=$(sed -e 's/^,//' <<< $mv_params)
-
-        ### tool-params
-        # dump output json to a file
-        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config tool-params"
-        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
-        blockbreaker_output=$(${blockbreaker_cmd})
-        EXIT_VAL=$?
-        if [ ${EXIT_VAL} != 0 ]; then
-                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
-        fi
-        tool_params="${base_run_dir}/config/${tool_params}"
-        echo $blockbreaker_output > $tool_params
-
-        ### tags
-        # extract tags stream key1:val1,key2:val2...
-        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config tags"
-        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
-        blockbreaker_output=$(${blockbreaker_cmd})
-        EXIT_VAL=$?
-        if [ ${EXIT_VAL} != 0 ]; then
-                exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
-        fi
-        tags_str=${blockbreaker_output}
-
-        ### endpoints
-        # extract endpoints stream
-        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config endpoints"
-        blockbreaker_cmd="$podman_run --workdir ${base_run_dir}/config -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
-	endpoints_stream=$(${blockbreaker_cmd})
-        EXIT_VAL=$?
-        if [ ${EXIT_VAL} != 0 ]; then
-            exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${endpoints_stream}"
-        fi
-
-        ### run-params
-        # extract run-params stream --key1 val1 --key2 val2 ...
-        blockbreaker_args="python3 ${RICKSHAW_HOME}/util/blockbreaker.py --json ${base_run_dir}/config/${run_file_json} --config run-params"
-        blockbreaker_cmd="$podman_run -i --name crucible-blockbreaker-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${blockbreaker_args}"
-        blockbreaker_output=$(${blockbreaker_cmd})
-        EXIT_VAL=$?
-        if [ ${EXIT_VAL} != 0 ]; then
-            exit_error "ERROR: blockbreaker failed to run with rc=$EXIT_VAL, stdout=${blockbreaker_output}"
-        fi
-        run_params_str=${blockbreaker_output}
-
-        use_mv_params=1
+        from_file_arg=1
+        passthru_args+=("--from-file")
+        passthru_args+=("${base_run_dir}/config/${run_file_json}")
     else
+        bench_params="bench-params.json"
+        tool_params="tool-params.json"
+        use_mv_params=0
+        mv_params=""
+        no_tools=0
+
         # backwards compatibility (separated JSON files)
         # if not using all-in-one, benchmark must be 1st arg: crucible run <benchmark>
         benchmark=${1}
@@ -337,23 +278,6 @@ elif [ "${1}" == "run" ]; then
 
     fi
 
-    if [ -n "${run_params_str}" ]; then
-        passthru_args="${run_params_str}"
-    fi
-
-    if [ -n "${tags_str}" ]; then
-        tags_str=" --tags ${tags_str}"
-        passthru_args="${tags_str} ${passthru_args}"
-    fi
-
-    endpoints_str=""
-    if [ -n "${endpoints_stream}" ]; then
-        for eps in ${endpoints_stream}; do
-            endpoints_str+=" --endpoint ${eps}"
-        done
-        passthru_args="${endpoints_str} ${passthru_args}"
-    fi
-
     if [ -z "$CRUCIBLE_CLIENT_SERVER_REPO" ]; then
         exit_error "CRUCIBLE_CLIENT_SERVER_REPO is not defined"
     fi
@@ -369,107 +293,109 @@ elif [ "${1}" == "run" ]; then
     ln -sf "$base_run_dir" "${var_run_crucible}/latest"
     rs_dir="${CRUCIBLE_HOME}"/subprojects/core/rickshaw
 
-    benchmark=$(sed -e 's/^,//' <<< $benchmark)
-    bench_list=$(sed -e 's/,/ /' <<< $benchmark)
-    for this_benchmark in $bench_list; do
-        this_benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$this_benchmark
-        if [ ! -e "$this_benchmark_subproj_dir" ]; then
-            echo "ERROR: Running benchmark ${this_benchmark} requires that the subproject be"
-            echo "located in "${CRUCIBLE_HOME}"/subprojects/bench/$this_benchmark"
-            echo "This directory could not be found.  Here are the benchmark"
-            echo "subproject directories:"
-            /bin/ls "${CRUCIBLE_HOME}"/subprojects/benchmarks
-            exit 1
-        fi
-        benchmark_subproj_dir+=",${this_benchmark_subproj_dir}"
-    done
-    benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | sed -e 's/^,//'`
-
-    if [ ${use_mv_params} == 1 ]; then
-        count=1
-        bench_params=""
-        # remove first comma from mv_params list of json files
-        # and replace commas with spaces
-        mv_params=`echo ${mv_params} | sed -e 's/^,//' | sed -e 's/,/ /g'`
-        for this_mv_params in ${mv_params}; do
-            if [ ! -e "${this_mv_params}" ]; then
-                exit_error "The multi-value params file you specified with '--mv-params ${this_mv_params}' does not exist!"
-            else
-                this_benchmark=`echo ${benchmark} | cut -d, -f$count`
-                this_benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | cut -d, -f$count`
-                echo "Generating --bench-params from --mv-params..."
-                this_mv_params_run_dir=${base_run_dir}/config/${this_benchmark}-mv-params.json
-                # if mv-params come from the run file json, files are already there
-                if [ ! -f "${this_mv_params_run_dir}" ]; then
-                    cp ${this_mv_params} ${this_mv_params_run_dir}
-                fi
-                bench_params_run_file=${base_run_dir}/config/${this_benchmark}-bench-params.json
-                bench_params_run_output=${base_run_dir}/config/${this_benchmark}-bench-params.txt
-    
-                multiplex_cmd="${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${this_mv_params_run_dir} --output ${bench_params_run_file}"
-                if [ -e ${this_benchmark_subproj_dir}/multiplex.json ]; then
-                    multiplex_cmd+=" --requirements ${this_benchmark_subproj_dir}/multiplex.json"
-                else
-                    echo "Skipping benchmark requirements validation because there is no ${this_benchmark_subproj_dir}/multiplex.json"
-                fi
-    
-                multiplex_cmd="$podman_run -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
-                ${multiplex_cmd} > ${bench_params_run_output} 2>&1
-                EXIT_VAL=$?
-                if [ ${EXIT_VAL} != 0 ]; then
-                    echo "ERROR: multiplex failed with an error and returned rc=${EXIT_VAL}"
-                    echo "multiplex output is:"
-                    cat ${bench_params_run_output}
-                    exit ${EXIT_VAL}
-                fi
-                this_bench_params=${bench_params_run_file}
-                bench_params+=",${this_bench_params}"
+    if [ $from_file_arg == 0 ]; then
+        benchmark=$(sed -e 's/^,//' <<< $benchmark)
+        bench_list=$(sed -e 's/,/ /' <<< $benchmark)
+        for this_benchmark in $bench_list; do
+            this_benchmark_subproj_dir="${CRUCIBLE_HOME}"/subprojects/benchmarks/$this_benchmark
+            if [ ! -e "$this_benchmark_subproj_dir" ]; then
+                echo "ERROR: Running benchmark ${this_benchmark} requires that the subproject be"
+                echo "located in "${CRUCIBLE_HOME}"/subprojects/bench/$this_benchmark"
+                echo "This directory could not be found.  Here are the benchmark"
+                echo "subproject directories:"
+                /bin/ls "${CRUCIBLE_HOME}"/subprojects/benchmarks
+                exit 1
             fi
-            let count=${count}+1
+            benchmark_subproj_dir+=",${this_benchmark_subproj_dir}"
         done
-        bench_params=`echo ${bench_params} | sed -e 's/^,//'`
+        benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | sed -e 's/^,//'`
 
-    elif [ ! -e ${bench_params} ]; then
-        echo "ERROR:"
-        echo "Make sure you have defined the benchmark parameters and put them in a file \"./bench-params.json\""
-        echo "or that you explicitly specify the benchmark parameters file with \"--bench-params=<file>\"."
-        exit 1
-    else
-        bench_params_run_file=${base_run_dir}/config/bench-params.json
-        cp ${bench_params} ${bench_params_run_file}
-        bench_params=${bench_params_run_file}
-    fi
+        if [ ${use_mv_params} == 1 ]; then
+            count=1
+            bench_params=""
+            # remove first comma from mv_params list of json files
+            # and replace commas with spaces
+            mv_params=`echo ${mv_params} | sed -e 's/^,//' | sed -e 's/,/ /g'`
+            for this_mv_params in ${mv_params}; do
+                if [ ! -e "${this_mv_params}" ]; then
+                    exit_error "The multi-value params file you specified with '--mv-params ${this_mv_params}' does not exist!"
+                else
+                    this_benchmark=`echo ${benchmark} | cut -d, -f$count`
+                    this_benchmark_subproj_dir=`echo ${benchmark_subproj_dir} | cut -d, -f$count`
+                    echo "Generating --bench-params from --mv-params..."
+                    this_mv_params_run_dir=${base_run_dir}/config/${this_benchmark}-mv-params.json
+                    # if mv-params come from the run file json, files are already there
+                    if [ ! -f "${this_mv_params_run_dir}" ]; then
+                        cp ${this_mv_params} ${this_mv_params_run_dir}
+                    fi
+                    bench_params_run_file=${base_run_dir}/config/${this_benchmark}-bench-params.json
+                    bench_params_run_output=${base_run_dir}/config/${this_benchmark}-bench-params.txt
 
-    tool_params_file=${base_run_dir}/config/tool-params.json
-    if [ "${no_tools}" == "0" ]; then
-        if [ ! -e ${tool_params} ]; then
-            cp $rs_dir/config/tool-params.json ${tool_params_file}
-            echo "You do not have a \"tool-params.json\" in the current directory and have not explicitly"
-            echo "specified where to find a tool parameters file with \"--tools-params=<file>\"."
-            echo ""
-            echo "Crucible will use the default tools found in $rs_dir/config/tool-params.json:"
-            cat ${tool_params_file}
-            echo ""
-            echo "If you wish to use different tools, create a tool parameters file which adheres to"
-            echo "the proper schema ($rs_dir/schema/tools/json) and either place that file in the"
-            echo "current directory named \"tool-params.json\" or explicitly specify it with"
-            echo "\"--tool-params=<file>\"."
-            echo ""
-            echo "You can also disable tools entirely using the \"--no-tools\" parameter."
+                    multiplex_cmd="${CRUCIBLE_HOME}/subprojects/core/multiplex/multiplex.py --input ${this_mv_params_run_dir} --output ${bench_params_run_file}"
+                    if [ -e ${this_benchmark_subproj_dir}/multiplex.json ]; then
+                        multiplex_cmd+=" --requirements ${this_benchmark_subproj_dir}/multiplex.json"
+                    else
+                        echo "Skipping benchmark requirements validation because there is no ${this_benchmark_subproj_dir}/multiplex.json"
+                    fi
+    
+                    multiplex_cmd="$podman_run -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
+                    ${multiplex_cmd} > ${bench_params_run_output} 2>&1
+                    EXIT_VAL=$?
+                    if [ ${EXIT_VAL} != 0 ]; then
+                        echo "ERROR: multiplex failed with an error and returned rc=${EXIT_VAL}"
+                        echo "multiplex output is:"
+                        cat ${bench_params_run_output}
+                        exit ${EXIT_VAL}
+                    fi
+                    this_bench_params=${bench_params_run_file}
+                    bench_params+=",${this_bench_params}"
+                fi
+                let count=${count}+1
+            done
+            bench_params=`echo ${bench_params} | sed -e 's/^,//'`
+
+        elif [ ! -e ${bench_params} ]; then
+            echo "ERROR:"
+            echo "Make sure you have defined the benchmark parameters and put them in a file \"./bench-params.json\""
+            echo "or that you explicitly specify the benchmark parameters file with \"--bench-params=<file>\"."
+            exit 1
         else
-            cp ${tool_params} ${tool_params_file}
+            bench_params_run_file=${base_run_dir}/config/bench-params.json
+            cp ${bench_params} ${bench_params_run_file}
+            bench_params=${bench_params_run_file}
         fi
-    else
-        echo "Disabling all tools due to --no-tools"
-        echo "[]" > ${tool_params_file}
-    fi
 
-    params_args=""
-    params_args+=" --bench-params ${bench_params}"
-    params_args+=" --tool-params ${tool_params_file}"
+        tool_params_file=${base_run_dir}/config/tool-params.json
+        if [ "${no_tools}" == "0" ]; then
+            if [ ! -e ${tool_params} ]; then
+                cp $rs_dir/config/tool-params.json ${tool_params_file}
+                echo "You do not have a \"tool-params.json\" in the current directory and have not explicitly"
+                echo "specified where to find a tool parameters file with \"--tools-params=<file>\"."
+                echo ""
+                echo "Crucible will use the default tools found in $rs_dir/config/tool-params.json:"
+                cat ${tool_params_file}
+                echo ""
+                echo "If you wish to use different tools, create a tool parameters file which adheres to"
+                echo "the proper schema ($rs_dir/schema/tools/json) and either place that file in the"
+                echo "current directory named \"tool-params.json\" or explicitly specify it with"
+                echo "\"--tool-params=<file>\"."
+                echo ""
+                echo "You can also disable tools entirely using the \"--no-tools\" parameter."
+            else
+                cp ${tool_params} ${tool_params_file}
+            fi
+        else
+            echo "Disabling all tools due to --no-tools"
+            echo "[]" > ${tool_params_file}
+        fi
 
-    if [ -n "${bench_ids_str}" ]; then
-      params_args+=" --bench-ids ${bench_ids_str}"
+        params_args=""
+        params_args+=" --bench-params ${bench_params}"
+        params_args+=" --tool-params ${tool_params_file}"
+
+        if [ -n "${bench_ids_str}" ]; then
+            params_args+=" --bench-ids ${bench_ids_str}"
+        fi
     fi
 
     ${CRUCIBLE_HOME}/bin/repo info > ${base_run_dir}/config/crucible.repo.info
@@ -487,7 +413,7 @@ elif [ "${1}" == "run" ]; then
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
 
-    echo "rickshaw run command: $rs_run_cmd"
+    echo "rickshaw-run command: $rs_run_cmd"
 
     if [ -n "$CRUCIBLE_DRY_RUN" ]; then
         echo "Warning: CRUCIBLE_DRY_RUN environment variable is set, exiting..."
