@@ -155,7 +155,7 @@
       "type": "distro",
       "distro_info": {
         "packages": [
-          "opensearch"
+          "opensearch-2.11.1-1"
         ]
       }
     },
