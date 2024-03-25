@@ -51,7 +51,6 @@
           "iproute",
           "bind-utils",
           "procps-ng",
-          "git",
           "bc",
           "sshpass"
         ]
