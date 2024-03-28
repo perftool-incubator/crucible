@@ -51,7 +51,6 @@
           "iproute",
           "bind-utils",
           "procps-ng",
-          "git",
           "bc",
           "sshpass"
         ]
@@ -155,8 +154,11 @@
       "type": "distro",
       "distro_info": {
         "packages": [
-          "opensearch-2.11.1-1"
-        ]
+          "opensearch"
+        ],
+        "environment": {
+          "OPENSEARCH_INITIAL_ADMIN_PASSWORD": "foo"
+        }
       }
     },
     {
