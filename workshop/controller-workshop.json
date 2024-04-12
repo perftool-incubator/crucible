@@ -62,7 +62,9 @@
       "distro_info": {
         "packages": [
           "python39",
-          "python3-pip"
+          "python3-pip",
+          "python3-invoke",
+          "python3-fabric"
         ]
       }
     },
