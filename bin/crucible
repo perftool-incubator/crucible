@@ -110,7 +110,7 @@ if [ "$1" == "log" ]; then
         echo "log command not supported because CRUCIBLE_USE_LOGGER = 0"
         exit
     fi
-elif [ "$1" == "help" ]; then
+elif [ "$1" == "help" -o -z "$1" ]; then
     # print all help output outside of the logger context to avoid
     # filling the log with generic help information
 
