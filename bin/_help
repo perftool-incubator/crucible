@@ -34,6 +34,7 @@ function help() {
     echo "postprocess                  |  Post-process (and index) a result with run-result-dir argument immediately following 'index'"
     echo "opensearch init              |  Completely delete and init OpenSearch, leaving OpenSearch with only empty indices"
     echo "opensearch rebuild           |  Completely delete and init OpenSearch, then post-process and index all runs found in ${var_run_crucible}"
+    echo "opensearch repair            |  Clear read-only bits applied to OpenSearch indices when the disk gets too full.  Only do this after freeing up disk space."
     echo "extract                      |  Extract data from a run directory:"
     echo "  run-id <dir>               |    - Such as the run ID"
     echo "  primary-periods <dir>      |    - Or a list of the primary period IDs"
