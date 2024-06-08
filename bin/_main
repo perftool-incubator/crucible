@@ -126,6 +126,8 @@ elif [ "${1}" == "opensearch" ]; then
             init_opensearch
         elif [ "${1}" == "rebuild" ]; then
             reinit_opensearch
+        elif [ "${1}" == "repair" ]; then
+            repair_opensearch
         fi
         if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
             if pushd ${var_run_crucible} >/dev/null; then

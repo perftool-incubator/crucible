@@ -782,6 +782,31 @@ function reinit_opensearch() {
     return ${RC}
 }
 
+function repair_opensearch() {
+    local RC
+    RC=0
+
+    opensearch_put_cmd="curl --silent --show-error --stderr - -X PUT localhost:9200/_all/_settings"
+
+    echo "Clearing read-only bit:"
+    pod_name="crucible-clear-opensearch-read-only"
+    ${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${opensearch_put_cmd}  -H 'Content-Type: application/json' --data '{ "index": { "blocks": { "read_only": false } } }'
+    RC=$?
+    if [ ${RC} != 0 ]; then
+        echo "ERROR: Failed to clear read-only bit on OpenSearch indices"
+    else
+        echo "Clearing read-only-allow-delete bit:"
+        pod_name="crucible-clear-opensearch-read-only-allow-delete"
+        ${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${opensearch_put_cmd}  -H 'Content-Type: application/json' --data '{ "index": { "blocks": { "read_only_allow_delete": false } } }'
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Failed to clear read-only-allow-delete bit on OpenSearch indices"
+        fi
+    fi
+
+    return ${RC}
+}
+
 function confirm_continue() {
     local ref
     local action_message
