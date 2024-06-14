@@ -19,4 +19,4 @@ jobs:
       ci_target_branch: "${{ github.ref }}"
       github_workspace: "$GITHUB_WORKSPACE"
     secrets:
-      registry_auth: ${{ secrets.CRUCIBLE_CI_ENGINES_REGISTRY_AUTH }}
+      ci_registry_auth: ${{ secrets.CRUCIBLE_CI_ENGINES_REGISTRY_AUTH }}
