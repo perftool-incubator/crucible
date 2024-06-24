@@ -1,0 +1,17 @@
+name: crucible-scheduled
+
+on:
+  schedule:
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+
+jobs:
+  call-core-crucible-ci_scheduled:
+    uses: perftool-incubator/crucible-ci/.github/workflows/core-crucible-ci.yaml@main
+    with:
+      ci_target: "crucible"
+      ci_target_branch: "master"
+      github_workspace: "$GITHUB_WORKSPACE"
+      force_engine_build: true
+    secrets:
+      production_registry_auth: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
