@@ -13,7 +13,5 @@ jobs:
       ci_target: "crucible"
       ci_target_branch: "master"
       github_workspace: "$GITHUB_WORKSPACE"
-      force_engine_build: true
-      integration_test_job_timeout: 150
     secrets:
       production_registry_auth: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
