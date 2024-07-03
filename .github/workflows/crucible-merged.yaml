@@ -22,3 +22,4 @@ jobs:
       github_workspace: "$GITHUB_WORKSPACE"
     secrets:
       production_registry_auth: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
+      quay_oauth_token: ${{ secrets.CRUCIBLE_QUAYIO_OAUTH_TOKEN }}
