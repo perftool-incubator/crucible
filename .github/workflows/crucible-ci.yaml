@@ -6,6 +6,7 @@ on:
     paths-ignore:
     - LICENSE
     - '**.md'
+    - .github/workflows/crucible-merged.yaml
     - .github/workflows/crucible-scheduled.yaml
     - .github/workflows/faux-crucible-ci.yaml
     - .github/workflows/faux-ci.yaml
@@ -21,3 +22,4 @@ jobs:
       github_workspace: "$GITHUB_WORKSPACE"
     secrets:
       ci_registry_auth: ${{ secrets.CRUCIBLE_CI_ENGINES_REGISTRY_AUTH }}
+      quay_oauth_token: ${{ secrets.CRUCIBLE_QUAYIO_OAUTH_TOKEN }}

@@ -7,12 +7,12 @@ on:
 
 jobs:
   call-core-crucible-ci_scheduled:
+    if: github.repository == "perftool-incubator/crucible"
     uses: perftool-incubator/crucible-ci/.github/workflows/core-crucible-ci.yaml@main
     with:
       ci_target: "crucible"
       ci_target_branch: "master"
       github_workspace: "$GITHUB_WORKSPACE"
-      force_engine_build: true
-      integration_test_job_timeout: 150
     secrets:
       production_registry_auth: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
+      quay_oauth_token: ${{ secrets.CRUCIBLE_QUAYIO_OAUTH_TOKEN }}
