@@ -7,7 +7,7 @@ on:
 
 jobs:
   call-core-crucible-ci_scheduled:
-    if: github.repository == "perftool-incubator/crucible"
+    if: github.repository == 'perftool-incubator/crucible'
     uses: perftool-incubator/crucible-ci/.github/workflows/core-crucible-ci.yaml@main
     with:
       ci_target: "crucible"
