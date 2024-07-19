@@ -1,0 +1,203 @@
+name: crucible-release
+on:
+  schedule:
+    # Runs every 3 months (1st day of the quarter)
+    - cron: "0 0 1 */3 *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        required: false
+        type: boolean
+        description: Do NOT push/delete tag to/from the repositories
+        default: false
+    inputs:
+      custom-tag:
+        required: false
+        type: string
+        description: Custom tag to push/delete
+      action:
+        required: true
+        type: choice
+        options:
+        - push
+        - delete
+        description: Action to perform with the custom-tag (push or delete)
+        default: push
+
+jobs:
+  release-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.gen-release-tag.outputs.tag }}
+    steps:
+    - name: Generate release tag
+      if: github.event_name != 'workflow_dispatch' || github.event.inputs.custom_tag == ''
+      id: gen-release-tag
+      run: |
+          year="$(date +%Y)"
+          month="$(date +%m)"
+          quarter="$(((month-1)/3+1))"
+          echo "tag=$year.$quarter" >> $GITHUB_OUTPUT
+    - name: Generate custom tag
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.custom_tag != ''
+      id: gen-custom-tag
+      env:
+          CUSTOM_TAG: ${{ inputs.custom-tag }}
+      run: |
+          echo "tag=$CUSTOM_TAG" >> $GITHUB_OUTPUT
+    - name: Get release tag
+      id: get-release-tag
+      env:
+          TAG: ${{ needs.release-tag.outputs.tag }}
+      run: echo "$TAG"
+
+  crucible-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    - name: checkout crucible default
+      uses: actions/checkout@v4
+      with:
+        repository: perftool-incubator/crucible
+        ref: master
+        path: crucible
+    - name: get tags from the crucible repo
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd crucible
+          git ls-remote --tags origin
+    - name: push if tag does not exist in the crucible repo
+      if: ${{ inputs.dry_run == false && inputs.action != 'delete' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd crucible
+          git ls-remote --tags origin | grep -v "$TAG" && \
+          git tag $TAG && git push origin $TAG
+    - name: check if tag has been pushed
+      if: ${{ inputs.dry_run == false && inputs.action == 'push' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd crucible
+          git ls-remote --tags origin | grep "$TAG"
+          git fetch -t
+          git tag -l "$TAG"
+    - name: delete if action==delete and tag exists in the crucible repo
+      if: ${{ inputs.dry_run == false && inputs.action == 'delete' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd crucible
+          git ls-remote --tags origin | grep "$TAG" && \
+          git push --delete origin $TAG
+    - name: check if tag has been deleted
+      if: ${{ inputs.dry_run == false && inputs.action == 'delete' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd crucible
+          git ls-remote --tags origin | grep -v "$TAG"
+
+  get-sub-projects:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      repos: ${{ steps.get-repos.outputs.repos }}
+    steps:
+    - name: Get the list of sub-projects
+      id: get-repos
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd crucible
+          # get first column (repo name) and add to a bash array ( a b c)
+          projects=( $(grep -v ^# config/default_subprojects | awk {'print $1'} ) )
+          # builtin implict join array a,b,c
+          printf -v list '%s,' "${projects[@]}"
+          # convert to a comma separated list [a,b,c]
+          echo "repos=[${list%,}]" >> $GITHUB_OUTPUT
+    - name: Get the sub-projects list
+      id: get-projects-list
+      env:
+          REPOS: ${{ needs.get-repos.outputs.repos }}
+      run: echo "$REPOS"
+
+  projects-tag:
+    needs:
+    - get-sub-projects
+    strategy:
+        matrix:
+            repository: ${{ needs.get-sub-projects.outputs.repos }}
+    steps:
+    - name: Display sub-project repository name
+      run: |
+          echo "repository=${{ matrix.repository }}"
+    - name: checkout sub-project repository
+      uses: actions/checkout@v4
+      with:
+        repository: perftool-incubator/${{ matrix.repository }}
+        ref: ''
+        path: ''
+    - name: get remote tags
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd ${{ matrix.repository }}
+          git ls-remote --tags origin
+    - name: create release tag
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd ${{ matrix.repository }}
+          git tag $TAG
+    - name: push release tag
+      if: ${{ inputs.dry_run == false && inputs.action == 'push' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd ${{ matrix.repository }}
+          git ls-remote --tags origin | grep -v "$TAG" && \
+          git tag $TAG && git push origin $TAG
+    - name: check if tag has been pushed
+      if: ${{ inputs.dry_run == false && inputs.action == 'push' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd ${{ matrix.repository }}
+          git ls-remote --tags origin | grep "$TAG"
+          git fetch -t
+          git tag -l "$TAG"
+    - name: delete if action==delete and tag exists in the project repo
+      if: ${{ inputs.dry_run == false && inputs.action == 'delete' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd ${{ matrix.repository }}
+          git ls-remote --tags origin | grep "$TAG" && \
+          git push --delete origin $TAG
+    - name: check if tag has been deleted
+      if: ${{ inputs.dry_run == false && inputs.action == 'delete' }}
+      env:
+        TAG: ${{ needs.release-tag.outputs.tag }}
+      run: |
+          cd $GITHUB_WORKSPACE
+          cd crucible
+          git ls-remote --tags origin | grep -v "$TAG"
+
+  crucible-release-complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+    - release-tag
+    - crucible-tag
+    - projects-tag
+    steps:
+    - name: Confirm Success
+      run: echo "crucible-release-complete"
