@@ -10,7 +10,6 @@ on:
         type: boolean
         description: Do NOT push/delete tag to/from the repositories
         default: false
-    inputs:
       custom-tag:
         required: false
         type: string
@@ -55,6 +54,7 @@ jobs:
   crucible-tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    steps:
     - name: checkout crucible default
       uses: actions/checkout@v4
       with:
