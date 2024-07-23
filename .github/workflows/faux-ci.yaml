@@ -12,6 +12,7 @@ on:
     paths:
       - LICENSE
       - '**.md'
+      - .github/workflows/run-crucible-tracking.yaml
       - .github/workflows/faux-crucible-ci.yaml
       - .github/workflows/faux-ci.yaml
       - 'docs/**'

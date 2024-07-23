@@ -6,6 +6,7 @@ on:
     paths:
     - LICENSE
     - '**.md'
+    - .github/workflows/run-crucible-tracking.yaml
     - .github/workflows/crucible-merged.yaml
     - .github/workflows/crucible-scheduled.yaml
     - .github/workflows/faux-crucible-ci.yaml
