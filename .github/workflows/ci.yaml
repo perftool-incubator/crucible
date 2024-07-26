@@ -13,6 +13,7 @@ on:
       - .github/workflows/run-crucible-tracking.yaml
       - .github/workflows/faux-crucible-ci.yaml
       - .github/workflows/faux-ci.yaml
+      - .github/workflows/crucible-release.yaml
       - 'docs/**'
 
   # Allows you to run this workflow manually from the Actions tab
