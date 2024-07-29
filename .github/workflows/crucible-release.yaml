@@ -76,11 +76,6 @@ jobs:
           repository: perftool-incubator/crucible
           ref: master
           path: crucible
-      - name: get tags from the crucible repo
-        run: |
-            cd $GITHUB_WORKSPACE
-            cd crucible
-            git ls-remote --tags origin
       - name: push/delete tag to/from the crucible repo
         if: ${{ inputs.dry_run == false }}
         env:
@@ -88,6 +83,8 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE
             cd crucible
+            echo "Tags:"
+            git ls-remote --tags origin
             if [ ${{ inputs.action == 'push' }} ]; then
                 git ls-remote --tags origin | grep -v "$TAG" && \
                 git tag $TAG && git push origin $TAG
@@ -97,10 +94,14 @@ jobs:
                 git push --delete origin $TAG
                 git ls-remote --tags origin | grep -v "$TAG"
             fi
+            echo "Tags:"
+            git ls-remote --tags origin
 
   get-sub-projects:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs:
+      - crucible-tag
     outputs:
       repos: ${{ steps.get-repos.outputs.repos }}
     steps:
@@ -140,11 +141,6 @@ jobs:
           repository: perftool-incubator/${{ matrix.repository }}
           ref: ''
           path: ''
-      - name: get remote tags
-        run: |
-            cd $GITHUB_WORKSPACE
-            cd ${{ matrix.repository }}
-            git ls-remote --tags origin
       - name: push/delete release tag
         if: ${{ inputs.dry_run == false }}
         env:
@@ -152,6 +148,8 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE
             cd ${{ matrix.repository }}
+            echo "Tags:"
+            git ls-remote --tags origin
             if [ ${{ inputs.action == 'push' }} ]; then
                 git ls-remote --tags origin | grep -v "$TAG" && \
                 git tag $TAG && git push origin $TAG
@@ -161,13 +159,14 @@ jobs:
                 git push --delete origin $TAG
                 git ls-remote --tags origin | grep -v "$TAG"
             fi
+            echo "Tags:"
+            git ls-remote --tags origin
 
   crucible-release-complete:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs:
       - display-params
-      - crucible-tag
       - projects-tag
     steps:
       - name: Confirm Success
