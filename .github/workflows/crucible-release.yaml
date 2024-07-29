@@ -105,6 +105,12 @@ jobs:
     outputs:
       repos: ${{ steps.get-repos.outputs.repos }}
     steps:
+      - name: checkout crucible default
+        uses: actions/checkout@v4
+        with:
+          repository: perftool-incubator/crucible
+          ref: master
+          path: crucible
       - name: Get the list of sub-projects
         id: get-repos
         run: |
