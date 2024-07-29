@@ -15,6 +15,7 @@ on:
       - .github/workflows/run-crucible-tracking.yaml
       - .github/workflows/faux-crucible-ci.yaml
       - .github/workflows/faux-ci.yaml
+      - .github/workflows/crucible-release.yaml
       - 'docs/**'
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
