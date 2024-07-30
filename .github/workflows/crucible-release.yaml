@@ -116,8 +116,8 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE
             cd crucible/config
-            # get first column (repo name) and add to a bash array ( a b c )
-            projects=( $(grep -v ^# default_subprojects | awk {'print $1'} ) )
+            # get 3rd column (repo URL) and add to a bash array ( a b c )
+            projects=( $(grep -v ^# default_subprojects | awk {'print $3'} ) )
             # builtin implict join array a,b,c
             printf -v list '"%s",' "${projects[@]}"
             # convert to a comma separated list [a,b,c]
