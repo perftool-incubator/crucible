@@ -119,7 +119,7 @@ jobs:
             # get first column (repo name) and add to a bash array ( a b c )
             projects=( $(grep -v ^# default_subprojects | awk {'print $1'} ) )
             # builtin implict join array a,b,c
-            printf -v list '%s,' "${projects[@]}"
+            printf -v list '"%s",' "${projects[@]}"
             # convert to a comma separated list [a,b,c]
             echo "repos=[${list%,}]" >> $GITHUB_OUTPUT
       - name: Display sub-projects repos list
@@ -136,7 +136,7 @@ jobs:
       - get-sub-projects
     strategy:
       matrix:
-        repository: ${{ needs.get-sub-projects.outputs.repos }}
+        repository: ${{ fromJSON(needs.get-sub-projects.outputs.repos) }}
     steps:
       - name: Display sub-project repository name
         run: |
