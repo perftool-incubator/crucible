@@ -27,3 +27,5 @@ flexran              benchmark      /bench-flexran                              
 iperf                benchmark      /bench-iperf                                    main
 examples             doc            /crucible-examples                              main
 testing              doc            /testing-repo                                   master
+ilab                 benchmark      /bench-ilab                                     main
+nvidia               tool           /tool-nvidia                                    main
