@@ -86,13 +86,10 @@ jobs:
             echo "Tags:"
             git ls-remote --tags origin
             if [ ${{ inputs.action == 'push' }} ]; then
-                git ls-remote --tags origin | grep -v "$TAG" && \
-                git tag $TAG && git push origin $TAG
-                git ls-remote --tags origin | grep "$TAG"
+                git tag $TAG
+                git push origin $TAG
             elif [ ${{ inputs.action == 'delete' }} ]; then
-                git ls-remote --tags origin | grep "$TAG" && \
                 git push --delete origin $TAG
-                git ls-remote --tags origin | grep -v "$TAG"
             fi
             echo "Tags:"
             git ls-remote --tags origin
@@ -157,13 +154,10 @@ jobs:
             echo "Tags:"
             git ls-remote --tags origin
             if [ ${{ inputs.action == 'push' }} ]; then
-                git ls-remote --tags origin | grep -v "$TAG" && \
-                git tag $TAG && git push origin $TAG
-                git ls-remote --tags origin | grep "$TAG"
+                git tag $TAG
+                git push origin $TAG
             elif [ ${{ inputs.action == 'delete' }} ]; then
-                git ls-remote --tags origin | grep "$TAG" && \
                 git push --delete origin $TAG
-                git ls-remote --tags origin | grep -v "$TAG"
             fi
             echo "Tags:"
             git ls-remote --tags origin
