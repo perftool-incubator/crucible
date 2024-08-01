@@ -10,6 +10,18 @@ if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" -a -n "${CRUCIBLE_CONTAINER_IMAGE}" ]; th
     CRUCIBLE_CONTROLLER_IMAGE=${CRUCIBLE_CONTAINER_IMAGE}
 fi
 
+# provide backwards compatibility with configration files that still
+# have CRUCIBLE_CLIENT_SERVER_* instead of CRUCIBLE_ENGINE_*
+if [ -z "${CRUCIBLE_ENGINE_REPO}" -a -n "${CRUCIBLE_CLIENT_SERVER_REPO}" ]; then
+    CRUCIBLE_ENGINE_REPO=${CRUCIBLE_CLIENT_SERVER_REPO}
+fi
+if [ -z "${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}" -a -n "${CRUCIBLE_CLIENT_SERVER_AUTH}" ]; then
+    CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=${CRUCIBLE_CLIENT_SERVER_AUTH}
+fi
+if [ -z "${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}" -a -n "${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}" ]; then
+    CRUCIBLE_ENGINE_REPO_TLS_VERIFY=${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}
+fi
+
 # make sure the user has a .crucible directory for storing things
 USER_STORE=$HOME/.crucible
 if [ ! -d ${USER_STORE} ]; then
@@ -71,9 +83,9 @@ container_opensearch_args+=("--mount=type=bind,source=${opensearch_dir}/,destina
 
 container_rs_args=()
 container_rs_args+=("-i")
-container_rs_args+=("-e RS_REG_REPO=$CRUCIBLE_CLIENT_SERVER_REPO")
-container_rs_args+=("-e RS_REG_AUTH=$CRUCIBLE_CLIENT_SERVER_AUTH")
-container_rs_args+=("-e RS_REG_TLS_VERIFY=$CRUCIBLE_CLIENT_SERVER_TLS_VERIFY")
+container_rs_args+=("-e RS_REG_REPO=${CRUCIBLE_ENGINE_REPO}")
+container_rs_args+=("-e RS_REG_AUTH=${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}")
+container_rs_args+=("-e RS_REG_TLS_VERIFY=${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}")
 container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
 container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
 container_rs_args+=("-e MULTIPLEX_HOME=${CRUCIBLE_HOME}/subprojects/core/multiplex")

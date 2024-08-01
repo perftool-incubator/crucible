@@ -143,13 +143,13 @@ function usage {
 
     Crucible installer script.
 
-    Usage: $0 --client-server-registry <value> [ opt ]
+    Usage: $0 --engine-registry <value> [ opt ]
 
-    --client-server-registry <full registry url>
+    --engine-registry <full registry url>
 
     optional:
-        --client-server-auth-file <authentication file>
-        --client-server-tls-verify true|false
+        --engine-auth-file <authentication file>
+        --engine-tls-verify true|false
         --controller-registry <full registry url> (default is ${CRUCIBLE_CONTROLLER_REGISTRY})
         --name <your full name>
         --email <your email address>
@@ -218,6 +218,7 @@ function has_dependency {
 
 longopts="name:,email:,help,verbose"
 longopts+=",client-server-registry:,client-server-auth-file:,client-server-tls-verify:"
+longopts+=",engine-registry:,engine-auth-file:,engine-tls-verify:"
 longopts+=",controller-registry:,git-repo:,git-branch:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
@@ -226,14 +227,14 @@ fi
 eval set -- "$opts";
 while true; do
     case "$1" in
-        --client-server-tls-verify)
+        --client-server-tls-verify|--engine-tls-verify)
             shift;
-            CRUCIBLE_CLIENT_SERVER_TLS_VERIFY="$1"
+            CRUCIBLE_ENGINE_TLS_VERIFY="$1"
             shift;
             ;;
-        --client-server-registry)
+        --client-server-registry|--engine-registry)
             shift;
-            CRUCIBLE_CLIENT_SERVER_REGISTRY="$1"
+            CRUCIBLE_ENGINE_REGISTRY="$1"
             shift;
             ;;
         --name)
@@ -246,9 +247,9 @@ while true; do
             CRUCIBLE_EMAIL="$1"
             shift;
             ;;
-        --client-server-auth-file)
+        --client-server-auth-file|--engine-auth-file)
             shift;
-            CRUCIBLE_CLIENT_SERVER_AUTH_FILE="$1"
+            CRUCIBLE_ENGINE_AUTH_FILE="$1"
             shift;
             ;;
         --controller-registry)
@@ -293,8 +294,8 @@ if [ "`id -u`" != "0" ]; then
     exit_error "You must run this as root, exiting" $EC_FAIL_USER
 fi
 
-if [ -z ${CRUCIBLE_CLIENT_SERVER_REGISTRY+x} ]; then
-    exit_error "You must specify a registry with the --client-server-registry option." $EC_FAIL_REGISTRY_UNSET
+if [ -z ${CRUCIBLE_ENGINE_REGISTRY+x} ]; then
+    exit_error "You must specify a registry with the --engine-registry option." $EC_FAIL_REGISTRY_UNSET
 fi
 
 identity
@@ -303,15 +304,15 @@ for dep in $DEPENDENCIES; do
     has_dependency $dep
 done
 
-if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
-    if [ ! -f $CRUCIBLE_CLIENT_SERVER_AUTH_FILE ]; then
-        exit_error "Crucible authentication file not found. See --client-server-auth-file for details." $EC_AUTH_FILE_NOT_FOUND
+if [ ! -z ${CRUCIBLE_ENGINE_AUTH_FILE+x} ]; then
+    if [ ! -f $CRUCIBLE_ENGINE_AUTH_FILE ]; then
+        exit_error "Crucible authentication file not found. See --engine-auth-file for details." $EC_AUTH_FILE_NOT_FOUND
     fi
 fi
 
-if [ ! -z ${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY+x} ]; then
-    if [ "${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}" != "true" -a "${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}" != "false" ]; then
-        exit_error "Incorrect Crucible client server tls verify option [${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}].  See --client-server-tls-verify for details." $EC_TLS_VERIFY_ERROR
+if [ ! -z ${CRUCIBLE_ENGINE_TLS_VERIFY+x} ]; then
+    if [ "${CRUCIBLE_ENGINE_TLS_VERIFY}" != "true" -a "${CRUCIBLE_ENGINE_TLS_VERIFY}" != "false" ]; then
+        exit_error "Incorrect Crucible client server tls verify option [${CRUCIBLE_ENGINE_TLS_VERIFY}].  See --engine-tls-verify for details." $EC_TLS_VERIFY_ERROR
     fi
 fi
 
@@ -336,14 +337,14 @@ fi
 $INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
     exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
 
-SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY="${CRUCIBLE_CLIENT_SERVER_REGISTRY}"
-SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH=""
-SYSCONFIG_CRUCIBLE_CLIENT_SERVER_TLS_VERIFY="\"true\""
-if [ ! -z ${CRUCIBLE_CLIENT_SERVER_AUTH_FILE+x} ]; then
-    SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH="\"${CRUCIBLE_CLIENT_SERVER_AUTH_FILE}\""
+SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY="${CRUCIBLE_ENGINE_REGISTRY}"
+SYSCONFIG_CRUCIBLE_ENGINE_AUTH=""
+SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="\"true\""
+if [ ! -z ${CRUCIBLE_ENGINE_AUTH_FILE+x} ]; then
+    SYSCONFIG_CRUCIBLE_ENGINE_AUTH="\"${CRUCIBLE_ENGINE_AUTH_FILE}\""
 fi
-if [ ! -z ${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY+x} ]; then
-    SYSCONFIG_CRUCIBLE_CLIENT_SERVER_TLS_VERIFY="\"${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}\""
+if [ ! -z ${CRUCIBLE_ENGINE_TLS_VERIFY+x} ]; then
+    SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="\"${CRUCIBLE_ENGINE_TLS_VERIFY}\""
 fi
 
 # native crucible install script already created this, only append
@@ -351,9 +352,9 @@ cat << _SYSCFG_ >> $SYSCONFIG
 CRUCIBLE_USE_CONTAINERS=1
 CRUCIBLE_USE_LOGGER=1
 CRUCIBLE_CONTROLLER_IMAGE=${CRUCIBLE_CONTROLLER_REGISTRY}
-CRUCIBLE_CLIENT_SERVER_REPO=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_REGISTRY}
-CRUCIBLE_CLIENT_SERVER_AUTH=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_AUTH}
-CRUCIBLE_CLIENT_SERVER_TLS_VERIFY=${SYSCONFIG_CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}
+CRUCIBLE_ENGINE_REPO=${SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY}
+CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=${SYSCONFIG_CRUCIBLE_ENGINE_AUTH}
+CRUCIBLE_ENGINE_REPO_TLS_VERIFY=${SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY}
 _SYSCFG_
 
 if [ ${VERBOSE} == 1 ]; then
