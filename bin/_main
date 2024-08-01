@@ -31,12 +31,12 @@ elif [ "${1}" == "ls" -o "${1}" == "tags" -o "${1}" == "result-completion" ]; th
     result_process_cmd="${CRUCIBLE_HOME}/bin/result-processor.py"
     case "${1}" in
         ls|tags)
-            $podman_run --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${result_process_cmd} "$@"
+            ${podman_run} --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${result_process_cmd} "$@"
             EXIT_VAL=$?
             ;;
         result-completion)
             shift
-            $podman_run --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} ${result_process_cmd} completion "$@"
+            ${podman_run} --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${result_process_cmd} completion "$@"
             EXIT_VAL=$?
             ;;
     esac
@@ -78,7 +78,7 @@ elif [ "${1}" == "get" ]; then
         elif [ "${1}" == "metric" ]; then
             shift
             get_metric_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh"
-            $podman_run --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $get_metric_cmd "$@"
+            ${podman_run} --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${get_metric_cmd} "$@"
             EXIT_VAL=$?
         else
             echo "ERROR: unsupported 'get' argument [${1}]"
@@ -89,7 +89,7 @@ elif [ "${1}" == "rm" ]; then
     shift
     if start_opensearch; then
        rm_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh"
-       $podman_run --name crucible-rm-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rm_result_cmd "$@"
+       ${podman_run} --name crucible-rm-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rm_result_cmd} "$@"
     fi
     EXIT_VAL=$?
 elif [ "${1}" == "index" ]; then
@@ -284,8 +284,8 @@ elif [ "${1}" == "run" ]; then
         exit_error "CRUCIBLE_CLIENT_SERVER_REPO is not defined"
     fi
 
-    if [ -z "$CRUCIBLE_CONTAINER_IMAGE" ]; then
-        exit_error "Exiting because CRUCIBLE_CONTAINER_IMAGE is not defined"
+    if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" ]; then
+        exit_error "Exiting because CRUCIBLE_CONTROLLER_IMAGE is not defined"
     fi
 
     if [ -e "${var_run_crucible}/latest" ]; then
@@ -340,7 +340,7 @@ elif [ "${1}" == "run" ]; then
                         echo "Skipping benchmark requirements validation because there is no ${this_benchmark_subproj_dir}/multiplex.json"
                     fi
     
-                    multiplex_cmd="$podman_run -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" $CRUCIBLE_CONTAINER_IMAGE ${multiplex_cmd}"
+                    multiplex_cmd="${podman_run} -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${multiplex_cmd}"
                     ${multiplex_cmd} > ${bench_params_run_output} 2>&1
                     EXIT_VAL=$?
                     if [ ${EXIT_VAL} != 0 ]; then
@@ -428,7 +428,7 @@ elif [ "${1}" == "run" ]; then
         exit ${EXIT_VAL}
     fi
 
-    $podman_run --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" $CRUCIBLE_CONTAINER_IMAGE $rs_run_cmd
+    ${podman_run} --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_run_cmd}
     RC=$?
 
     if [ ${RC} == 0 ]; then
@@ -491,7 +491,7 @@ elif [ "${1}" == "reset" ]; then
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-    ${podman_run} --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTAINER_IMAGE} $@
+    ${podman_run} --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} $@
     EXIT_VAL=$?
 else
     echo "ERROR: This function has not been implemented"

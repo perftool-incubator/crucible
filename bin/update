@@ -111,7 +111,7 @@ case "${repo}" in
         echo
         echo "Checking for new controller image:"
         echo
-        if ! ${podman_pull} ${CRUCIBLE_CONTAINER_IMAGE}; then
+        if ! ${podman_pull} ${CRUCIBLE_CONTROLLER_IMAGE}; then
             RC=1
         fi
         ;;
