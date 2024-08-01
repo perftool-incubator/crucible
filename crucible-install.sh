@@ -222,7 +222,8 @@ longopts+=",engine-registry:,engine-auth-file:,engine-tls-verify:"
 longopts+=",controller-registry:,git-repo:,git-branch:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
-    exit_error "Unrecognized option specified: $@" $EC_INVALID_OPTION
+    opts=$(echo "$@")
+    exit_error "Unrecognized option specified: ${opts}" ${EC_INVALID_OPTION}
 fi
 eval set -- "$opts";
 while true; do
