@@ -15,65 +15,83 @@ ec=$(grep EC_FAIL_REGISTRY_UNSET= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh
 test "$?" = "$ec" || exit 1
 
-# auth file not found
-ec=$(grep EC_AUTH_FILE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
-sudo ./crucible-install.sh \
-  --client-server-registry myregistry.io/crucible \
-  --client-server-auth-file /tmp/auth-file.json
-test "$?" = "$ec" || exit 1
+for arg_mode in client-server engine; do echo "testing
+    arg_mode=${arg_mode}"
+    # auth file not found
+    ec=$(grep EC_AUTH_FILE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
+    sudo ./crucible-install.sh \
+      --${arg_mode}-registry myregistry.io/crucible \
+      --${arg_mode}-auth-file /tmp/auth-file.json
+    test "$?" = "$ec" || exit 1
+done
 
-# invalid tls verify value
-ec=$(grep EC_TLS_VERIFY_ERROR= crucible-install.sh | cut -d '=' -f2)
-sudo ./crucible-install.sh \
-  --client-server-registry myregistry.io/crucible \
-  --client-server-tls-verify foo
-test "$?" = "$ec" || exit 1
+for arg_mode in client-server engine; do
+    echo "testing arg_mode=${arg_mode}"
+    # invalid tls verify value
+    ec=$(grep EC_TLS_VERIFY_ERROR= crucible-install.sh | cut -d '=' -f2)
+    sudo ./crucible-install.sh \
+      --${arg_mode}-registry myregistry.io/crucible \
+      --${arg_mode}-tls-verify foo
+    test "$?" = "$ec" || exit 1
+done
 
-# default args
-touch /tmp/auth-file.json
-cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
-# TODO(rfolco): temporary workaround until we make it distro generic
-sudo mkdir -p $(dirname $cfgfile)
-sudo ./crucible-install.sh \
-  --client-server-registry myregistry.io/crucible \
-  --client-server-auth-file /tmp/auth-file.json
-test "$?" = "0" || exit 1
-grep "myregistry.io" $cfgfile || exit 1
-grep "auth-file.json" $cfgfile || exit 1
-command -v crucible || exit 1
+for arg_mode in client-server engine; do
+    echo "testing arg_mode=${arg_mode}"
+    # default args
+    touch /tmp/auth-file.json
+    cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+    # TODO(rfolco): temporary workaround until we make it distro generic
+    sudo mkdir -p $(dirname $cfgfile)
+    sudo ./crucible-install.sh \
+      --${arg_mode}-registry myregistry.io/crucible \
+      --${arg_mode}-auth-file /tmp/auth-file.json
+    test "$?" = "0" || exit 1
+    grep "myregistry.io" $cfgfile || exit 1
+    grep "auth-file.json" $cfgfile || exit 1
+    command -v crucible || exit 1
+done
 
-# identity
-touch /tmp/auth-file.json
-# Remove all previous installs
-rm -rf /opt/crucible*
-cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
-idfile=$(grep IDENTITY= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
-# TODO(rfolco): temporary workaround until we make it distro generic
-sudo mkdir -p $(dirname $cfgfile)
-sudo ./crucible-install.sh \
-  --client-server-registry myregistry.io/crucible \
-  --client-server-auth-file /tmp/auth-file.json \
-  --name "Nobody" \
-  --email "nobody@somewhere.com"
-sudo grep "CRUCIBLE_NAME=\"Nobody\"" $idfile || exit 1
-sudo grep "CRUCIBLE_EMAIL=\"nobody@somewhere.com\"" $idfile || exit 1
+for arg_mode in client-server engine; do
+    echo "testing arg_mode=${arg_mode}"
+    # identity
+    touch /tmp/auth-file.json
+    # Remove all previous installs
+    rm -rf /opt/crucible*
+    cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+    idfile=$(grep IDENTITY= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+    # TODO(rfolco): temporary workaround until we make it distro generic
+    sudo mkdir -p $(dirname $cfgfile)
+    sudo ./crucible-install.sh \
+      --${arg_mode}-registry myregistry.io/crucible \
+      --${arg_mode}-auth-file /tmp/auth-file.json \
+      --name "Nobody" \
+      --email "nobody@somewhere.com"
+    sudo grep "CRUCIBLE_NAME=\"Nobody\"" $idfile || exit 1
+    sudo grep "CRUCIBLE_EMAIL=\"nobody@somewhere.com\"" $idfile || exit 1
+done
 
-# override existing installation
-touch /tmp/auth-file.json
-cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
-# TODO(rfolco): temporary workaround until we make it distro generic
-sudo mkdir -p $(dirname $cfgfile)
-sudo ./crucible-install.sh \
-  --client-server-registry myregistry.io/crucible \
-  --client-server-auth-file /tmp/auth-file.json
-test "$?" = "0" || exit 1
-ls /opt/crucible-moved* || exit 1
+for arg_mode in client-server engine; do
+    echo "testing arg_mode=${arg_mode}"
+    # override existing installation
+    touch /tmp/auth-file.json
+    cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+    # TODO(rfolco): temporary workaround until we make it distro generic
+    sudo mkdir -p $(dirname $cfgfile)
+    sudo ./crucible-install.sh \
+      --${arg_mode}-registry myregistry.io/crucible \
+      --${arg_mode}-auth-file /tmp/auth-file.json
+    test "$?" = "0" || exit 1
+    ls /opt/crucible-moved* || exit 1
+done
 
-# override existing installation, no auth-file arg
-cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
-# TODO(rfolco): temporary workaround until we make it distro generic
-sudo mkdir -p $(dirname $cfgfile)
-sudo ./crucible-install.sh \
-  --client-server-registry myregistry.io/crucible
-test "$?" = "0" || exit 1
-ls /opt/crucible-moved* || exit 1
+for arg_mode in client-server engine; do
+    echo "testing arg_mode=${arg_mode}"
+    # override existing installation, no auth-file arg
+    cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+    # TODO(rfolco): temporary workaround until we make it distro generic
+    sudo mkdir -p $(dirname $cfgfile)
+    sudo ./crucible-install.sh \
+      --${arg_mode}-registry myregistry.io/crucible
+    test "$?" = "0" || exit 1
+    ls /opt/crucible-moved* || exit 1
+done
