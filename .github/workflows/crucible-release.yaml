@@ -154,12 +154,13 @@ jobs:
         with:
           app-id: ${{ vars.APP_ID__TAG_CRUCIBLE_RELEASE }}
           private-key: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
-          owner: ${{ github.repository_owner }}  
       - name: checkout sub-project repository
         uses: actions/checkout@v4
         with:
           repository: perftool-incubator/${{ matrix.repository }}
+          path: ${{ matrix.repository }}
           token: ${{ steps.generate-token.outputs.token }}
+          owner: ${{ github.repository_owner }}  
       - name: push/delete release tag
         if: ${{ inputs.dry_run == false }}
         env:
