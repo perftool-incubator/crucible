@@ -25,19 +25,6 @@ on:    # yamllint disable-line rule:truthy
         default: push
 
 jobs:
-  app-token:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      token: ${{ steps.generate-token.outputs.token }}
-    steps:
-      - name: Generate token
-        id: generate-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.APP_ID__TAG_CRUCIBLE_RELEASE }}
-          private-key: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
-
   release-tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -81,16 +68,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs:
-      - app-token
       - release-tag
     steps:
+      - name: Generate token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.APP_ID__TAG_CRUCIBLE_RELEASE }}
+          private-key: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
+          owner: ${{ github.repository_owner }}  
       - name: checkout crucible default
         uses: actions/checkout@v4
         with:
           repository: perftool-incubator/crucible
           ref: master
           path: crucible
-          token: ${{ needs.app-token.outputs.token }}
+          token: ${{ steps.generate-token.outputs.token }}
       - name: push/delete tag to/from the crucible repo
         if: ${{ inputs.dry_run == false }}
         env:
@@ -146,7 +139,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:
-      - app-token
       - release-tag
       - get-sub-projects
     strategy:
@@ -156,11 +148,18 @@ jobs:
       - name: Display sub-project repository name
         run: |
             echo "repository=${{ matrix.repository }}"
+      - name: Generate token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.APP_ID__TAG_CRUCIBLE_RELEASE }}
+          private-key: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
+          owner: ${{ github.repository_owner }}  
       - name: checkout sub-project repository
         uses: actions/checkout@v4
         with:
           repository: perftool-incubator/${{ matrix.repository }}
-          token: ${{ needs.app-token.outputs.token }}
+          token: ${{ steps.generate-token.outputs.token }}
       - name: push/delete release tag
         if: ${{ inputs.dry_run == false }}
         env:
