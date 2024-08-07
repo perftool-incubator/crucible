@@ -15,6 +15,7 @@ on:    # yamllint disable-line rule:truthy
         required: false
         type: string
         description: Custom tag to push/delete
+        default: ''
       action:
         required: true
         type: choice
@@ -22,11 +23,11 @@ on:    # yamllint disable-line rule:truthy
           - push
           - delete
         description: Action to perform with the custom-tag (push or delete)
-        default: push
+        default: 'push'
       force_push:
         required: false
         type: boolean
-        description: FORCE push (override if tag exists)
+        description: FORCE push (override tag)
         default: false
 
 jobs:
@@ -35,7 +36,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       tag: ${{ steps.gen-release-tag.outputs.tag }}
-      force: ${{ steps.get-force-push.outputs.force }}
     steps:
       - name: Generate release tag
         id: gen-release-tag
@@ -48,14 +48,6 @@ jobs:
             else
                 echo "tag=${{ inputs.custom_tag }}" >> $GITHUB_OUTPUT
             fi
-      - name: Get force push flag
-        if: ${{ inputs.action == 'push' }}
-        id: get-force-push
-        run: |
-            if [ ${{ inputs.force_push == true }} ]; then
-                echo "force='-f'" >> $GITHUB_OUTPUT
-            else
-                echo "force=''" >> $GITHUB_OUTPUT
 
   display-params:
     runs-on: ubuntu-latest
@@ -104,19 +96,22 @@ jobs:
           token: ${{ steps.generate-token.outputs.token }}
 
       - name: push/delete tag to/from the crucible repo
-        if: ${{ inputs.dry_run == false }}
+        if: ${{ inputs.dry_run == "false" }}
         env:
           TAG: ${{ needs.release-tag.outputs.tag }}
-          FORCE: ${{ needs.release-tag.outputs.force }}
         run: |
             cd $GITHUB_WORKSPACE
             cd crucible
             echo "Tags:"
             git ls-remote --tags origin
-            if [ ${{ inputs.action == 'push' }} ]; then
+            if [ "${{ inputs.action }}" == "push" }} ]; then
                 git tag $TAG
-                git push origin $TAG $FORCE
-            elif [ ${{ inputs.action == 'delete' }} ]; then
+                if [ "${{ inputs.force_push }}" == "true" ]; then
+                    git push origin $TAG --force
+                else
+                    git push origin $TAG
+                fi    
+            elif [ "${{ inputs.action }}" == "delete" ]; then
                 git push --delete origin $TAG
             fi
             echo "Tags:"
@@ -184,19 +179,22 @@ jobs:
           fetch-tags: true
           token: ${{ steps.generate-token.outputs.token }}
       - name: push/delete release tag
-        if: ${{ inputs.dry_run == false }}
+        if: ${{ inputs.dry_run == "false" }}
         env:
           TAG: ${{ needs.release-tag.outputs.tag }}
-          FORCE: ${{ needs.release-tag.outputs.force }}
         run: |
             cd $GITHUB_WORKSPACE
             cd ${{ matrix.repository }}
             echo "Tags:"
             git ls-remote --tags origin
-            if [ ${{ inputs.action == 'push' }} ]; then
+            if [ "${{ inputs.action }}" == "push" ]; then
                 git tag $TAG
-                git push origin $TAG $FORCE
-            elif [ ${{ inputs.action == 'delete' }} ]; then
+                if [ "${{ inputs.force_push }}" == "true" ]; then
+                    git push origin $TAG --force
+                else
+                    git push origin $TAG
+                fi    
+            elif [ "${{ inputs.action }}" == "delete" ]; then
                 git push --delete origin $TAG
             fi
             echo "Tags:"
