@@ -55,7 +55,7 @@ jobs:
             if [ ${{ inputs.force_push == true }} ]; then
                 echo "force='-f'" >> $GITHUB_OUTPUT
             else
-                echo "force=" >> $GITHUB_OUTPUT
+                echo "force=''" >> $GITHUB_OUTPUT
 
   display-params:
     runs-on: ubuntu-latest
