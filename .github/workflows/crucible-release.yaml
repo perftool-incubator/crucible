@@ -104,13 +104,13 @@ jobs:
             cd crucible
             echo "Tags:"
             git ls-remote --tags origin
-            if [ "${{ inputs.action }}" == "push" }} ]; then
-                git tag $TAG
+            if [ "${{ inputs.action }}" == "push" ]; then
+                ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
-                    git push origin $TAG --force
-                else
-                    git push origin $TAG
-                fi    
+                    ARGS="--force"
+                fi
+                git tag $TAG $ARGS
+                git push origin $TAG $ARGS
             elif [ "${{ inputs.action }}" == "delete" ]; then
                 git push --delete origin $TAG
             fi
@@ -188,12 +188,12 @@ jobs:
             echo "Tags:"
             git ls-remote --tags origin
             if [ "${{ inputs.action }}" == "push" ]; then
-                git tag $TAG
+                ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
-                    git push origin $TAG --force
-                else
-                    git push origin $TAG
-                fi    
+                    ARGS="--force"
+                fi
+                git tag $TAG $ARGS
+                git push origin $TAG $ARGS
             elif [ "${{ inputs.action }}" == "delete" ]; then
                 git push --delete origin $TAG
             fi
