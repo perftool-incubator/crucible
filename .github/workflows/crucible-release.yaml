@@ -96,7 +96,7 @@ jobs:
           token: ${{ steps.generate-token.outputs.token }}
 
       - name: push/delete tag to/from the crucible repo
-        if: ${{ inputs.dry_run == "false" }}
+        if: ${{ inputs.dry_run == false }}
         env:
           TAG: ${{ needs.release-tag.outputs.tag }}
         run: |
@@ -179,7 +179,7 @@ jobs:
           fetch-tags: true
           token: ${{ steps.generate-token.outputs.token }}
       - name: push/delete release tag
-        if: ${{ inputs.dry_run == "false" }}
+        if: ${{ inputs.dry_run == false }}
         env:
           TAG: ${{ needs.release-tag.outputs.tag }}
         run: |
