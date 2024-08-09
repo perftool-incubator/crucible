@@ -62,6 +62,7 @@ cyclictest | Traditional RT latency measurement tool | https://github.com/perfto
 fio | Traditional block IO testing | https://github.com/perftool-incubator/bench-fio
 hwlatdetect | Baremetal HW latency spike detector | https://github.com/perftool-incubator/bench-hwlatdetect
 flexran | Radio Access Network (RAN) edge framework testing | https://github.com/perftool-incubator/bench-flexran
+ilab | AI/LLM workload based on InstructLab | https://github.com/perftool-incubator/bench-ilab
 oslat | Latency measurement tool that simulates a continously polling application (ie. DPDK PMD) | https://github.com/perftool-incubator/bench-oslat
 iperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-iperf
 tracer | Framework for Linux kernel latency tracer/workload tools (ie. osnoise & timerlat) | https://github.com/perftool-incubator/bench-tracer
