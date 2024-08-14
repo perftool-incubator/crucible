@@ -95,3 +95,35 @@ for arg_mode in client-server engine; do
     test "$?" = "0" || exit 1
     ls /opt/crucible-moved* || exit 1
 done
+
+# RELEASE: --release and --list-releases
+## prep step: check tags in remote repo
+tags=$(git ls-remote --tags \
+    --sort='version:refname' \
+    https://github.com/perftool-incubator/crucible.git \
+    | awk -F/ 'END{print$NF}')
+
+## show releases, test rc and stdout
+stdout=$(sudo ./crucible-install.sh \
+    --list-releases)
+test "$?" = "0" || exit 1
+[[ "$stdout" = *"$tags"* ]] || exit 1
+
+## negative test: --release and --git-repo
+ec=$(grep EC_RELEASE_DEFAULT_REPO_ONLY= crucible-install.sh | cut -d '=' -f2)
+sudo ./crucible-install.sh \
+    --release DoesNotMatter --git-repo DoesNotMatter
+test "$?" = "$ec" || exit 1
+
+## negative test: --release and --git-branch
+ec=$(grep EC_RELEASE_CONFLICTS_WITH_BRANCH= crucible-install.sh | cut -d '=' -f2)
+sudo ./crucible-install.sh \
+    --release DoesNotMatter --git-branch DoesNotMatter
+test "$?" = "$ec" || exit 1
+
+## negative test: non-existent tag
+ec=$(grep EC_FAIL_CHECKOUT= crucible-install.sh | cut -d '=' -f2)
+sudo ./crucible-install.sh \
+    --release NonExitentTag \
+    --client-server-registry myregistry.io/crucible
+test "$?" = "$ec" || exit 1

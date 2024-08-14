@@ -14,6 +14,7 @@ DEFAULT_GIT_REPO="https://github.com/perftool-incubator/crucible.git"
 DEFAULT_GIT_BRANCH="master"
 GIT_REPO=""
 GIT_BRANCH=""
+GIT_TAG=""
 VERBOSE=0
 
 # User Exit Codes
@@ -32,6 +33,8 @@ EC_FAIL_AUTH_SET=13
 EC_FAIL_CHECKOUT=14
 EC_PUSHD_FAIL=15
 EC_PULL_FAIL=16
+EC_RELEASE_DEFAULT_REPO_ONLY=18
+EC_RELEASE_CONFLICTS_WITH_BRANCH=19
 
 # remove a previous installation log
 if [ -e ${GIT_INSTALL_LOG} ]; then
@@ -145,20 +148,52 @@ function usage {
 
     Usage: $0 --engine-registry <value> [ opt ]
 
-    --engine-registry <full registry url>
+        --engine-registry <full registry url>
+        Engine registry.
 
     optional:
+
         --engine-auth-file <authentication file>
+        Authentication file for pushing images to the remote registry.
+  
         --engine-tls-verify true|false
-        --controller-registry <full registry url> (default is ${CRUCIBLE_CONTROLLER_REGISTRY})
-        --name <your full name>
+        Use TLS verification.
+
+        --controller-registry <full registry url>
+        Controller registry (default is ${CRUCIBLE_CONTROLLER_REGISTRY}).
+
+	--name <your full name>
         --email <your email address>
-        --verbose
+        Name and email of Crucible user.
+
         --git-repo <repo path/url>
         --git-branch <branch name>
+        Repository and branch to install Crucible from.
 
-    --help [displays this usage output]
+        --release [<release>|select]
+	Release tag <release> to install a locked-down version of Crucible.
+        The option '--release select' lists all available releases on
+        interactive prompt.
+
+	--verbose
+        Verbose mode that provides more debugging info.
+
+	--list-releases
+        Show all available release tags from the remote repository.
+
+    --help
+    Displays this usage output.
+
 _USAGE_
+}
+
+# list available tags from the remote repository
+function list_releases {
+# only default repo is supported for the release mechanism
+    git ls-remote --tags \
+	    --sort='version:refname' \
+	    https://github.com/perftool-incubator/crucible.git \
+	    | awk -F/ 'END{print$NF}'
 }
 
 # cleanup previous installation
@@ -176,19 +211,19 @@ function clean_old_install {
 # set name and email address
 function identity {
 
-    if [ -z $CRUCIBLE_NAME ] && [ -z $CRUCIBLE_EMAIL ]; then
-        if [ -e $IDENTITY ]; then
-            echo "Sourcing $IDENTITY"
-            . $IDENTITY
+    if [ -z "${CRUCIBLE_NAME}" ] && [ -z "${CRUCIBLE_EMAIL}" ]; then
+        if [ -e "${IDENTITY}" ]; then
+            echo "Sourcing ${IDENTITY}"
+            . ${IDENTITY}
         fi
     fi
 
-    if [ -z $CRUCIBLE_NAME ]; then
+    if [ -z "${CRUCIBLE_NAME}" ]; then
             echo "Please enter your full name:"
             read CRUCIBLE_NAME
     fi
 
-    if [ -z $CRUCIBLE_EMAIL ]; then
+    if [ -z "${CRUCIBLE_EMAIL}" ]; then
         echo "Please enter your email address:"
         read CRUCIBLE_EMAIL
     fi
@@ -216,10 +251,40 @@ function has_dependency {
     echo
 }
 
-longopts="name:,email:,help,verbose"
+# process release tag passed as an argument with '--release <TAG>'
+# interactively select from a list of available releases (tags)
+# if none is specified as <TAG>
+function select_release {
+    release="$1"
+    if [ "$release" == "select" ]; then
+	echo
+        echo "Releases:"
+        tags=( $(list_releases) )
+
+        numopt=${#tags[@]}
+        if [ $numopt -eq 0 ]; then
+            echo "No available releases! Using default branch."
+
+        else
+            PS3="Select release option # [1-${numopt}]: "
+            select release in ${tags[@]}; do
+                echo ${tags[@]} | grep -w -q "$release"
+                if [ $? -eq 0 ]; then
+                    echo "Release '$REPLY) $release' has been selected."
+                else
+                    echo "Invalid option '$REPLY'! Using default branch."
+                fi
+                break
+            done
+        fi
+    fi
+    GIT_TAG="$release"
+}
+
+longopts="name:,email:,help,list-releases,verbose"
 longopts+=",client-server-registry:,client-server-auth-file:,client-server-tls-verify:"
 longopts+=",engine-registry:,engine-auth-file:,engine-tls-verify:"
-longopts+=",controller-registry:,git-repo:,git-branch:"
+longopts+=",controller-registry:,git-repo:,git-branch:,release:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
     opts=$(echo "$@")
@@ -277,6 +342,16 @@ while true; do
             GIT_BRANCH="$1"
             shift;
             ;;
+        --list-releases)
+	    shift;
+	    list_releases
+	    exit
+	    ;;
+	--release)
+	    shift;
+	    select_release "$1"
+	    shift;
+	    ;;
         --)
             shift;
             break;
@@ -289,7 +364,22 @@ while true; do
     esac
 done
 
+# --release conflicts with --git-repo or --git-branch
+if [ -n "${GIT_TAG}" ]; then
+    if [ -n "${GIT_REPO}" ]; then
+        exit_error "Only default repo is supported for installing a release." $EC_RELEASE_DEFAULT_REPO_ONLY
+    fi
+    if [ -n "${GIT_BRANCH}" ]; then
+        exit_error "Cannot install from release and specify '--git-branch'." $EC_RELEASE_CONFLICTS_WITH_BRANCH
+    fi
+fi
+
 determine_git_install_source
+
+# Override GIT_BRANCH **AFTER** determine function
+if [ -n "${GIT_TAG}" ]; then
+    GIT_BRANCH="${GIT_TAG}"
+fi
 
 if [ "`id -u`" != "0" ]; then
     exit_error "You must run this as root, exiting" $EC_FAIL_USER
@@ -335,7 +425,7 @@ if [ -n "${GIT_BRANCH}" ]; then
 else
     echo "No specific git branch requested, using default"
 fi
-$INSTALL_PATH/bin/subprojects-install >>"$GIT_INSTALL_LOG" 2>&1 ||
+$INSTALL_PATH/bin/subprojects-install $GIT_TAG >>"$GIT_INSTALL_LOG" 2>&1 ||
     exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
 
 SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY="${CRUCIBLE_ENGINE_REGISTRY}"

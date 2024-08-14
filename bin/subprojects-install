@@ -2,6 +2,8 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
+GIT_TAG=$1
+
 default_git_host_org="https://github.com/perftool-incubator"
 
 function exit_error() {
@@ -125,7 +127,11 @@ for subproject in "${!subprojects[@]}"; do
     sp_git_host_org=`echo $sp_git_user_host_org | sed -e 'sXhttps://XX' -e 'sXhttp://XX' -e 's/.*@//'`
     sp_git_user=`echo $sp_git_user_host_org | sed -e s,$sp_git_host_org,, -e 'sX://X:X'`
     sp_git_host_org=`echo $sp_git_host_org | sed -e 's,/,:,g'`
-    sp_branch=`echo ${subprojects[$subproject]} | awk '{print $4}'`
+    if [ -z "${GIT_TAG}" ]; then
+        sp_branch=`echo ${subprojects[$subproject]} | awk '{print $4}'`
+    else
+        sp_branch=$GIT_TAG
+    fi
     case "$sp_type" in
         "benchmark")
             sp_dir_prefix="benchmarks/"
@@ -157,11 +163,11 @@ for subproject in "${!subprojects[@]}"; do
             fi
         fi
         if pushd "${clone_user_host_org_proj_dir}" >/dev/null; then
-            cmd="git checkout ${sp_branch}"
-            echo "${cmd}"
-            if ! ${cmd}; then
-                exit_error "Could not checkout ${sp_branch} for ${sp_git_user_host_org}/${sp_git_proj}"
-            fi
+	    cmd="git checkout ${sp_branch}"
+	    echo "${cmd}"
+	    if ! ${cmd}; then
+	        exit_error "Could not checkout ${sp_branch} for ${sp_git_user_host_org}/${sp_git_proj}"
+	    fi
             popd >/dev/null
         else
             exit_error "Could not chdir to ${clone_user_host_org_proj_dir}"
