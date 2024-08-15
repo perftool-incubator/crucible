@@ -6,7 +6,7 @@
   },
   "userenvs": [
     {
-      "name": "fedora39",
+      "name": "fedora40",
       "requirements": [
         "motd",
         "dnf-tools",
