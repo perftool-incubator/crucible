@@ -15,6 +15,7 @@ on:
       - .github/workflows/faux-ci.yaml
       - .github/workflows/crucible-release.yaml
       - 'docs/**'
+      - 'spec/**'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
