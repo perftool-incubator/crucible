@@ -1,7 +1,7 @@
 # as described here: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/troubleshooting-required-status-checks#handling-skipped-but-required-checks
 
 # Basic ci workflow using github actions
-name: CI
+name: faux-CI
 
 # Controls when the action will run.
 on:
