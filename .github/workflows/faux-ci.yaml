@@ -23,8 +23,8 @@ on:
 jobs:
   # Job to test installation
   install:
-    # Job will run on github-hosted runner
-    runs-on: ubuntu-latest
+    # Job will run on self-hosted runner tagged for workflow-overhead
+    runs-on: [ self-hosted, workflow-overhead ]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
