@@ -1,7 +1,7 @@
 # as described here: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/troubleshooting-required-status-checks#handling-skipped-but-required-checks
 
 # Basic ci workflow using github actions
-name: CI
+name: faux-CI
 
 # Controls when the action will run.
 on:
@@ -23,8 +23,8 @@ on:
 jobs:
   # Job to test installation
   install:
-    # Job will run on github-hosted runner
-    runs-on: ubuntu-latest
+    # Job will run on self-hosted runner tagged for workflow-overhead
+    runs-on: [ self-hosted, workflow-overhead ]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
