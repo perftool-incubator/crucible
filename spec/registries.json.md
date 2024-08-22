@@ -63,7 +63,14 @@ this:
       "tokens": {
         "push": "/path/to/public/engines/push/token.json"
       },
-      "tls-verify": true
+      "tls-verify": true,
+      "quay": {            # optional quay object that is used for quay specific things -- which at this time is all image expiration related (this was in rickshaw-settings.json but it should probably be migrated hear)
+        "expiration-length": "2w",
+        "refresh-expiration": {
+          "token-file": "/path/to/public/engines/refresh/expiration/token.json",
+          "api-url": "https://quay.io/api/v1/repository/crucible/client-server"
+        }
+      }
     },
     "private": {
       "url": "foo.com/crucible/private-engines",
@@ -71,7 +78,10 @@ this:
         "push": "/path/to/private/engines/push/token.json",
         "pull": "/path/to/private/engines/pull/token.json"
       },
-      "tls-verify": true
+      "tls-verify": true,
+      "quay": {            # this could also have an optional quay object as above
+        ...
+      }
     }
   },
   "userenvs": [            # this array would contain information to be provided to workshop so it would know how to access base userenv images that have controlled access (by matching against the url?)
