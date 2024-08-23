@@ -130,7 +130,8 @@
         "packages": [
           "buildah",
           "podman",
-          "skopeo"
+          "skopeo",
+          "fuse-overlayfs"
         ]
       }
     },
