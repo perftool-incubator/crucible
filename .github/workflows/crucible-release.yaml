@@ -33,9 +33,10 @@ on:    # yamllint disable-line rule:truthy
 jobs:
   release-tag:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       tag: ${{ steps.gen-release-tag.outputs.tag }}
+      repos: ${{ steps.get-repos.outputs.repos }}
     steps:
       - name: Generate release tag
         id: gen-release-tag
@@ -49,13 +50,6 @@ jobs:
             else
                 echo "tag=${{ inputs.custom_tag }}" >> $GITHUB_OUTPUT
             fi
-
-  display-params:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs:
-      - release-tag
-    steps:
       - name: Display params
         id: get-params
         env:
@@ -72,13 +66,6 @@ jobs:
           echo "action=$ACTION"
           echo "github_event=$GITHUB_EVENT"
           echo "force_push=$FORCE_PUSH"
-
-  crucible-tag:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs:
-      - release-tag
-    steps:
       - name: Generate token
         id: generate-token
         uses: actions/create-github-app-token@v1
@@ -95,11 +82,10 @@ jobs:
           set-safe-directory: false
           fetch-tags: true
           token: ${{ steps.generate-token.outputs.token }}
-
       - name: push/delete tag to/from the crucible repo
         if: ${{ inputs.dry_run == false }}
         env:
-          TAG: ${{ needs.release-tag.outputs.tag }}
+          TAG: ${{ steps.gen-release-tag.outputs.tag }}
         run: |
             cd $GITHUB_WORKSPACE
             cd crucible
@@ -117,21 +103,6 @@ jobs:
             fi
             echo "Tags:"
             git ls-remote --tags origin
-
-  get-sub-projects:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs:
-      - crucible-tag
-    outputs:
-      repos: ${{ steps.get-repos.outputs.repos }}
-    steps:
-      - name: checkout crucible default
-        uses: actions/checkout@v4
-        with:
-          repository: perftool-incubator/crucible
-          ref: master
-          path: crucible
       - name: Get the list of sub-projects
         id: get-repos
         run: |
@@ -156,10 +127,9 @@ jobs:
     timeout-minutes: 10
     needs:
       - release-tag
-      - get-sub-projects
     strategy:
       matrix:
-        repository: ${{ fromJSON(needs.get-sub-projects.outputs.repos) }}
+        repository: ${{ fromJSON(needs.release-tag.outputs.repos) }}
     steps:
       - name: Display sub-project repository name
         run: |
@@ -200,13 +170,3 @@ jobs:
             fi
             echo "Tags:"
             git ls-remote --tags origin
-
-  crucible-release-complete:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs:
-      - display-params
-      - projects-tag
-    steps:
-      - name: Confirm Success
-        run: echo "crucible-release-complete"
