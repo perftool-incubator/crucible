@@ -1,0 +1,81 @@
+{
+    "type": "object",
+    "properties": {
+        "official": {
+            "$ref": "#/definitions/repo-array"
+        },
+        "unofficial": {
+            "$ref": "#/definitions/repo-array"
+        }
+    },
+    "additionalProperties": false,
+    "required": [
+        "official",
+        "unofficial"
+    ],
+    "definitions": {
+        "repo-array": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "primary",
+                            "core",
+                            "tool",
+                            "benchmark",
+                            "doc"
+                        ]
+                    },
+                    "repository": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "primary-branch": {
+                        "type": "string",
+                        "enum": [
+                            "main",
+                            "master"
+                        ]
+                    },
+                    "checkout": {
+                        "type": "object",
+                        "properties": {
+                            "mode": {
+                                "type": "string",
+                                "enum": [
+                                    "follow",
+                                    "locked"
+                                ]
+                            },
+                            "target": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                            "mode",
+                            "target"
+                        ]
+                    }
+                },
+                "additionalProperties": false,
+                "required": [
+                    "name",
+                    "type",
+                    "repository",
+                    "primary-branch",
+                    "checkout"
+                ]
+            }
+        }
+    }
+}
