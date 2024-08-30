@@ -193,7 +193,7 @@ function list_releases {
     git ls-remote --tags \
 	    --sort='version:refname' \
 	    https://github.com/perftool-incubator/crucible.git \
-	    | awk -F/ 'END{print$NF}'
+	    | awk -F/ '{print$NF}'
 }
 
 # cleanup previous installation
