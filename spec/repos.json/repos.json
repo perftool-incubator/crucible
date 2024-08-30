@@ -1,0 +1,296 @@
+{
+    "official": [
+        {
+            "name": "crucible",
+            "type": "primary",
+            "repository": "https://github.com/perftool-incubator/crucible.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "rickshaw",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/rickshaw.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "multiplex",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/multiplex.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "roadblock",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/roadblock.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "workshop",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/workshop.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "CommonDataModel",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/CommonDataModel.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "toolbox",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/toolbox.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "packrat",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/packrat.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "crucible-ci",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/crucible-ci.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "fio",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-fio.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "uperf",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-uperf.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "oslat",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-oslat.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "trafficgen",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-trafficgen.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "cyclictest",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-cyclictest.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "hwlatdetect",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-hwlatdetect.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "tracer",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-tracer.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "flexran",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-flexran.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "iperf",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-iperf.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "ilab",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-ilab.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "sysstat",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-sysstat.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "procstat",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-procstat.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "ftrace",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-ftrace.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "kernel",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-kernel.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "ovs",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-ovs.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
+            "name": "rt-trace-bpf",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-rt-trace-bpf.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "forkstat",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-forkstat.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "nvidia",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-nvidia.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "examples",
+            "type": "doc",
+            "repository": "https://github.com/perftool-incubator/crucible-examples.git",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
+            "name": "testing",
+            "type": "doc",
+            "repository": "https://github.com/perftool-incubator/testing-repo.git",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        }
+    ],
+    "unofficial": [
+    ]
+}

@@ -80,11 +80,11 @@ The proposed JSON config file will be called
   "official": [      # all of the repositories that are part of the "official upstream project"
     {
       "name": "crucible",
-      "type": "glue",              # choices: glue (only 1 -- Crucible), core, tool, benchmark, or doc
+      "type": "primary",           # choices: primary (only 1 -- Crucible), core, tool, benchmark, or doc
       "repository": "https://github.com/perftool-incubator/crucible.git",
       "primary-branch": "master",  # choices: master or main
       "checkout": {
-        "mode": "follow",          # choices: follow (upstream) or user (chosen, stay at)
+        "mode": "follow",          # choices: follow or locked
         "target": "master"         # branch/tag/commit the repo is expected to be at
       }
     }.
@@ -94,7 +94,7 @@ The proposed JSON config file will be called
       "repository": "https://github.com/perftool-incubator/rickshaw.git",
       "primary-branch": "master",
       "checkout": {
-        "mode": "user",
+        "mode": "locked",
         "target": "2024.4"
       }
     },
@@ -111,7 +111,7 @@ The proposed JSON config file will be called
     },
   ...
   ],
-  "3rd-party": [     # this would be user supplied repositories that should be managed by crucible (for updates, checkouts, etc.) but are not part of the "official upstream project" -- ie. tools, benchmarks, userenv libraries, etc.
+  "unofficial": [    # this would be user supplied repositories that should be managed by crucible (for updates, checkouts, etc.) but are not part of the "official upstream project" -- ie. tools, benchmarks, userenv libraries, etc.
   ]                  # formatting: placing the [] on separate lines is important to make seemless merges of upstream changes when local changes (ie. array contents) are present
 }
 ```
