@@ -96,10 +96,13 @@ jobs:
                 if [ "${{ inputs.force_push }}" == "true" ]; then
                     ARGS="--force"
                 fi
+                git checkout -b $TAG
+                git push origin $TAG $ARGS #branch
                 git tag $TAG $ARGS
-                git push origin $TAG $ARGS
+                git push origin tag $TAG $ARGS #tag
             elif [ "${{ inputs.action }}" == "delete" ]; then
-                git push --delete origin $TAG
+                git push --delete origin tag $TAG #tag
+                git push --delete origin $TAG #branch
             fi
             echo "Tags:"
             git ls-remote --tags origin
@@ -163,10 +166,13 @@ jobs:
                 if [ "${{ inputs.force_push }}" == "true" ]; then
                     ARGS="--force"
                 fi
+                git checkout -b $TAG
+                git push origin $TAG $ARGS #branch
                 git tag $TAG $ARGS
-                git push origin $TAG $ARGS
+                git push origin tag $TAG $ARGS #tag
             elif [ "${{ inputs.action }}" == "delete" ]; then
-                git push --delete origin $TAG
+                git push --delete origin tag $TAG #tag
+                git push --delete origin $TAG #branch
             fi
             echo "Tags:"
             git ls-remote --tags origin
