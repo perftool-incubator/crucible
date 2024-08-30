@@ -23,6 +23,7 @@ jobs:
       ci_target: "crucible"
       ci_target_branch: "${{ github.ref }}"
       github_workspace: "$GITHUB_WORKSPACE"
+      userenv_filter: "minimal"
     secrets:
       ci_registry_auth: ${{ secrets.CRUCIBLE_CI_ENGINES_REGISTRY_AUTH }}
       quay_oauth_token: ${{ secrets.CRUCIBLE_QUAYIO_OAUTH_TOKEN }}
