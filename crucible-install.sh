@@ -281,6 +281,51 @@ function select_release {
     GIT_TAG="$release"
 }
 
+function update_repos_config() {
+    local REPO BRANCH PATH MODE
+    local current_repo_location primary_branch
+    local update_mode update_target
+    REPO=${1}
+    BRANCH=${2}
+    PATH=${3}
+
+    REPO_FILE=${PATH}/config/repos.json
+
+    current_repo_location=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | .repository')
+    if [ "${REPO}" != "${current_repo_location}" ]; then
+        jq_update ${REPO_FILE} repository --arg repository "${REPO}" '.official[] | select(.name == "crucible") |= (.repository = $repository)'
+    fi
+
+    primary_branch=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | ."primary-branch"')
+    checkout_target=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | .checkout.target')
+    checkout_mode=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | .checkout.mode')
+    update_mode=0
+    update_target=0
+    if [ "${BRANCH}" == "${primary_branch}" ]; then
+        if [ "${BRANCH}" == "${checkout_target}" ]; then
+            # don't make any changes
+        else
+            update_target=1
+
+            # what do we do about the mode?
+        fi
+    else
+        if [ "${BRANCH}" == "${checkout_target}" ]; then
+            # no need to update the target, but what about the mode?
+        else
+            update_target=1
+
+            # what do we do about the mode?
+        fi
+    fi
+    if [ ${update_mode} -eq 1 ]; then
+        jq_update ${REPO_FILE} checkout.mode --arg checkout_mode $MODE '.official[] | select(.name == "crucible") |= (.checkout.mode = $checkout_mode)'
+    fi
+    if [ ${update_target} -eq 1 ]; then
+        jq_update ${REPO_FILE} checkout.target --arg checkout_target $BRANCH '.official[] | select(.name == "crucible") |= (.checkout.target = $checkout_target)'
+    fi
+}
+
 longopts="name:,email:,help,list-releases,verbose"
 longopts+=",client-server-registry:,client-server-auth-file:,client-server-tls-verify:"
 longopts+=",engine-registry:,engine-auth-file:,engine-tls-verify:"
