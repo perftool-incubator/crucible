@@ -20,9 +20,8 @@ function jq_update() {
 }
 
 function jq_query() {
-    local FILE QUERY
-    FILE=${1}
-    QUERY=${2}
+    local FILE
+    FILE=${1}; shift
 
-    jq -r ${QUERY} ${FILE}
+    jq -r $@ ${FILE}
 }
