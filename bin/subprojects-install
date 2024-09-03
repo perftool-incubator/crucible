@@ -23,6 +23,7 @@ fi
 # Find the git repo base directory
 crucible_repo_bin_dir=$(dirname `readlink -e $0`)
 crucible_repo_dir=$(echo $crucible_repo_bin_dir | sed -e 'sX/binXX')
+source ${crucible_repo_dir}/bin/jqlib
 
 # The three sections below use sudo to install files and links as root.
 # This script could be run by root (in which the sudo does not matter),
@@ -57,19 +58,17 @@ else
     exit_error "file $crucible_repo_bin_dir/crucible was not found, exiting"
 fi
 
-# Load the subprojects from ./config/default_subprojects, then from $HOME/.crucible/subprojects to get local overrides
+# Load the subprojects
+REPOS_FILE=${crucible_repo_dir}/config/repos.json
 declare -A subprojects
-for conf_file in "$crucible_repo_dir/config/default_subprojects" "$HOME/.crucible/subprojects"; do
-    if [ -e "$conf_file" ]; then
-        while read line; do
-            if echo $line | grep -q "^\#"; then
-                continue
-            fi
-            name=`echo $line | awk '{print $1}'`
-            subprojects["$name"]="$line"
-        done < "$conf_file"
-    fi
-done
+if [ -e "${REPOS_FILE}" ]; then
+    for repo in $(jq -r '.official[], .unofficial[] | select(.name != "crucible") | .name' ${REPOS_FILE}); do
+        subprojects["${repo}"]=1
+    done
+else
+    exit_error "Could not locate the repos.json at ${REPOS_FILE}"
+fi
+
 
 no_clone=""
 pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change directory to $crucible_repo_dir"
@@ -79,7 +78,7 @@ for link in $(find subprojects -type l); do
     name_link=$(echo "${link}" | awk -F'/' '{ print $3 }')
     active=0
     if [ -n "${subprojects[$name_link]}" ]; then
-        sp_type=`echo ${subprojects[$name_link]} | awk '{print $2}'`
+        sp_type=$(jq -r --arg name "${name_link}" '.official[], .unofficial[] | select(.name == $name) | .type' ${REPOS_FILE})
         case "$sp_type" in
             "benchmark")
                 if [ "${type_dir}" == "benchmarks" ]; then
@@ -109,29 +108,32 @@ for link in $(find subprojects -type l); do
     fi
 done
 for subproject in "${!subprojects[@]}"; do
-    sp_type=`echo ${subprojects[$subproject]} | awk '{print $2}'`
-    sp_git_user_host_org_proj=`echo ${subprojects[$subproject]} | awk '{print $3}'`
-    # sp_git_user_host_org_proj has two possible formats:
+    sp_type=$(jq -r --arg name "${subproject}" '.official[], .unofficial[] | select(.name == $name) | .type' ${REPOS_FILE})
+    sp_repository=$(jq -r --arg name "${subproject}" '.official[], .unofficial[] | select(.name == $name) | .repository' ${REPOS_FILE})
+    # sp_repository has two possible formats:
     #   https://github.com/perftool-incubator/crucible.git
     #   git@github.com:perftool-incubator/crucible.git
-    sp_git_proj=`echo $sp_git_user_host_org_proj | awk -F/ '{print $NF}'`
-    sp_git_user_host_org=`echo $sp_git_user_host_org_proj | sed -e s/$sp_git_proj$// -e s,/$,,`
-    # If the repo location was omitted, get this from existing crucible repo
-    if [ -z "$sp_git_user_host_org" ]; then
-        pushd $crucible_repo_dir >/dev/null
-        cru_git_user_host_org_proj=`git remote -v | grep origin | grep fetch | head -1 | awk '{print $2}'`
-        cru_git_proj=`echo $cru_git_user_host_org_proj | awk -F/ '{print $NF}'`
-            sp_git_user_host_org=`echo $cru_git_user_host_org_proj | sed -e s/$cru_git_proj$// -e s,/$,,`
-            popd >/dev/null
+
+    sp_git_proj=$(echo ${sp_repository} | awk -F/ '{print $NF}')
+    sp_git_user_host_org=$(echo ${sp_repository} | sed -e s/${sp_git_proj}$// -e s,/$,,)
+
+    sp_git_host_org=$(echo ${sp_git_user_host_org} | sed -e 'sXhttps://XX' -e 'sXhttp://XX' -e 's/.*@//')
+    sp_git_user=$(echo ${sp_git_user_host_org} | sed -e s,${sp_git_host_org},, -e 'sX://X:X')
+    sp_git_host_org=$(echo ${sp_git_host_org} | sed -e 's,/,:,g')
+
+    sp_branch=$(jq -r --arg name "${subproject}" '.official[], .unofficial[] | select(.name == $name) | .checkout.target' ${REPOS_FILE})
+    if [ -n "${GIT_TAG}" ]; then
+        if [ "${sp_branch}" != "${GIT_TAG}" ]; then
+            sp_branch=${GIT_TAG}
+            jq_update ${REPOS_FILE} ${subproject}:checkout.target --arg subproject "${subproject}" --arg checkout_target "${sp_branch}" '.official[], .unofficial[] | select(.name == $subproject) |= (.checkout.target = $checkout_target)'
+        fi
+
+        current_checkout_mode=$(jq_query --arg subproject "${subproject}" '.official[], .unofficial[] | select(.name == $subproject) | .checkout.mode')
+        if [ "${current_checkout_mode}" != "locked" ]; then
+            jq_update ${REPOS_FILE} ${subproject}:checkout.mode --arg subproject "${subproject}" --arg checkout_mode "locked" '.official[], .unofficial[] | select(.name == $subproject) |= (.checkout.mode = $checkout_mode)'
+        fi
     fi
-    sp_git_host_org=`echo $sp_git_user_host_org | sed -e 'sXhttps://XX' -e 'sXhttp://XX' -e 's/.*@//'`
-    sp_git_user=`echo $sp_git_user_host_org | sed -e s,$sp_git_host_org,, -e 'sX://X:X'`
-    sp_git_host_org=`echo $sp_git_host_org | sed -e 's,/,:,g'`
-    if [ -z "${GIT_TAG}" ]; then
-        sp_branch=`echo ${subprojects[$subproject]} | awk '{print $4}'`
-    else
-        sp_branch=$GIT_TAG
-    fi
+
     case "$sp_type" in
         "benchmark")
             sp_dir_prefix="benchmarks/"
@@ -146,45 +148,54 @@ for subproject in "${!subprojects[@]}"; do
             sp_dir_prefix="docs/"
             ;;
     esac
-    clone_user_host_org_dir="repos/$sp_git_user$sp_git_host_org"
-    mkdir -p "$clone_user_host_org_dir"
-    clone_user_host_org_proj_dir="$clone_user_host_org_dir/$sp_git_proj"
-    subproject_dir="subprojects/$sp_dir_prefix$subproject"
-    if [ ! -e "$clone_user_host_org_proj_dir" ]; then
-        cmd="git clone $sp_git_user_host_org/$sp_git_proj $clone_user_host_org_proj_dir"
+
+    clone_user_host_org_dir="repos/${sp_git_user}${sp_git_host_org}"
+    mkdir -p "${clone_user_host_org_dir}"
+    clone_user_host_org_proj_dir="${clone_user_host_org_dir}/${sp_git_proj}"
+    subproject_dir="subprojects/${sp_dir_prefix}${subproject}"
+
+    if [ ! -e "${clone_user_host_org_proj_dir}" ]; then
+        echo "Cloning ${subproject}"
+
+        cmd="git clone ${sp_git_user_host_org}/${sp_git_proj} ${clone_user_host_org_proj_dir}"
         echo "${cmd}"
         if ! ${cmd}; then
             echo "failed to clone ${sp_git_user_host_org}/${sp_git_proj}"
-            cmd="git clone ${default_git_host_org}/${sp_git_proj} $clone_user_host_org_proj_dir"
-            echo "${cmd}"
-            if ! ${cmd}; then
-                echo "failed to clone ${default_git_host_org}/${sp_git_proj}"
-                exit_error "Could not clone repo ${sp_git_proj}"
-            fi
+            exit_error "Could not clone repo ${sp_git_proj}"
         fi
-        if pushd "${clone_user_host_org_proj_dir}" >/dev/null; then
-	    cmd="git checkout ${sp_branch}"
-	    echo "${cmd}"
-	    if ! ${cmd}; then
-	        exit_error "Could not checkout ${sp_branch} for ${sp_git_user_host_org}/${sp_git_proj}"
-	    fi
-            popd >/dev/null
-        else
-            exit_error "Could not chdir to ${clone_user_host_org_proj_dir}"
-        fi
+    else
+        echo "Not cloning ${subproject} (it already exists)"
+        no_clone+=" ${subproject}"
+    fi
+
+    if [ -e "${subproject_dir}" ]; then
+        # delete an existing $subproject_dir so we can create a new one
         if ! /bin/rm -f "${subproject_dir}"; then
             exit_error "Could not rm ${subproject_dir}"
         fi
-        if ! /bin/ln -sf "../../${clone_user_host_org_proj_dir}" "${subproject_dir}"; then
-            exit_error "Symlinking ${subproject_dir} to ../../${clone_user_host_org_proj_dir} failed"
-        fi
+    fi
+
+    # create the new $subproject_dir
+    if ! /bin/ln -sf "../../${clone_user_host_org_proj_dir}" "${subproject_dir}"; then
+        exit_error "Symlinking ${subproject_dir} to ../../${clone_user_host_org_proj_dir} failed"
+    fi
+
+    # make sure the correct branch/tag/commit is checked out
+    if pushd "${clone_user_host_org_proj_dir}" >/dev/null; then
+	cmd="git checkout ${sp_branch}"
+	echo "${cmd}"
+	if ! ${cmd}; then
+	    exit_error "Could not checkout ${sp_branch} for ${sp_git_user_host_org}/${sp_git_proj}"
+	fi
+        popd >/dev/null
     else
-        no_clone="$no_clone $subproject"
+        exit_error "Could not chdir to ${clone_user_host_org_proj_dir}"
     fi
 done
-if [ ! -z "$no_clone" ]; then
-    echo "Not cloning these subprojects as they already exist:"
-    echo "$no_clone"
-fi
-popd >/dev/null
 
+if [ ! -z "${no_clone}" ]; then
+    echo "Not cloning these subprojects as they already exist:"
+    echo "${no_clone}"
+fi
+
+popd >/dev/null
