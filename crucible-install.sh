@@ -198,10 +198,20 @@ function list_releases {
 
 # cleanup previous installation
 function clean_old_install {
+    local timestamp
+
+    timestamp=$(date +%d-%m-%Y_%H:%M:%S)
+    
     if [ -d $INSTALL_PATH ]; then
-        old_install_path="/opt/crucible-moved-on-`date +%d-%m-%Y_%H:%M:%S`"
+        old_install_path="/opt/crucible-moved-on-${timestamp}"
         echo "An existing installation of crucible exists and will be moved to $old_install_path"
         /bin/mv "$INSTALL_PATH" "$old_install_path"
+    fi
+
+    if [ -e ${SYSCONFIG} ]; then
+        old_sysconfig="${SYSCONFIG}-moved-on-${timestamp}"
+        echo "An existing crucible sysconfig file exists and will be moved to ${old_sysconfig}"
+        /bin/mv "${SYSCONFIG}" "${old_sysconfig}"
     fi
 
     # reset the update tracker if there is any existing state
