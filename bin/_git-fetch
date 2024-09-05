@@ -17,6 +17,9 @@ if [ ! -e ${CRUCIBLE_HOME} ]; then
 fi
 
 source ${CRUCIBLE_HOME}/bin/base
+source ${CRUCIBLE_HOME}/bin/jqlib
+
+REPO_FILE=${CRUCIBLE_HOME}/config/repos.json
 
 PROCESS_LOCK_FILE="${UPDATE_STATUS_FILE}.process-lock"
 touch "${PROCESS_LOCK_FILE}"
@@ -45,34 +48,47 @@ touch "${PROCESS_LOCK_FILE}"
     {
         UPDATE_COUNT=0
 
-        if pushd ${CRUCIBLE_HOME}/subprojects > /dev/null; then
-            for tmp_repo in $(find . -maxdepth 2 -mindepth 2 -type l | sed 'sX./XX'); do
-                echo "REPO: ${tmp_repo}"
-                if pushd ${tmp_repo} > /dev/null; then
+        for project in $(jq_query ${REPO_FILE} '.official[], .unofficial[] | .name'); do
+            echo "Processing project: ${project}"
+
+            PROJECT_NAME=$(jq_query ${REPO_FILE} --arg project ${project} '.official[], .unofficial[] | select(.name == $project) | .name')
+            PROJECT_TYPE=$(jq_query ${REPO_FILE} --arg project ${project} '.official[], .unofficial[] | select(.name == $project) | .type')
+            PROJECT_CHECKOUT_MODE=$(jq_query ${REPO_FILE} --arg project ${project} '.official[], .unofficial[] | select(.name == $project) | .checkout.mode')
+
+            if [ "${PROJECT_CHECKOUT_MODE}" == "follow" ]; then
+                if [ "${PROJECT_NAME}" == "crucible" ]; then
+                    repo_dir=${CRUCIBLE_HOME}
+                else
+                    repo_dir=${CRUCIBLE_HOME}/subprojects/$(get_project_type_dir ${PROJECT_TYPE})/${PROJECT_NAME}
+                fi
+
+                if pushd ${repo_dir} > /dev/null; then
                     if [ -d "./.git" ]; then
-                        git remote --verbose update --prune
+                        git_fetch_cmd="git fetch --all --prune --prune-tags --tags --verbose"
+                        echo "${git_fetch_cmd}"
+                        ${git_fetch_cmd}
 
                         git_status=$(git_get_status)
                         git_tracking=$(git_get_tracking "${git_status}")
 
                         if [ -n "${git_tracking}" -a "${git_tracking}" != "(detached)" ]; then
                             git_delta_behind=$(git_get_delta_behind "${git_status}")
+                            echo "Found ${git_delta_behind} update(s)"
                             if [ "${git_delta_behind}" != "0" ]; then
                                 (( UPDATE_COUNT += git_delta_behind ))
                             fi
                         fi
                     else
-                        echo "ERROR: not a git repo"
+                        echo "ERROR: '${repo_dir}' is not a Git repo"
                     fi
                     popd > /dev/null
+                else
+                    echo "ERROR: Faild to pushd to '${repo_dir}'"
                 fi
-                echo
-            done
-            popd > /dev/null
-        else
-            echo "ERROR: Could not pushd to ${CRUCIBLE_HOME}/subprojects"
-            exit 1
-        fi
+            else
+                echo "Skipping analysis since checkout.mode is 'locked'"
+            fi
+        done
 
         CURRENT_TIMESTAMP=$(date +%s)
         {
