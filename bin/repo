@@ -4,7 +4,9 @@
 
 # repo management infrastructure
 
-if [ ! -e $CRUCIBLE_HOME ]; then
+source /etc/sysconfig/crucible
+
+if [ ! -e "${CRUCIBLE_HOME}" ]; then
     echo "Could not find $CRUCIBLE_HOME, exiting."
     exit 1
 fi
@@ -19,6 +21,7 @@ function help() {
     echo ""
     echo "info          |  Give high level info about the active repositories (default)"
     echo "details       |  Give details for the active repositories"
+    echo "config        |  Repository configuration control and information"
     echo ""
 }
 
@@ -199,21 +202,75 @@ function handle_scope() {
     fi
 }
 
-if [ -z "${1}" ]; then
-    scope="all"
-else
-    scope=${1}
-    shift
-fi
+function config_show() {
+    fmt_line="%-20s  %-15s  %-13s  %-60s  %-20s  %-20s  %-20s"
+    printf "${fmt_line}\n" "Project Family" "Project Name" "Project Type" "Git Remote URL" "Primary Branch" "Checkout Mode" "Checkout Target"
+
+    for family in official unofficial; do
+        projects=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} '.[$family][] | .name')
+        for project in ${projects}; do
+            project_type=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} --arg project_name ${project} '.[$family][] | select(.name == $project_name) | .type')
+            project_repository=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} --arg project_name ${project} '.[$family][] | select(.name == $project_name) | .repository')
+            project_primary_branch=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} --arg project_name ${project} '.[$family][] | select(.name == $project_name) | ."primary-branch"')
+            project_checkout_mode=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} --arg project_name ${project} '.[$family][] | select(.name == $project_name) | .checkout.mode')
+            project_checkout_target=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} --arg project_name ${project} '.[$family][] | select(.name == $project_name) | .checkout.target')
+
+            printf "${fmt_line}\n" "${family}" "${project}" "${project_type}" "${project_repository}" "${project_primary_branch}" "${project_checkout_mode}" "${project_checkout_target}"
+        done
+    done
+}
+
+function config_help() {
+    echo "Config Usage:"
+    echo "  repo config [<command> <command-specific-options>]"
+    echo
+    echo "The following command are supported"
+    echo
+    echo "show          |  Dump the configuration information in tabular form (default)"
+    echo
+}
 
 case "${command}" in
-    info)
-        fmt_line="%-15s  %-13s  %-16s  %-58s  %-17s  %-15s  %-13s  %-14s  %-13s"
-        printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit" "Updates"
+    info|details)
+        if [ -z "${1}" ]; then
+            scope="all"
+        else
+            scope=${1}
+            shift
+        fi
 
-        handle_scope info ${scope}
+        case "${command}" in
+            info)
+                fmt_line="%-15s  %-13s  %-16s  %-60s  %-17s  %-15s  %-13s  %-14s  %-13s"
+                printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit" "Updates"
+
+                handle_scope info ${scope}
+                ;;
+            details)
+                handle_scope details ${scope}
+                ;;
+        esac
         ;;
-    details)
-        handle_scope details ${scope}
+    config)
+        source "${CRUCIBLE_HOME}/bin/jqlib"
+
+        config_subcommand="show"
+        if [ -n "${1}" ]; then
+            config_subcommand=${1}
+            shift
+        fi
+
+        case "${config_subcommand}" in
+            show)
+                config_show
+                ;;
+            help)
+                config_help
+                ;;
+            *)
+                config_help
+                exit 1
+                ;;
+        esac
         ;;
 esac

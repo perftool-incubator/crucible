@@ -402,6 +402,7 @@ elif [ "${1}" == "run" ]; then
 
     ${CRUCIBLE_HOME}/bin/repo info > ${base_run_dir}/config/crucible.repo.info
     ${CRUCIBLE_HOME}/bin/repo details > ${base_run_dir}/config/crucible.repo.details
+    ${CRUCIBLE_HOME}/bin/repo config show > ${base_run_dir}/config/crucible.repo.config.show
 
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
