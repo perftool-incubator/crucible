@@ -16,7 +16,10 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     exit 1
 fi
 
-. $CRUCIBLE_HOME/bin/base
+source ${CRUCIBLE_HOME}/bin/base
+source ${CRUCIBLE_HOME}/bin/jqlib
+
+REPO_FILE=${CRUCIBLE_HOME}/config/repos.json
 
 help_column_width=25
 
@@ -30,12 +33,9 @@ function help() {
     printf "%-${help_column_width}s | Update the main crucible repository\n" "crucible"
     printf "%-${help_column_width}s | Update the controller container image\n" "controller-image"
     echo
-    if pushd $CRUCIBLE_HOME/subprojects > /dev/null; then
-        for repo in $(find . -type l | sed 'sX./XX'); do
-            printf "%-${help_column_width}s | Update the %s repository\n" "${repo}" "${repo}"
-        done
-        popd > /dev/null
-    fi
+    for project in $(jq_query ${REPO_FILE} '.official[], .unofficial[] | select(.name != "crucible") | .name'); do
+        printf "%-${help_column_width}s | Update the %s repository\n" "${project}" "${project}"
+    done
     echo
 }
 
@@ -82,7 +82,7 @@ case "${repo}" in
             echo "rm ${TMP_SCRIPT}" >> ${TMP_SCRIPT}
             echo "exec ${CRUCIBLE_HOME}/bin/update __${repo}" >> ${TMP_SCRIPT}
 
-            exec ${TMP_SCRIPT}
+            exec ${TMP_SCRIPT} crucible
         else
             echo "ERROR: failed to pushd to ${CRUCIBLE_HOME}"
             exit 1
@@ -116,48 +116,61 @@ case "${repo}" in
         fi
         ;;
     *)
-        repo_dir=$(find ${CRUCIBLE_HOME}/subprojects -maxdepth 2 -mindepth 2 -name ${repo} -type l)
-        if [ -n "${repo_dir}" ]; then
+        PROJECT_NAME=$(jq_query ${REPO_FILE} --arg project ${repo} '.official[], .unofficial[] | select(.name == $project) | .name')
+        if [ "${PROJECT_NAME}" != "${repo}" ]; then
+	    echo "ERROR: You must supply a valid project name!"
+	    exit 1
+        fi
+        PROJECT_TYPE=$(jq_query ${REPO_FILE} --arg project ${repo} '.official[], .unofficial[] | select(.name == $project) | .type')
+
+        repo_dir=${CRUCIBLE_HOME}/subprojects/$(get_project_type_dir ${PROJECT_TYPE})/${PROJECT_NAME}
+        if [ -n "${repo_dir}" -a -L "${repo_dir}" ]; then
             echo
-            echo "Updating ${repo}:"
+            echo "Updating ${PROJECT_NAME}:"
             echo
 
             if pushd "${repo_dir}" > /dev/null; then
-                if $CRUCIBLE_HOME/bin/_update-git; then
+                if $CRUCIBLE_HOME/bin/_update-git ${PROJECT_NAME}; then
                     exit 0
                 else
                     exit 1
                 fi
             else
-                echo "Could not pushd to ${repo_dir}"
+                echo "ERROR: Could not pushd to ${repo_dir}!"
                 exit 1
             fi
         else
-            echo "Invalid repo '${repo}'."
+            echo "ERROR: Invalid project directory '${repo_dir}'!"
             exit 1
         fi
         ;;
 esac
 
 if [ "${repo}" == "____all" ]; then
-    if pushd ${CRUCIBLE_HOME}/subprojects > /dev/null; then
-        for tmp_repo in $(find . -maxdepth 2 -mindepth 2 -type l | sed 'sX./XX'); do
+    for project in $(jq_query ${REPO_FILE} '.official[], .unofficial[] | select(.name != "crucible") | .name'); do
+        PROJECT_NAME=$(jq_query ${REPO_FILE} --arg project ${project} '.official[], .unofficial[] | select(.name == $project) | .name')
+        PROJECT_TYPE=$(jq_query ${REPO_FILE} --arg project ${project} '.official[], .unofficial[] | select(.name == $project) | .type')
+
+        repo_dir=${CRUCIBLE_HOME}/subprojects/$(get_project_type_dir ${PROJECT_TYPE})/${PROJECT_NAME}
+        if [ -n "${repo_dir}" -a -L "${repo_dir}" ]; then
             echo
-            echo "Updating ${tmp_repo}:"
+            echo "Updating ${PROJECT_NAME}:"
             echo
 
-            if pushd ${tmp_repo} > /dev/null; then
-                if ! $CRUCIBLE_HOME/bin/_update-git; then
+            if pushd ${repo_dir} > /dev/null; then
+                if ! $CRUCIBLE_HOME/bin/_update-git ${PROJECT_NAME}; then
                     RC=1
                 fi
                 popd > /dev/null
+            else
+                echo "ERROR: Could not pushd to ${repo_dir}!"
+                RC=1
             fi
-        done
-        popd > /dev/null
-    else
-        echo "Could not pushd to ${CRUCIBLE_HOME}/subprojects"
-        exit 1
-    fi
+        else
+            echo "ERROR: Invalid project directory '${repo_dir}'!"
+            RC=1
+        fi
+    done
 fi
 
 case "${repo}" in
@@ -177,5 +190,7 @@ esac
 
 echo
 ${CRUCIBLE_HOME}/bin/repo info
+echo
+${CRUCIBLE_HOME}/bin/repo config show
 
 exit ${RC}
