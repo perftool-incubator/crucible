@@ -206,12 +206,14 @@ function clean_old_install {
         old_install_path="/opt/crucible-moved-on-${timestamp}"
         echo "An existing installation of crucible exists and will be moved to $old_install_path"
         /bin/mv "$INSTALL_PATH" "$old_install_path"
+        echo
     fi
 
     if [ -e ${SYSCONFIG} ]; then
         old_sysconfig="${SYSCONFIG}-moved-on-${timestamp}"
         echo "An existing crucible sysconfig file exists and will be moved to ${old_sysconfig}"
         /bin/mv "${SYSCONFIG}" "${old_sysconfig}"
+        echo
     fi
 
     # reset the update tracker if there is any existing state
@@ -289,6 +291,69 @@ function select_release {
         fi
     fi
     GIT_TAG="$release"
+}
+
+function update_repos_config() {
+    local REPO BRANCH CRUCIBLE_PATH MODE
+    local current_repo_location primary_branch
+    local update_mode update_target
+    REPO=${1}
+    CRUCIBLE_PATH=${2}
+    BRANCH=${3}
+
+    REPO_FILE=${CRUCIBLE_PATH}/config/repos.json
+
+    current_repo_location=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | .repository')
+    if [ "${REPO}" != "${current_repo_location}" ]; then
+        echo "Setting crucible repository to '${REPO}' in '${REPO_FILE}'" >> ${GIT_INSTALL_LOG}
+        jq_update ${REPO_FILE} repository --arg repository "${REPO}" '(.official[] | select(.name == "crucible") | .repository) |= $repository'
+    fi
+
+    if [ -z "${BRANCH}" -a -z "$(git branch --show-current)" ]; then
+        # since we are not on a branch right now (immediately after a
+        # clone) and no branch was requested, let's assume this is in
+        # the CI environment and we have to do some special handling
+        BRANCH="HEAD"
+        echo "Detected CI environment, setting BRANCH=HEAD"
+    fi
+
+    primary_branch=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | ."primary-branch"')
+    checkout_target=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | .checkout.target')
+    checkout_mode=$(jq_query ${REPO_FILE} '.official[] | select(.name == "crucible") | .checkout.mode')
+    if [ -n "${BRANCH}" ]; then
+        update_mode=0
+        update_target=0
+        if [ "${BRANCH}" == "${primary_branch}" ]; then
+            if [ "${BRANCH}" != "${checkout_target}" ]; then
+                update_target=1
+            fi
+        else
+            if [ "${BRANCH}" != "${checkout_target}" ]; then
+                update_target=1
+
+                if [ "${BRANCH}" == "HEAD" ]; then
+                    echo "Detected CI environment, setting crucible primary-branch to '${BRANCH}' in '${REPO_FILE}'" >> ${GIT_INSTALL_LOG}
+                    jq_update ${REPO_FILE} primary-branch --arg primary_branch ${BRANCH} '(.official[] | select(.name == "crucible") | ."primary-branch") |= $primary_branch'
+                fi
+            fi
+        fi
+        if echo "${BRANCH}" | grep -q "^\(20[0-9][0-9]\.[1234]\|version-test\)$"; then
+            # this is a version install so lock it down
+            update_mode=1
+            MODE="locked"
+        fi
+        if [ ${update_mode} -eq 1 ]; then
+            echo "Setting crucible checkout.mode to '${MODE}' in '${REPO_FILE}'" >> ${GIT_INSTALL_LOG}
+            jq_update ${REPO_FILE} checkout.mode --arg checkout_mode ${MODE} '(.official[] | select(.name == "crucible") | .checkout.mode) |= $checkout_mode'
+        fi
+        if [ ${update_target} -eq 1 ]; then
+            echo "Setting crucible checkout.target to '${BRANCH}' in '${REPO_FILE}'" >> ${GIT_INSTALL_LOG}
+            jq_update ${REPO_FILE} checkout.target --arg checkout_target ${BRANCH} '(.official[] | select(.name == "crucible") | .checkout.target) |= $checkout_target'
+        fi
+    else
+        git checkout ${checkout_target} >> ${GIT_INSTALL_LOG} 2>&1 ||
+            exit_error "Failed to git checkout ${checkout_target}, checking ${GIT_INSTALL_LOG} for details" ${EC_FAIL_CHECKOUT}
+    fi
 }
 
 longopts="name:,email:,help,list-releases,verbose"
@@ -422,7 +487,9 @@ clean_old_install
 echo "Installing crucible in $INSTALL_PATH"
 echo "Using Git repo:   ${GIT_REPO}"
 echo "Using Git branch: ${GIT_BRANCH}"
-git clone $GIT_REPO $INSTALL_PATH > $GIT_INSTALL_LOG 2>&1 ||
+git_clone_cmd="git -c advice.detachedHead=false clone ${GIT_REPO} ${INSTALL_PATH}"
+echo ${git_clone_cmd} > ${GIT_INSTALL_LOG}
+${git_clone_cmd} >> $GIT_INSTALL_LOG 2>&1 ||
     exit_error "Failed to git clone $GIT_REPO, check $GIT_INSTALL_LOG for details" $EC_FAIL_CLONE
 if [ -n "${GIT_BRANCH}" ]; then
     if pushd ${INSTALL_PATH} > /dev/null; then
@@ -435,6 +502,14 @@ if [ -n "${GIT_BRANCH}" ]; then
 else
     echo "No specific git branch requested, using default"
 fi
+
+# make sure the branch being installed has jqlib support before
+# attempting to use it
+if [ -e ${INSTALL_PATH}/bin/jqlib ]; then
+    source ${INSTALL_PATH}/bin/jqlib
+    update_repos_config ${GIT_REPO} ${INSTALL_PATH} ${GIT_BRANCH}
+fi
+
 $INSTALL_PATH/bin/subprojects-install $GIT_TAG >>"$GIT_INSTALL_LOG" 2>&1 ||
     exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
 
@@ -459,14 +534,23 @@ CRUCIBLE_ENGINE_REPO_TLS_VERIFY=${SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY}
 _SYSCFG_
 
 if [ ${VERBOSE} == 1 ]; then
+    echo
+    echo "Contents of git install log: '${GIT_INSTALL_LOG}'"
     cat ${GIT_INSTALL_LOG}
     echo
+    ${INSTALL_PATH}/bin/repo info
+    if [ -e ${INSTALL_PATH}/bin/jqlib ]; then
+        echo
+        ${INSTALL_PATH}/bin/repo config show
+    fi
 fi
 
+echo
 echo "Pulling Crucible controller container image:"
 podman --log-level error pull ${CRUCIBLE_CONTROLLER_REGISTRY} ||
     exit_error "Failed to pull controller image ${CRUCIBLE_CONTROLLER_REGISTRY}" ${EC_PULL_FAIL}
 
+echo
 echo "Installation is complete.  Run \"crucible help\" to see what's possible"
 echo "You can also source /etc/profile.d/crucible_completions.sh (or re-login) to use tab completion for crucible"
 echo

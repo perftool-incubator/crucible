@@ -4,7 +4,7 @@
 
 ## Introduction
 
-Crucible is a performance tool harness that integrates [multiple performance tooling projects](config/default_subprojects). The project's intention is to provide a well rounded, portable, and highly functional end-to-end performance testing harness. Crucible can be used for test automation to execute, measure, store, visualize, and analyze the performance of various systems-under-test (SUT).
+Crucible is a performance tool harness that integrates [multiple performance tooling projects](config/repos.json). The project's intention is to provide a well rounded, portable, and highly functional end-to-end performance testing harness. Crucible can be used for test automation to execute, measure, store, visualize, and analyze the performance of various systems-under-test (SUT).
 
 ## Features
 

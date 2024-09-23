@@ -944,3 +944,17 @@ function git_get_remote_name() {
 function git_get_remote_branch() {
     echo "${1}" | awk -F'/' '{ print $2 }'
 }
+
+# map a project type to it's actual on disk directory name
+function get_project_type_dir() {
+    local TYPE
+    TYPE=$1
+
+    case "${TYPE}" in
+        benchmark|tool|doc)
+            echo "${TYPE}s"
+            ;;
+        *)
+            echo "${TYPE}"
+    esac
+}

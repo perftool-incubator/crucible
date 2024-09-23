@@ -29,7 +29,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "result metric" -- "${COMP_WORDS[2]}"))
                 ;;
             repo)
-                COMPREPLY=($(compgen -W "info details" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "info details config" -- "${COMP_WORDS[2]}"))
                 ;;
             update)
                 COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
@@ -96,6 +96,9 @@ _crucible_completions() {
         case "${COMP_WORDS[2]}" in
             info|details)
                 COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[3]}"))
+                ;;
+            config)
+                COMPREPLY=($(compgen -W "help show" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "rm" ]; then

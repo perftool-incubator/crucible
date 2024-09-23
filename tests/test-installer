@@ -1,41 +1,86 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+exec 2>&1
+
 set +e
 set -x
 
+test_number=0
+
+CRUCIBLE_DIR=$(pwd)
+
+function start_test() {
+    set +x
+    echo
+    echo "#################################################################################"
+    echo "Test Number: $(( test_number += 1 ))"
+    echo "#################################################################################"
+    set -x
+}
+
+function stop_test() {
+    set +x
+    echo "*********************************************************************************"
+    echo
+    set -x
+}
+
+start_test
 # usage
 stdout=$(./crucible-install.sh --help)
 [[ "$stdout" = *"Usage"* ]] || exit 1
+stop_test
 
+start_test
 # non-root
 ec=$(grep EC_FAIL_USER= crucible-install.sh | cut -d '=' -f2)
-./crucible-install.sh
+./crucible-install.sh \
+  --git-repo ${CRUCIBLE_DIR} \
+  --verbose
 test "$?" = "$ec" || exit 1
+stop_test
 
+start_test
 # no args
 ec=$(grep EC_FAIL_REGISTRY_UNSET= crucible-install.sh | cut -d '=' -f2)
-sudo ./crucible-install.sh
+sudo ./crucible-install.sh \
+  --git-repo ${CRUCIBLE_DIR} \
+  --verbose
 test "$?" = "$ec" || exit 1
+stop_test
 
-for arg_mode in client-server engine; do echo "testing
-    arg_mode=${arg_mode}"
+for arg_mode in client-server engine; do
+    start_test
+    echo "testing arg_mode=${arg_mode}"
     # auth file not found
     ec=$(grep EC_AUTH_FILE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
     sudo ./crucible-install.sh \
+      --git-repo ${CRUCIBLE_DIR} \
       --${arg_mode}-registry myregistry.io/crucible \
-      --${arg_mode}-auth-file /tmp/auth-file.json
+      --${arg_mode}-auth-file /tmp/auth-file.json \
+      --verbose
     test "$?" = "$ec" || exit 1
+    stop_test
 done
 
 for arg_mode in client-server engine; do
+    start_test
     echo "testing arg_mode=${arg_mode}"
     # invalid tls verify value
     ec=$(grep EC_TLS_VERIFY_ERROR= crucible-install.sh | cut -d '=' -f2)
     sudo ./crucible-install.sh \
+      --git-repo ${CRUCIBLE_DIR} \
       --${arg_mode}-registry myregistry.io/crucible \
-      --${arg_mode}-tls-verify foo
+      --${arg_mode}-tls-verify foo \
+      --verbose
     test "$?" = "$ec" || exit 1
+    stop_test
 done
 
 for arg_mode in client-server engine; do
+    start_test
     echo "testing arg_mode=${arg_mode}"
     # default args
     touch /tmp/auth-file.json
@@ -43,15 +88,19 @@ for arg_mode in client-server engine; do
     # TODO(rfolco): temporary workaround until we make it distro generic
     sudo mkdir -p $(dirname $cfgfile)
     sudo ./crucible-install.sh \
+      --git-repo ${CRUCIBLE_DIR} \
       --${arg_mode}-registry myregistry.io/crucible \
-      --${arg_mode}-auth-file /tmp/auth-file.json
+      --${arg_mode}-auth-file /tmp/auth-file.json \
+      --verbose
     test "$?" = "0" || exit 1
     grep "myregistry.io" $cfgfile || exit 1
     grep "auth-file.json" $cfgfile || exit 1
     command -v crucible || exit 1
+    stop_test
 done
 
 for arg_mode in client-server engine; do
+    start_test
     echo "testing arg_mode=${arg_mode}"
     # identity
     touch /tmp/auth-file.json
@@ -62,15 +111,19 @@ for arg_mode in client-server engine; do
     # TODO(rfolco): temporary workaround until we make it distro generic
     sudo mkdir -p $(dirname $cfgfile)
     sudo ./crucible-install.sh \
+      --git-repo ${CRUCIBLE_DIR} \
       --${arg_mode}-registry myregistry.io/crucible \
       --${arg_mode}-auth-file /tmp/auth-file.json \
       --name "Nobody" \
-      --email "nobody@somewhere.com"
+      --email "nobody@somewhere.com" \
+      --verbose
     sudo grep "CRUCIBLE_NAME=\"Nobody\"" $idfile || exit 1
     sudo grep "CRUCIBLE_EMAIL=\"nobody@somewhere.com\"" $idfile || exit 1
+    stop_test
 done
 
 for arg_mode in client-server engine; do
+    start_test
     echo "testing arg_mode=${arg_mode}"
     # override existing installation
     touch /tmp/auth-file.json
@@ -78,52 +131,78 @@ for arg_mode in client-server engine; do
     # TODO(rfolco): temporary workaround until we make it distro generic
     sudo mkdir -p $(dirname $cfgfile)
     sudo ./crucible-install.sh \
+      --git-repo ${CRUCIBLE_DIR} \
       --${arg_mode}-registry myregistry.io/crucible \
-      --${arg_mode}-auth-file /tmp/auth-file.json
+      --${arg_mode}-auth-file /tmp/auth-file.json \
+      --verbose
     test "$?" = "0" || exit 1
     ls /opt/crucible-moved* || exit 1
+    stop_test
 done
 
 for arg_mode in client-server engine; do
+    start_test
     echo "testing arg_mode=${arg_mode}"
     # override existing installation, no auth-file arg
     cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
     # TODO(rfolco): temporary workaround until we make it distro generic
     sudo mkdir -p $(dirname $cfgfile)
     sudo ./crucible-install.sh \
-      --${arg_mode}-registry myregistry.io/crucible
+      --git-repo ${CRUCIBLE_DIR} \
+      --${arg_mode}-registry myregistry.io/crucible \
+      --verbose
     test "$?" = "0" || exit 1
     ls /opt/crucible-moved* || exit 1
+    stop_test
 done
 
+start_test
 # RELEASE: --release and --list-releases
 ## prep step: check tags in remote repo
 tags=$(git ls-remote --tags \
     --sort='version:refname' \
     https://github.com/perftool-incubator/crucible.git \
     | awk -F/ '{print$NF}')
+stop_test
 
+start_test
 ## show releases, test rc and stdout
 stdout=$(sudo ./crucible-install.sh \
+    --git-repo ${CRUCIBLE_DIR} \
     --list-releases)
 test "$?" = "0" || exit 1
 [[ "$stdout" = *"$tags"* ]] || exit 1
+stop_test
 
+start_test
 ## negative test: --release and --git-repo
 ec=$(grep EC_RELEASE_DEFAULT_REPO_ONLY= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
-    --release DoesNotMatter --git-repo DoesNotMatter
+    --release DoesNotMatter --git-repo DoesNotMatter \
+    --verbose
 test "$?" = "$ec" || exit 1
+stop_test
 
+start_test
 ## negative test: --release and --git-branch
 ec=$(grep EC_RELEASE_CONFLICTS_WITH_BRANCH= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
-    --release DoesNotMatter --git-branch DoesNotMatter
+    --release DoesNotMatter --git-branch DoesNotMatter \
+    --verbose
 test "$?" = "$ec" || exit 1
+stop_test
 
+start_test
 ## negative test: non-existent tag
+# for this test we cannot use --git-repo (because it's not allowed in
+# conjunction with --release) so we have to "hack" DEFAULT_GIT_REPO to
+# point where we need it to
+sed -i -e "s|\(DEFAULT_GIT_REPO\)=.*|\1=\"${CRUCIBLE_DIR}\"|" crucible-install.sh
+grep "^DEFAULT_GIT_REPO" crucible-install.sh
 ec=$(grep EC_FAIL_CHECKOUT= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
     --release NonExitentTag \
-    --client-server-registry myregistry.io/crucible
+    --client-server-registry myregistry.io/crucible \
+    --verbose
 test "$?" = "$ec" || exit 1
+stop_test
