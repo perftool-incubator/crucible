@@ -63,7 +63,7 @@ if [ -d "./.git" ]; then
     fi
 
     # fetch updates from remote(s)
-    git_fetch_cmd="git fetch --all --prune --prune-tags --tags --verbose"
+    git_fetch_cmd="git fetch --all --prune --prune-tags --tags --verbose --force"
     echo "${git_fetch_cmd}"
     if ! ${git_fetch_cmd} 2>&1; then
 	echo "ERROR: could not git-fetch"

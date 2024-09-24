@@ -64,7 +64,7 @@ touch "${PROCESS_LOCK_FILE}"
 
                 if pushd ${repo_dir} > /dev/null; then
                     if [ -d "./.git" ]; then
-                        git_fetch_cmd="git fetch --all --prune --prune-tags --tags --verbose"
+                        git_fetch_cmd="git fetch --all --prune --prune-tags --tags --verbose --force"
                         echo "${git_fetch_cmd}"
                         ${git_fetch_cmd}
 
