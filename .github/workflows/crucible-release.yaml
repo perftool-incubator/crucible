@@ -119,7 +119,7 @@ jobs:
             # get 3rd column (repo URL) without the starting '/' (remove first char),
             # so repo urls /a /b /c are extracted to a b c
             # and add to a bash array ( a b c )
-            projects=( $(jq -r '.official[] | select(.name != "crucible") | .name) )
+            projects=( $(jq -r '.official[] | select(.name != "crucible") | .name' repos.json) )
             # builtin implict join array "a","b","c" (double quotes for a valid json)
             printf -v list '"%s",' "${projects[@]}"
             # convert to a comma separated list ["a","b","c"]
