@@ -74,7 +74,7 @@ jobs:
           private-key: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
           owner: ${{ github.repository_owner }}  
       - name: checkout crucible default
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: perftool-incubator/crucible
           ref: master
@@ -150,7 +150,7 @@ jobs:
           private-key: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
           owner: ${{ github.repository_owner }}  
       - name: checkout sub-project repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: perftool-incubator/${{ matrix.repository }}
           path: ${{ matrix.repository }}
