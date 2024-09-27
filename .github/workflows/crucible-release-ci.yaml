@@ -1,0 +1,33 @@
+name: crucible-release-ci
+
+on:
+  pull_request:
+    branches: [ master ]
+    workflow_dispatch:
+
+jobs:
+  call-crucible-release-remove:
+    uses: ./.github/workflows/crucible-release.yaml
+    with:
+      custom_tag: "ci-version-test"
+      action: "delete"
+      force_push: true
+    secrets:
+      PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
+
+  call-crucible-release-create:
+    uses: ./.github/workflows/crucible-release.yaml
+    needs: call-crucible-release-remove
+    with:
+      custom_tag: "ci-version-test"
+      action: "push"
+    secrets:
+      PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
+
+  crucible-release-ci-complete:
+    runs-on: [ self-hosted, workflow-overhead ]
+    timeout-minutes: 10
+    needs: call-crucible-release-create
+    steps:
+    - name: complete
+      run: echo "crucible-release-ci-complete"
