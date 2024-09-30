@@ -232,11 +232,43 @@ jobs:
             echo "Tags:"
             git ls-remote --tags origin
 
+  crucible-release-verification:
+    if: ${{ inputs.action == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - release-tag
+      - projects-tag
+    steps:
+      - name: checkout crucible
+        uses: actions/checkout@v4
+        with:
+          repository: perftool-incubator/crucible
+          ref: ${{ github.ref }}
+          path: crucible
+          fetch-tags: true
+      - name: prepare installation resources
+        run: |
+          touch /tmp/auth-file.json
+          cfgfile=$(grep SYSCONFIG= crucible/crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+          sudo mkdir -p $(dirname $cfgfile)
+      - name: test release install
+        env:
+          TAG: ${{ needs.release-tag.outputs.tag }}
+        run: |
+          sudo ./crucible/crucible-install.sh \
+            --release $TAG \
+            --engine-registry myregistry.io/crucible \
+            --engine-auth-file /tmp/auth-file.json \
+            --name "Nobody" \
+            --email "nobody@somewhere.com" \
+            --verbose
+
   crucible-release-complete:
     runs-on: [ self-hosted, workflow-overhead ]
     timeout-minutes: 10
     needs:
-      - projects-tag
+      - crucible-release-verification
     steps:
       - name: 
         run: |
