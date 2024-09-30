@@ -29,6 +29,35 @@ on:    # yamllint disable-line rule:truthy
         type: boolean
         description: FORCE push (override tag)
         default: false
+  workflow_call:
+    inputs:
+      dry_run:
+        required: false
+        type: boolean
+        description: Do NOT push/delete tag to/from the repositories
+        default: false
+      custom_tag:
+        required: false
+        type: string
+        description: Custom tag to push/delete
+        default: ''
+      action:
+        required: true
+        type: string
+        description: Action to perform with the custom-tag (push or delete)
+        default: 'push'
+      force_push:
+        required: false
+        type: boolean
+        description: FORCE push (override tag)
+        default: false
+    secrets:
+      PRIVATE_KEY__TAG_CRUCIBLE_RELEASE:
+        required: true
+
+concurrency:
+  group: crucible-release
+  cancel-in-progress: false
 
 jobs:
   release-tag:
@@ -77,7 +106,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: perftool-incubator/crucible
-          ref: master
+          ref: ${{ github.ref }}
           path: crucible
           set-safe-directory: false
           fetch-tags: true
@@ -202,3 +231,45 @@ jobs:
             fi
             echo "Tags:"
             git ls-remote --tags origin
+
+  crucible-release-verification:
+    if: ${{ inputs.action == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - release-tag
+      - projects-tag
+    steps:
+      - name: checkout crucible
+        uses: actions/checkout@v4
+        with:
+          repository: perftool-incubator/crucible
+          ref: ${{ github.ref }}
+          path: crucible
+          fetch-tags: true
+      - name: prepare installation resources
+        run: |
+          touch /tmp/auth-file.json
+          cfgfile=$(grep SYSCONFIG= crucible/crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+          sudo mkdir -p $(dirname $cfgfile)
+      - name: test release install
+        env:
+          TAG: ${{ needs.release-tag.outputs.tag }}
+        run: |
+          sudo ./crucible/crucible-install.sh \
+            --release $TAG \
+            --engine-registry myregistry.io/crucible \
+            --engine-auth-file /tmp/auth-file.json \
+            --name "Nobody" \
+            --email "nobody@somewhere.com" \
+            --verbose
+
+  crucible-release-complete:
+    runs-on: [ self-hosted, workflow-overhead ]
+    timeout-minutes: 10
+    needs:
+      - crucible-release-verification
+    steps:
+      - name: 
+        run: |
+            echo "crucible-release-complete"

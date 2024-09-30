@@ -337,7 +337,7 @@ function update_repos_config() {
                 fi
             fi
         fi
-        if echo "${BRANCH}" | grep -q "^\(20[0-9][0-9]\.[1234]\|version-test\)$"; then
+        if echo "${BRANCH}" | grep -q "^\(20[0-9][0-9]\.[1234]\|version-test\|ci-verstion-test\)$"; then
             # this is a version install so lock it down
             update_mode=1
             MODE="locked"
