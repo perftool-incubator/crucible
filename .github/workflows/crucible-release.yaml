@@ -89,8 +89,16 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE
             cd crucible
+            echo "Fetching remote heads/tags..."
+            git fetch --prune --prune-tags
             echo "Tags:"
             git ls-remote --tags origin
+            echo "Local Tags:"
+            git tag
+            echo "Branches:"
+            git ls-remote --heads origin
+            echo "Local Branches:"
+            git branch
             if [ "${{ inputs.action }}" == "push" ]; then
                 ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
@@ -164,8 +172,16 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE
             cd ${{ matrix.repository }}
+            echo "Fetching remote heads/tags..."
+            git fetch --prune --prune-tags
             echo "Tags:"
             git ls-remote --tags origin
+            echo "Local Tags:"
+            git tag
+            echo "Branches:"
+            git ls-remote --heads origin
+            echo "Local Branches:"
+            git branch
             if [ "${{ inputs.action }}" == "push" ]; then
                 ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
