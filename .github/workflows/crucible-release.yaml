@@ -106,7 +106,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: perftool-incubator/crucible
-          ref: master
+          ref: ${{ github.ref }}
           path: crucible
           set-safe-directory: false
           fetch-tags: true
