@@ -82,7 +82,7 @@ jobs:
       - name: Display params
         id: get-params
         env:
-          TAG: ${{ needs.release-tag.outputs.tag }}
+          TAG: ${{ steps.gen-release-tag.outputs.tag }}
           DRY_RUN: ${{ inputs.dry_run }}
           CUSTOM_TAG: ${{ inputs.custom_tag }}
           ACTION: ${{ inputs.action }}
