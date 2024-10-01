@@ -71,8 +71,8 @@ jobs:
         id: gen-release-tag
         run: |
             if [ "${{ inputs.custom_tag }}" == "" ]; then
-                year="$(date +%Y)"
-                month="$(date +%m)"
+                year="$(date -u +%Y)"
+                month="$(date -u +%m)"
                 month=${month#0}
                 quarter="$(((month-1)/3+1))"
                 echo "tag=$year.$quarter" >> $GITHUB_OUTPUT
@@ -82,7 +82,7 @@ jobs:
       - name: Display params
         id: get-params
         env:
-          TAG: ${{ needs.release-tag.outputs.tag }}
+          TAG: ${{ steps.gen-release-tag.outputs.tag }}
           DRY_RUN: ${{ inputs.dry_run }}
           CUSTOM_TAG: ${{ inputs.custom_tag }}
           ACTION: ${{ inputs.action }}
