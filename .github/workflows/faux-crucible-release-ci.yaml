@@ -1,4 +1,4 @@
-name: faux-crucible-ci
+name: faux-crucible-release-ci
 
 on:
   pull_request:
@@ -9,7 +9,6 @@ on:
     - .github/workflows/run-crucible-tracking.yaml
     - .github/workflows/crucible-merged.yaml
     - .github/workflows/crucible-scheduled.yaml
-    - .github/workflows/crucible-release-ci.yaml
     - .github/workflows/faux-crucible-release-ci.yaml
     - .github/workflows/faux-crucible-ci.yaml
     - .github/workflows/faux-ci.yaml
@@ -18,5 +17,7 @@ on:
     - 'spec/**'
 
 jobs:
-  call-core-crucible-ci:
-    uses: perftool-incubator/crucible-ci/.github/workflows/faux-core-crucible-ci.yaml@main
+  crucible-release-ci-complete:
+    runs-on: [ self-hosted, workflow-overhead ]
+    steps:
+    - run: echo "faux-crucible-release-ci-complete"
