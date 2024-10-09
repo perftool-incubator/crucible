@@ -12,7 +12,6 @@ on:
     - .github/workflows/faux-crucible-release-ci.yaml
     - .github/workflows/faux-crucible-ci.yaml
     - .github/workflows/faux-ci.yaml
-    - .github/workflows/crucible-release.yaml
     - 'docs/**'
     - 'spec/**'
   workflow_dispatch:

@@ -128,6 +128,12 @@ jobs:
             git ls-remote --heads origin
             echo "Local Branches:"
             git branch
+            echo "Current commit's object name:"
+            git rev-parse --verify HEAD
+            echo "Current object name for tag $TAG (if it exists):"
+            git rev-parse --verify tags/$TAG || true
+            echo "Current object name for branch $TAG (if it exists):"
+            git rev-parse --verify remotes/origin/$TAG || true
             if [ "${{ inputs.action }}" == "push" ]; then
                 ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
@@ -148,6 +154,10 @@ jobs:
             fi
             echo "Tags:"
             git ls-remote --tags origin
+            echo "Current object name for tag $TAG (if it exists):"
+            git rev-parse --verify tags/$TAG || true
+            echo "Current object name for branch $TAG (if it exists):"
+            git rev-parse --verify remotes/origin/$TAG || true
       - name: Get the list of sub-projects
         id: get-repos
         run: |
@@ -211,6 +221,12 @@ jobs:
             git ls-remote --heads origin
             echo "Local Branches:"
             git branch
+            echo "Current commit's object name:"
+            git rev-parse --verify HEAD
+            echo "Current object name for tag $TAG (if it exists):"
+            git rev-parse --verify tags/$TAG || true
+            echo "Current object name for branch $TAG (if it exists):"
+            git rev-parse --verify remotes/origin/$TAG || true
             if [ "${{ inputs.action }}" == "push" ]; then
                 ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
@@ -231,6 +247,10 @@ jobs:
             fi
             echo "Tags:"
             git ls-remote --tags origin
+            echo "Current object name for tag $TAG (if it exists):"
+            git rev-parse --verify tags/$TAG || true
+            echo "Current object name for branch $TAG (if it exists):"
+            git rev-parse --verify remotes/origin/$TAG || true
 
   crucible-release-verification:
     if: ${{ inputs.action == 'push' }}
