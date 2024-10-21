@@ -25,6 +25,7 @@ sub help {
     print("clear           |  Clear the crucible log\n");
     print("info            |  Display information about the log\n");
     print("init            |  Initialize the log\n");
+    print("tidy            |  Perform maintenance on the crucible log\n");
     print("view            |  View the crucible log (default)\n");
     print("\n");
 }
@@ -40,6 +41,7 @@ sub format_ts {
 }
 
 if ((!($mode eq "view") &&
+     !($mode eq "tidy") &&
      !($mode eq "clear") &&
      !($mode eq "info") &&
      !($mode eq "getsessionids") &&
@@ -214,6 +216,20 @@ if ($mode eq "view") {
     if ($rv < 0) {
         print $DBI::errstr;
         exit(1);
+    }
+
+    $rv = $log_dbh->do("VACUUM");
+    if ($rv < 0) {
+        print $DBI::errstr;
+        exit(1);
+    }
+} elsif ($mode eq "tidy") {
+    my $rv = $log_dbh->do("VACUUM");
+    if ($rv < 0) {
+        print $DBI::errstr;
+        exit(1);
+    } else {
+        printf("Crucible log maintenance complete.");
     }
 } elsif ($mode eq "info") {
     print("Crucible log information:\n\n");
