@@ -16,6 +16,14 @@ function jq_update() {
         exit_error "Failed to update ${REASON} in ${FILE}"
     fi
 
+    diff ${FILE} ${TMP_FILE} > /dev/null
+    DIFF_RC=$?
+    if [ ${DIFF_RC} -eq 0 ]; then
+        exit_error "Failed to update ${REASON} in ${FILE} -- no changes detected"
+    elif [ ${DIFF_RC} -gt 1 ]; then
+        exit_error "Failed to update ${REASON} in ${FILE} -- an error occurred"
+    fi
+
     mv ${TMP_FILE} ${FILE}
 }
 
