@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.ref }}/ci
+  group: ${{ github.ref }}/release-ci
   cancel-in-progress: true
 
 jobs:
