@@ -23,7 +23,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "log repo update run" -- "${COMP_WORDS[2]}"))
                 ;;
             log)
-                COMPREPLY=($(compgen -W "clear info init view" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "clear info init tidy view" -- "${COMP_WORDS[2]}"))
                 ;;
             get)
                 COMPREPLY=($(compgen -W "result metric" -- "${COMP_WORDS[2]}"))
