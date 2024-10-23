@@ -85,6 +85,7 @@ for arg_mode in client-server engine; do
     # default args
     touch /tmp/auth-file.json
     cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+    regfile="/opt/crucible/config/registries.json"
     # TODO(rfolco): temporary workaround until we make it distro generic
     sudo mkdir -p $(dirname $cfgfile)
     sudo ./crucible-install.sh \
@@ -93,8 +94,8 @@ for arg_mode in client-server engine; do
       --${arg_mode}-auth-file /tmp/auth-file.json \
       --verbose
     test "$?" = "0" || exit 1
-    grep "myregistry.io" $cfgfile || exit 1
-    grep "auth-file.json" $cfgfile || exit 1
+    grep "myregistry.io" $regfile || exit 1
+    grep "auth-file.json" $regfile || exit 1
     command -v crucible || exit 1
     stop_test
 done
