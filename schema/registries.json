@@ -1,0 +1,165 @@
+{
+    "type": "object",
+    "properties": {
+	"controller": {
+	    "type": "object",
+	    "properties": {
+		"url": {
+		    "type": "string",
+		    "minLength": 1
+		},
+		"tag": {
+		    "type": "string",
+		    "minLength": 1
+		},
+		"pull-token": {
+		    "type": "string",
+		    "minLength": 1
+		},
+		"tls-verify": {
+		    "type": "boolean"
+		}
+	    },
+	    "additionalProperties": false,
+	    "required": [
+		"url",
+		"tag"
+	    ]
+	},
+	"engines": {
+	    "type": "object",
+	    "properties": {
+		"public": {
+		    "type": "object",
+		    "properties": {
+			"url": {
+			    "type": "string",
+			    "minLength": 1
+			},
+			"push-token": {
+			    "type": "string",
+			    "minLength": 1
+			},
+			"tls-verify": {
+			    "type": "boolean"
+			},
+			"quay": {
+			    "$ref": "#/definitions/quay"
+			}
+		    },
+		    "additionalProperties": false,
+		    "required": [
+			"url"
+		    ]
+		},
+		"private": {
+		    "type": "object",
+		    "properties": {
+			"url": {
+			    "type": "string",
+			    "minLength": 1
+			},
+			"tokens": {
+			    "type": "object",
+			    "properties": {
+				"push": {
+				    "type": "string",
+				    "minLength": 1
+				},
+				"pull": {
+				    "type": "string",
+				    "minLength": 1
+				}
+			    },
+			    "additionalProperties": false,
+			    "required": [
+				"push",
+				"pull"
+			    ]
+			},
+			"tls-verify": {
+			    "type": "boolean"
+			},
+			"quay": {
+			    "$ref": "#/definitions/quay"
+			}
+		    },
+		    "additionalProperties": false,
+		    "required": [
+			"url",
+			"tokens"
+		    ]
+		}
+	    },
+	    "additionalProperties": false,
+	    "required": [
+		"public"
+	    ]
+	},
+	"userenvs": {
+	    "type": "array",
+	    "uniqueItems": true,
+	    "minItems": 1,
+	    "items": {
+		"type": "object",
+		"properties": {
+		    "url": {
+			"type": "string",
+			"minLength": 1
+		    },
+		    "pull-token": {
+			"type": "string",
+			"minLength": 1
+		    },
+		    "tls-verify": {
+			"type": "boolean"
+		    }
+		},
+		"additionalProperties": false,
+		"required": [
+		    "url",
+		    "pull-token"
+		]
+	    }
+	}
+    },
+    "additionalProperties": false,
+    "required": [
+	"controller",
+	"engines"
+    ],
+    "definitions": {
+	"quay": {
+	    "type": "object",
+	    "properties": {
+		"expiration-length": {
+		    "type": "string",
+		    "minLength": 2,
+		    "pattern": "^[1-9][0-9]*[wd]$"
+		},
+		"refresh-expiration": {
+		    "type": "object",
+		    "properties": {
+			"token-file": {
+			    "type": "string",
+			    "minLength": 1
+			},
+			"api-url": {
+			    "type": "string",
+			    "minLength": 1
+			}
+		    },
+		    "additionalProperties": false,
+		    "required": [
+			"token-file",
+			"api-url"
+		    ]
+		}
+	    },
+	    "additionalProperties": false,
+	    "required": [
+		"expiration-length"
+	    ]
+	}
+    }
+}

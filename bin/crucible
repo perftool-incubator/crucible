@@ -23,9 +23,8 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     exit 1
 fi
 export CRUCIBLE_HOME
-export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
-export RICKSHAW_HOME=${CRUCIBLE_HOME}/subprojects/core/rickshaw
 CRUCIBLE_NEW_SESSION_ID="yes"
+CRUCIBLE_CFG_JSON_VALIDATION="yes"
 . $CRUCIBLE_HOME/bin/base
 
 # must run as root
@@ -43,10 +42,6 @@ if [ $? -gt 0 ]; then
 fi
 
 check_id
-
-/bin/mkdir -p $var_crucible
-/bin/mkdir -p ${var_run_crucible}
-/bin/mkdir -p ${var_archive_crucible}
 
 function setup_pipe() {
     local PIPE=${1}

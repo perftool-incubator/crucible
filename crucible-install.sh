@@ -538,10 +538,10 @@ if [ ${VERBOSE} == 1 ]; then
     echo "Contents of git install log: '${GIT_INSTALL_LOG}'"
     cat ${GIT_INSTALL_LOG}
     echo
-    ${INSTALL_PATH}/bin/repo info
+    ${INSTALL_PATH}/bin/crucible repo info
     if [ -e ${INSTALL_PATH}/bin/jqlib ]; then
         echo
-        ${INSTALL_PATH}/bin/repo config show
+        ${INSTALL_PATH}/bin/crucible repo config show
     fi
 fi
 
