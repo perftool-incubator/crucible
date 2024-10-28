@@ -4,94 +4,15 @@
 
 EC_FAIL_USER=2
 
-# provide backwards compatibility with configuration files that still
-# have CRUCIBLE_CONTAINER_IMAGE instead of CRUCIBLE_CONTROLLER_IMAGE
-if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" -a -n "${CRUCIBLE_CONTAINER_IMAGE}" ]; then
-    CRUCIBLE_CONTROLLER_IMAGE=${CRUCIBLE_CONTAINER_IMAGE}
-fi
-
-# provide backwards compatibility with configration files that still
-# have CRUCIBLE_CLIENT_SERVER_* instead of CRUCIBLE_ENGINE_*
-if [ -z "${CRUCIBLE_ENGINE_REPO}" -a -n "${CRUCIBLE_CLIENT_SERVER_REPO}" ]; then
-    CRUCIBLE_ENGINE_REPO=${CRUCIBLE_CLIENT_SERVER_REPO}
-fi
-if [ -z "${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}" -a -n "${CRUCIBLE_CLIENT_SERVER_AUTH}" ]; then
-    CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=${CRUCIBLE_CLIENT_SERVER_AUTH}
-fi
-if [ -z "${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}" -a -n "${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}" ]; then
-    CRUCIBLE_ENGINE_REPO_TLS_VERIFY=${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}
-fi
-
-# make sure the user has a .crucible directory for storing things
-USER_STORE=$HOME/.crucible
-if [ ! -d ${USER_STORE} ]; then
-    mkdir -v ${USER_STORE}
-fi
-LOG_DB=${USER_STORE}/log.db
-UPDATE_STATUS_FILE="${USER_STORE}/update-status"
-UPDATE_STATUS_LOCK_FILE="${UPDATE_STATUS_FILE}.file-lock"
-touch "${UPDATE_STATUS_LOCK_FILE}"
-
-if [ -z "${HOSTFS_DIR}" ]; then
-    export CRUCIBLE_HOSTFS_PWD=$(pwd)
-fi
-
-if [ -z "${SESSION_ID}" -o "${CRUCIBLE_NEW_SESSION_ID}" == "yes" ]; then
-    export SESSION_ID=$(uuidgen)
-    CRUCIBLE_NEW_SESSION_ID="no"
-fi
-
-var_crucible="/var/lib/crucible"
-var_run_crucible="${var_crucible}/run"
-var_archive_crucible="${var_crucible}/archive"
-opensearch_dir="${var_crucible}/opensearch"
-
-container_common_args=()
-container_common_args+=("--rm")
-container_common_args+=("-e CRUCIBLE_HOME=$CRUCIBLE_HOME")
-container_common_args+=("-e TOOLBOX_HOME=${TOOLBOX_HOME}")
-container_common_args+=("-e RICKSHAW_HOME=${RICKSHAW_HOME}")
-container_common_args+=("-e CRUCIBLE_HOSTFS_PWD=${CRUCIBLE_HOSTFS_PWD}")
-container_common_args+=("--mount=type=bind,source=/etc/sysconfig/crucible,destination=/etc/sysconfig/crucible")
-container_common_args+=("--mount=type=bind,source=/root,destination=/root")
-container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME}/config/.bashrc,destination=/root/.bashrc")
-container_common_args+=("--mount=type=bind,source=/home,destination=/home")
-container_common_args+=("--mount=type=bind,source=/var/lib/crucible,destination=/var/lib/crucible")
-container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME},destination=${CRUCIBLE_HOME}")
-container_common_args+=("--mount=type=bind,source=/,destination=/hostfs")
-container_common_args+=("--privileged")
-container_common_args+=("--ipc=host")
-container_common_args+=("--pid=host")
-container_common_args+=("--net=host")
-container_common_args+=("--security-opt=label=disable")
-
-container_log_args=()
-container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
-container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
-
-container_redis_args=()
-container_redis_args+=("-d")
-container_redis_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf")
-
-container_httpd_args=()
-container_httpd_args+=("-d")
-container_httpd_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/httpd/,destination=/etc/httpd/")
-
-container_opensearch_args=()
-container_opensearch_args+=("-d")
-container_opensearch_args+=("--mount=type=bind,source=${opensearch_dir}/,destination=/usr/share/opensearch/data/")
-
-container_rs_args=()
-container_rs_args+=("-i")
-container_rs_args+=("-e RS_REG_REPO=${CRUCIBLE_ENGINE_REPO}")
-container_rs_args+=("-e RS_REG_AUTH=${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}")
-container_rs_args+=("-e RS_REG_TLS_VERIFY=${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}")
-container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
-container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
-container_rs_args+=("-e MULTIPLEX_HOME=${CRUCIBLE_HOME}/subprojects/core/multiplex")
-
-container_build_args=()
-container_build_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
+function exit_error() {
+    echo "ERROR: ${1}"
+    shift
+    if [ ! -z "$1" ]; then
+        exit $1
+    else
+        exit 1
+    fi
+}
 
 function podman_wrapper() {
     local RC
@@ -101,14 +22,6 @@ function podman_wrapper() {
 
     return ${RC}
 }
-
-podman_pull="podman_wrapper pull"
-podman_stop="podman_wrapper stop"
-podman_rm="podman_wrapper rm"
-podman_run="podman_wrapper run --pull=missing"
-podman_run_interactive="podman run --pull=missing"
-podman_exists="podman_wrapper container exists"
-podman_ps="podman_wrapper ps"
 
 function podman_running() {
     pod=${1}
@@ -139,16 +52,6 @@ function get_timestamp() {
 }
 
 datetime=$(get_timestamp)
-
-function exit_error() {
-    echo "ERROR: ${1}"
-    shift
-    if [ ! -z "$1" ]; then
-        exit $1
-    else
-        exit 1
-    fi
-}
 
 function check_id {
     if [ -e $HOME/.crucible/identity ]; then
@@ -958,3 +861,215 @@ function get_project_type_dir() {
             echo "${TYPE}"
     esac
 }
+
+# launch a container to run the json schema validation tool
+function validate_json_schema() {
+    local JSON
+    local SCHEMA
+    JSON=$1
+    SCHEMA=$2
+
+    ${podman_run} --name crucible-json-validator-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${TOOLBOX_HOME}/bin/json-validator.py --json ${JSON} --schema ${SCHEMA}
+    return $?
+}
+
+export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
+export RICKSHAW_HOME=${CRUCIBLE_HOME}/subprojects/core/rickshaw
+
+# make sure the user has a .crucible directory for storing things
+USER_STORE=$HOME/.crucible
+if [ ! -d ${USER_STORE} ]; then
+    mkdir -v ${USER_STORE}
+fi
+LOG_DB=${USER_STORE}/log.db
+UPDATE_STATUS_FILE="${USER_STORE}/update-status"
+UPDATE_STATUS_LOCK_FILE="${UPDATE_STATUS_FILE}.file-lock"
+touch "${UPDATE_STATUS_LOCK_FILE}"
+
+if [ -z "${HOSTFS_DIR}" ]; then
+    export CRUCIBLE_HOSTFS_PWD=$(pwd)
+fi
+
+if [ -z "${SESSION_ID}" -o "${CRUCIBLE_NEW_SESSION_ID}" == "yes" ]; then
+    export SESSION_ID=$(uuidgen)
+    CRUCIBLE_NEW_SESSION_ID="no"
+fi
+
+var_crucible="/var/lib/crucible"
+var_run_crucible="${var_crucible}/run"
+var_archive_crucible="${var_crucible}/archive"
+opensearch_dir="${var_crucible}/opensearch"
+
+/bin/mkdir -p $var_crucible
+/bin/mkdir -p ${var_run_crucible}
+/bin/mkdir -p ${var_archive_crucible}
+
+container_common_args=()
+container_common_args+=("--rm")
+container_common_args+=("-e CRUCIBLE_HOME=$CRUCIBLE_HOME")
+container_common_args+=("-e TOOLBOX_HOME=${TOOLBOX_HOME}")
+container_common_args+=("-e RICKSHAW_HOME=${RICKSHAW_HOME}")
+container_common_args+=("-e CRUCIBLE_HOSTFS_PWD=${CRUCIBLE_HOSTFS_PWD}")
+container_common_args+=("--mount=type=bind,source=/etc/sysconfig/crucible,destination=/etc/sysconfig/crucible")
+container_common_args+=("--mount=type=bind,source=/root,destination=/root")
+container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME}/config/.bashrc,destination=/root/.bashrc")
+container_common_args+=("--mount=type=bind,source=/home,destination=/home")
+container_common_args+=("--mount=type=bind,source=/var/lib/crucible,destination=/var/lib/crucible")
+container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME},destination=${CRUCIBLE_HOME}")
+container_common_args+=("--mount=type=bind,source=/,destination=/hostfs")
+container_common_args+=("--privileged")
+container_common_args+=("--ipc=host")
+container_common_args+=("--pid=host")
+container_common_args+=("--net=host")
+container_common_args+=("--security-opt=label=disable")
+
+container_log_args=()
+container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
+container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
+
+container_redis_args=()
+container_redis_args+=("-d")
+container_redis_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf")
+
+container_httpd_args=()
+container_httpd_args+=("-d")
+container_httpd_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/httpd/,destination=/etc/httpd/")
+
+container_opensearch_args=()
+container_opensearch_args+=("-d")
+container_opensearch_args+=("--mount=type=bind,source=${opensearch_dir}/,destination=/usr/share/opensearch/data/")
+
+container_build_args=()
+container_build_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
+
+podman_pull="podman_wrapper pull"
+podman_stop="podman_wrapper stop"
+podman_rm="podman_wrapper rm"
+podman_run="podman_wrapper run --pull=missing"
+podman_run_interactive="podman run --pull=missing"
+podman_exists="podman_wrapper container exists"
+podman_ps="podman_wrapper ps"
+
+# load the jqlib library
+source ${CRUCIBLE_HOME}/bin/jqlib
+
+REGISTRIES_CFG=${CRUCIBLE_HOME}/config/registries.json
+REGISTRIES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/registries.json
+
+# if there is not ${REGISTRIES_CFG} file then we need to create one
+# using values from /etc/sysconfig/crucible
+if [ ! -e ${REGISTRIES_CFG} ]; then
+    # provide backwards compatibility with configuration files that still
+    # have CRUCIBLE_CONTAINER_IMAGE instead of CRUCIBLE_CONTROLLER_IMAGE
+    if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" -a -n "${CRUCIBLE_CONTAINER_IMAGE}" ]; then
+        CRUCIBLE_CONTROLLER_IMAGE=${CRUCIBLE_CONTAINER_IMAGE}
+    fi
+
+    # provide backwards compatibility with configration files that still
+    # have CRUCIBLE_CLIENT_SERVER_* instead of CRUCIBLE_ENGINE_*
+    if [ -z "${CRUCIBLE_ENGINE_REPO}" -a -n "${CRUCIBLE_CLIENT_SERVER_REPO}" ]; then
+        CRUCIBLE_ENGINE_REPO=${CRUCIBLE_CLIENT_SERVER_REPO}
+    fi
+    if [ -z "${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}" -a -n "${CRUCIBLE_CLIENT_SERVER_AUTH}" ]; then
+        CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=${CRUCIBLE_CLIENT_SERVER_AUTH}
+    fi
+    if [ -z "${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}" -a -n "${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}" ]; then
+        CRUCIBLE_ENGINE_REPO_TLS_VERIFY=${CRUCIBLE_CLIENT_SERVER_TLS_VERIFY}
+    fi
+
+    echo "Creating ${REGISTRIES_CFG}"
+
+    # create an empty JSON file that jq will be able to add to
+    echo "{}" > ${REGISTRIES_CFG}
+
+    # populate the new JSON file with the information from
+    # /etc/sysconfig/crucible
+    CONTROLLER_URL=$(echo ${CRUCIBLE_CONTROLLER_IMAGE} | awk -F: '{ print $1 }')
+    CONTROLLER_TAG=$(echo ${CRUCIBLE_CONTROLLER_IMAGE} | awk -F: '{ print $2 }')
+    jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-controller" \
+              --arg CONTROLLER_URL "${CONTROLLER_URL}" \
+              --arg CONTROLLER_TAG "${CONTROLLER_TAG}" \
+              '. += { "controller": { "url": $CONTROLLER_URL, "tag": $CONTROLLER_TAG } }'
+
+    jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public" \
+              --arg ENGINES_PUBLIC_URL "${CRUCIBLE_ENGINE_REPO}" \
+              '. += { "engines": { "public": { "url": $ENGINES_PUBLIC_URL } } }'
+
+    if [ -n "${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}" ]; then
+        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public-push-token" \
+                  --arg ENGINES_PUBLIC_PUSH_TOKEN "${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}" \
+                  '.engines.public += { "push-token": $ENGINES_PUBLIC_PUSH_TOKEN }'
+    fi
+
+    if [ -n "${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}" ]; then
+        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public-tls-verify" \
+                  --argjson ENGINES_PUBLIC_TLS_VERIFY "${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}" \
+                  '.engines.public += { "tls-verify": $ENGINES_PUBLIC_TLS_VERIFY }'
+    fi
+
+    echo "Contents of ${REGISTRIES_CFG}:"
+    cat ${REGISTRIES_CFG}
+
+    # verify that the newly created registries.json passes schema
+    # validation
+    validate_json_schema ${REGISTRIES_CFG} ${REGISTRIES_CFG_SCHEMA}
+    RC=$?
+    if [ ${RC} -ne 0 ]; then
+        rm -v ${REGISTRIES_CFG}
+        exit_error "The newly created ${REGISTRIES_CFG} did not validate against ${REGISTRIES_CFG_SCHEMA}" ${RC}
+    fi
+
+    # cleanup /etc/sysconfig/crucible to reflect that registry
+    # information is now stored elsewhere
+    cp /etc/sysconfig/crucible /etc/sysconfig/crucible.registries-cleanup.$(date +%d-%m-%Y_%H:%M:%S)
+    sed -i -e "/CRUCIBLE_CONTAINER_IMAGE=/d" \
+        -e "/CRUCIBLE_CONTROLLER_IMAGE=/d" \
+        -e "/CRUCIBLE_CLIENT_SERVER_REPO=/d" \
+        -e "/CRUCIBLE_ENGINE_REPO=/d" \
+        -e "/CRUCIBLE_CLIENT_SERVER_AUTH=/d" \
+        -e "/CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=/d" \
+        -e "/CRUCIBLE_CLIENT_SERVER_TLS_VERIFY=/d" \
+        -e "/CRUCIBLE_ENGINE_REPO_TLS_VERIFY=/d" \
+        /etc/sysconfig/crucible
+fi
+
+# check if there is a registries.json and act accordingly
+if [ -e ${REGISTRIES_CFG} ]; then
+    # begin the migration to using registries.json by loading values
+    # from it and assigning them to the appropriate environment
+    # variable
+
+    # load this value before validating it because we need at least it
+    # for this to work :/
+    CRUCIBLE_CONTROLLER_IMAGE=$(jq_query ${REGISTRIES_CFG} '.controller.url + ":" + .controller.tag')
+    if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" ]; then
+        exit_error "Could not load CRUCIBLE_CONTROLLER_IMAGE from ${REGISTRIES_CFG}"
+    fi
+
+    # validate that the registries.json passes it's schema -- this
+    # should only happen the first time this file is sourced
+    if [ "${CRUCIBLE_CFG_JSON_VALIDATION}" == "yes" ]; then
+        export CRUCIBLE_CFG_JSON_VALIDATION="no"
+        validate_json_schema ${REGISTRIES_CFG} ${REGISTRIES_CFG_SCHEMA}
+        RC=$?
+        if [ ${RC} -ne 0 ]; then
+            exit_error "${REGISTRIES_CFG} does not validate against ${REGISTRIES_CFG_SCHEMA}" ${RC}
+        fi
+    fi
+
+    CRUCIBLE_ENGINE_REPO=$(jq_query ${REGISTRIES_CFG} '.engines.public.url')
+    CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=$(jq_query ${REGISTRIES_CFG} '.engines.public."push-token"')
+    CRUCIBLE_ENGINE_REPO_TLS_VERIFY=$(jq_query ${REGISTRIES_CFG} '.engines.public."tls-verify"')
+else
+    exit_error "Could not locate ${REGISTRIES_CFG}"
+fi
+
+# this must be defined after the registry information is known
+container_rs_args=()
+container_rs_args+=("-i")
+container_rs_args+=("-e RS_REG_REPO=${CRUCIBLE_ENGINE_REPO}")
+container_rs_args+=("-e RS_REG_AUTH=${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}")
+container_rs_args+=("-e RS_REG_TLS_VERIFY=${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}")
+container_rs_args+=("-e RS_EMAIL=$CRUCIBLE_EMAIL")
+container_rs_args+=("-e RS_NAME=\"$CRUCIBLE_NAME\"")
+container_rs_args+=("-e MULTIPLEX_HOME=${CRUCIBLE_HOME}/subprojects/core/multiplex")
