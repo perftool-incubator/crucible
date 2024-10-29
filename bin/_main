@@ -414,6 +414,7 @@ elif [ "${1}" == "run" ]; then
       --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop\
       --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat\
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
+      --registries-json=${REGISTRIES_CFG}\
       --base-run-dir=$base_run_dir\
       ${passthru_args[@]}"
 
