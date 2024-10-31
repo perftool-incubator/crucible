@@ -280,10 +280,6 @@ elif [ "${1}" == "run" ]; then
 
     fi
 
-    if [ -z "${CRUCIBLE_ENGINE_REPO}" ]; then
-        exit_error "CRUCIBLE_ENGINE_REPO is not defined"
-    fi
-
     if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" ]; then
         exit_error "Exiting because CRUCIBLE_CONTROLLER_IMAGE is not defined"
     fi
