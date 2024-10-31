@@ -1056,10 +1056,6 @@ if [ -e ${REGISTRIES_CFG} ]; then
             exit_error "${REGISTRIES_CFG} does not validate against ${REGISTRIES_CFG_SCHEMA}" ${RC}
         fi
     fi
-
-    CRUCIBLE_ENGINE_REPO=$(jq_query ${REGISTRIES_CFG} '.engines.public.url')
-    CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=$(jq_query ${REGISTRIES_CFG} '.engines.public."push-token"')
-    CRUCIBLE_ENGINE_REPO_TLS_VERIFY=$(jq_query ${REGISTRIES_CFG} '.engines.public."tls-verify"')
 else
     exit_error "Could not locate ${REGISTRIES_CFG}"
 fi
