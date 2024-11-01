@@ -985,33 +985,13 @@ if [ ! -e ${REGISTRIES_CFG} ]; then
 
     echo "Creating ${REGISTRIES_CFG}"
 
-    # create an empty JSON file that jq will be able to add to
-    echo "{}" > ${REGISTRIES_CFG}
+    source ${CRUCIBLE_HOME}/bin/_registries.lib
 
-    # populate the new JSON file with the information from
-    # /etc/sysconfig/crucible
-    CONTROLLER_URL=$(echo ${CRUCIBLE_CONTROLLER_IMAGE} | awk -F: '{ print $1 }')
-    CONTROLLER_TAG=$(echo ${CRUCIBLE_CONTROLLER_IMAGE} | awk -F: '{ print $2 }')
-    jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-controller" \
-              --arg CONTROLLER_URL "${CONTROLLER_URL}" \
-              --arg CONTROLLER_TAG "${CONTROLLER_TAG}" \
-              '. += { "controller": { "url": $CONTROLLER_URL, "tag": $CONTROLLER_TAG } }'
-
-    jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public" \
-              --arg ENGINES_PUBLIC_URL "${CRUCIBLE_ENGINE_REPO}" \
-              '. += { "engines": { "public": { "url": $ENGINES_PUBLIC_URL } } }'
-
-    if [ -n "${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}" ]; then
-        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public-push-token" \
-                  --arg ENGINES_PUBLIC_PUSH_TOKEN "${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN}" \
-                  '.engines.public += { "push-token": $ENGINES_PUBLIC_PUSH_TOKEN }'
-    fi
-
-    if [ -n "${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}" ]; then
-        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public-tls-verify" \
-                  --argjson ENGINES_PUBLIC_TLS_VERIFY "${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}" \
-                  '.engines.public += { "tls-verify": $ENGINES_PUBLIC_TLS_VERIFY }'
-    fi
+    create_registries_json \
+        ${CRUCIBLE_CONTROLLER_IMAGE} \
+        ${CRUCIBLE_ENGINE_REPO} \
+        ${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN} \
+        ${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}
 
     echo "Contents of ${REGISTRIES_CFG}:"
     cat ${REGISTRIES_CFG}
@@ -1059,6 +1039,8 @@ if [ -e ${REGISTRIES_CFG} ]; then
         validate_json_schema ${REGISTRIES_CFG} ${REGISTRIES_CFG_SCHEMA}
         RC=$?
         if [ ${RC} -ne 0 ]; then
+            echo "${REGISTRIES_CFG}:"
+            cat ${REGISTRIES_CFG}
             exit_error "${REGISTRIES_CFG} does not validate against ${REGISTRIES_CFG_SCHEMA}" ${RC}
         fi
     fi
