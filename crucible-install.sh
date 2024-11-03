@@ -193,7 +193,7 @@ function list_releases {
     git ls-remote --tags \
         --sort='version:refname' \
         https://github.com/perftool-incubator/crucible.git \
-        | awk -F/ '{print$NF}' |
+        | awk -F/ '{print$NF}' \
         | grep -E '20[0-9]{2}\.[1234]'
 }
 
@@ -442,7 +442,7 @@ done
 
 # --release conflicts with --git-repo or --git-branch
 if [ -n "${GIT_TAG}" ]; then
-    if [ -n "${GIT_REPO}" ]; then
+    if [ -n "${GIT_REPO}" -a "${GIT_REPO}" != "${DEFAULT_GIT_REPO}" ]; then
         exit_error "Only default repo is supported for installing a release." $EC_RELEASE_DEFAULT_REPO_ONLY
     fi
     if [ -n "${GIT_BRANCH}" ]; then

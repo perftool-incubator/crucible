@@ -176,6 +176,27 @@ test "$?" = "0" || exit 1
 [[ "$stdout" = *"$tags"* ]] || exit 1
 stop_test
 
+for arg_mode in client-server engine; do
+    for tag in $tags; do
+        start_test
+        echo "testing arg_mode=${arg_mode} tag=${tag}"
+        # install existing release with current installer
+        touch /tmp/auth-file.json
+        cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+        # TODO(rfolco): temporary workaround until we make it distro generic
+        sudo mkdir -p $(dirname $cfgfile)
+        sudo ./crucible-install.sh \
+             --git-repo "https://github.com/perftool-incubator/crucible" \
+             --release $tag \
+             --${arg_mode}-registry myregistry.io/crucible \
+             --${arg_mode}-auth-file /tmp/auth-file.json \
+             --verbose
+        test "$?" = "0" || exit 1
+        ls /opt/crucible-moved* || exit 1
+        stop_test
+    done
+done
+
 start_test
 ## negative test: --release and --git-repo
 ec=$(grep EC_RELEASE_DEFAULT_REPO_ONLY= crucible-install.sh | cut -d '=' -f2)
@@ -203,7 +224,7 @@ sed -i -e "s|\(DEFAULT_GIT_REPO\)=.*|\1=\"${CRUCIBLE_DIR}\"|" crucible-install.s
 grep "^DEFAULT_GIT_REPO" crucible-install.sh
 ec=$(grep EC_FAIL_CHECKOUT= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
-    --release NonExitentTag \
+    --release NonExistentTag \
     --client-server-registry myregistry.io/crucible \
     --verbose
 test "$?" = "$ec" || exit 1
