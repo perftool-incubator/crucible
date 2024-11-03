@@ -5,7 +5,6 @@
 exec 2>&1
 
 set +e
-set -x
 
 test_number=0
 
@@ -13,7 +12,6 @@ CRUCIBLE_DIR=$(pwd)
 GITHUB_RUNNER=1
 
 function start_test() {
-    set +x
     local msg
     msg="Test Number: $(( test_number += 1 ))"
     if [ ${GITHUB_RUNNER} -eq 1 ]; then
@@ -35,7 +33,6 @@ function stop_test() {
         echo "*********************************************************************************"
         echo
     fi
-    set -x
 }
 
 start_test
