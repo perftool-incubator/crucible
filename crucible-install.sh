@@ -189,11 +189,12 @@ _USAGE_
 
 # list available tags from the remote repository
 function list_releases {
-# only default repo is supported for the release mechanism
+    # only default repo is supported for the release mechanism
     git ls-remote --tags \
-	    --sort='version:refname' \
-	    https://github.com/perftool-incubator/crucible.git \
-	    | awk -F/ '{print$NF}'
+        --sort='version:refname' \
+        https://github.com/perftool-incubator/crucible.git \
+        | awk -F/ '{print$NF}' |
+        | grep -E '20[0-9]{2}\.[1234]'
 }
 
 # cleanup previous installation
