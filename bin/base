@@ -991,7 +991,8 @@ if [ ! -e ${REGISTRIES_CFG} ]; then
         ${CRUCIBLE_CONTROLLER_IMAGE} \
         ${CRUCIBLE_ENGINE_REPO} \
         ${CRUCIBLE_ENGINE_REPO_AUTH_TOKEN} \
-        ${CRUCIBLE_ENGINE_REPO_TLS_VERIFY}
+        ${CRUCIBLE_ENGINE_REPO_TLS_VERIFY} \
+        "SKIP_QUAY"
 
     echo "Contents of ${REGISTRIES_CFG}:"
     cat ${REGISTRIES_CFG}

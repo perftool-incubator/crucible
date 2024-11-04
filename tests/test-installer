@@ -73,6 +73,19 @@ for arg_mode in client-server engine; do
     stop_test
 done
 
+start_test
+# oauth file not found
+ec=$(grep EC_OAUTH_FILE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
+sudo ./crucible-install.sh \
+     --git-repo ${CRUCIBLE_DIR} \
+     --engine-registry myregistry.io/crucible \
+     --engine-auth-file /tmp/auth-file.json \
+     --quay-engine-expiration-refresh-token /tmp/oauth-file.json \
+     --quay-engine-expiration-refresh-api-url myregistry.io/crucible/api/url \
+     --verbose
+test "$?" = "$ec" || exit 1
+stop_test
+
 for arg_mode in client-server engine; do
     start_test
     echo "testing arg_mode=${arg_mode}"
@@ -86,6 +99,20 @@ for arg_mode in client-server engine; do
     test "$?" = "$ec" || exit 1
     stop_test
 done
+
+start_test
+# invalid quay expiration length
+touch /tmp/auth-file.json
+ec=$(grep EC_INVALID_QUAY_EXPIRATION_LENGTH= crucible-install.sh | cut -d '=' -f2)
+# TODO(rfolco): temporary workaround until we make it distro generic
+sudo ./crucible-install.sh \
+     --git-repo ${CRUCIBLE_DIR} \
+     --engine-registry myregistry.io/crucible \
+     --engine-auth-file /tmp/auth-file.json \
+     --quay-engine-expiration-length 1y \
+     --verbose
+test "$?" = "${ec}" || exit 1
+stop_test
 
 for arg_mode in client-server engine; do
     start_test
@@ -148,6 +175,24 @@ for arg_mode in client-server engine; do
     ls -ld /opt/crucible-moved* || exit 1
     stop_test
 done
+
+start_test
+# override existing installation
+touch /tmp/auth-file.json
+touch /tmp/oauth-file.json
+cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+# TODO(rfolco): temporary workaround until we make it distro generic
+sudo mkdir -p $(dirname $cfgfile)
+sudo ./crucible-install.sh \
+     --git-repo ${CRUCIBLE_DIR} \
+     --engine-registry myregistry.io/crucible \
+     --engine-auth-file /tmp/auth-file.json \
+     --quay-engine-expiration-refresh-token /tmp/oauth-file.json \
+     --quay-engine-expiration-refresh-api-url myregistry.io/crucible/api/url \
+     --verbose
+test "$?" = "0" || exit 1
+ls -ld /opt/crucible-moved* || exit 1
+stop_test
 
 for arg_mode in client-server engine; do
     start_test

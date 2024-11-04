@@ -44,5 +44,31 @@ function create_registries_json() {
                   --argjson ENGINES_PUBLIC_TLS_VERIFY "${ENGINES_REPO_TLS_VERIFY}" \
                   '.engines.public += { "tls-verify": $ENGINES_PUBLIC_TLS_VERIFY }'
     fi
+}
 
+# add quay specific information to an existing registries.json
+function registries_json_add_quay() {
+    local ENGINES_QUAY_EXPIRATION_LENGTH
+    ENGINES_QUAY_EXPIRATION_LENGTH=$1
+    local ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN
+    ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN=$2
+    local ENGINES_QUAY_EXPIRATION_REFRESH_API_URL
+    ENGINES_QUAY_EXPIRATION_REFRESH_API_URL=$3
+
+    if [ -z "${REGISTRIES_CFG}" ]; then
+        exit_error "ERROR: \%REGISTRIES_CFG must be defined when calling $0"
+    fi
+
+    if [ "${ENGINES_QUAY_EXPIRATION_LENGTH}" != "SKIP_QUAY" ]; then
+        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-quay-expiration-length" \
+                  --arg ENGINES_PUBLIC_QUAY_EXPIRATION_LENGTH "${ENGINES_QUAY_EXPIRATION_LENGTH}" \
+                  '.engines.public += { "quay": { "expiration-length": $ENGINES_PUBLIC_QUAY_EXPIRATION_LENGTH } }'
+
+        if [ -n "${ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN}" -a -n "${ENGINES_QUAY_EXPIRATION_REFRESH_API_URL}" ]; then
+            jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-quay-expiration-refresh-token" \
+                      --arg ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_TOKEN "${ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN}" \
+                      --arg ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_API_URL "${ENGINES_QUAY_EXPIRATION_REFRESH_API_URL}" \
+                      '.engines.public.quay += { "refresh-expiration": { "token-file": $ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_TOKEN, "api-url": $ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_API_URL } }'
+        fi
+    fi
 }
