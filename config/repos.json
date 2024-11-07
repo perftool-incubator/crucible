@@ -151,6 +151,16 @@
             }
         },
         {
+            "name": "hwnoise",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-hwnoise",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "tracer",
             "type": "benchmark",
             "repository": "https://github.com/perftool-incubator/bench-tracer",
