@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# create a registries.json
+function create_registries_json() {
+    local CONTROLLER_IMAGE
+    CONTROLLER_IMAGE=$1
+    local ENGINES_REPO
+    ENGINES_REPO=$2
+    local ENGINES_REPO_AUTH_TOKEN
+    ENGINES_REPO_AUTH_TOKEN=$3
+    local ENGINES_REPO_TLS_VERIFY
+    ENGINES_REPO_TLS_VERIFY=$4
+
+    if [ -z "${REGISTRIES_CFG}" ]; then
+        exit_error "ERROR: \%REGISTRIES_CFG must be defined when calling $0"
+    fi
+    
+    # create an empty JSON file that jq will be able to add to
+    echo "{}" > ${REGISTRIES_CFG}
+
+    # populate the new JSON file with the information from
+    # /etc/sysconfig/crucible
+    CONTROLLER_URL=$(echo ${CONTROLLER_IMAGE} | awk -F: '{ print $1 }')
+    CONTROLLER_TAG=$(echo ${CONTROLLER_IMAGE} | awk -F: '{ print $2 }')
+    jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-controller" \
+              --arg CONTROLLER_URL "${CONTROLLER_URL}" \
+              --arg CONTROLLER_TAG "${CONTROLLER_TAG}" \
+              '. += { "controller": { "url": $CONTROLLER_URL, "tag": $CONTROLLER_TAG } }'
+
+    jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public" \
+              --arg ENGINES_PUBLIC_URL "${ENGINES_REPO}" \
+              '. += { "engines": { "public": { "url": $ENGINES_PUBLIC_URL } } }'
+
+    if [ -n "${ENGINES_REPO_AUTH_TOKEN}" ]; then
+        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public-push-token" \
+                  --arg ENGINES_PUBLIC_PUSH_TOKEN "${ENGINES_REPO_AUTH_TOKEN}" \
+                  '.engines.public += { "push-token": $ENGINES_PUBLIC_PUSH_TOKEN }'
+    fi
+
+    if [ -n "${ENGINES_REPO_TLS_VERIFY}" ]; then
+        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-public-tls-verify" \
+                  --argjson ENGINES_PUBLIC_TLS_VERIFY "${ENGINES_REPO_TLS_VERIFY}" \
+                  '.engines.public += { "tls-verify": $ENGINES_PUBLIC_TLS_VERIFY }'
+    fi
+}
+
+# add quay specific information to an existing registries.json
+function registries_json_add_quay() {
+    local ENGINES_QUAY_EXPIRATION_LENGTH
+    ENGINES_QUAY_EXPIRATION_LENGTH=$1
+    local ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN
+    ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN=$2
+    local ENGINES_QUAY_EXPIRATION_REFRESH_API_URL
+    ENGINES_QUAY_EXPIRATION_REFRESH_API_URL=$3
+
+    if [ -z "${REGISTRIES_CFG}" ]; then
+        exit_error "ERROR: \%REGISTRIES_CFG must be defined when calling $0"
+    fi
+
+    if [ "${ENGINES_QUAY_EXPIRATION_LENGTH}" != "SKIP_QUAY" ]; then
+        jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-quay-expiration-length" \
+                  --arg ENGINES_PUBLIC_QUAY_EXPIRATION_LENGTH "${ENGINES_QUAY_EXPIRATION_LENGTH}" \
+                  '.engines.public += { "quay": { "expiration-length": $ENGINES_PUBLIC_QUAY_EXPIRATION_LENGTH } }'
+
+        if [ -n "${ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN}" -a -n "${ENGINES_QUAY_EXPIRATION_REFRESH_API_URL}" ]; then
+            jq_update ${REGISTRIES_CFG} "${REGISTRIES_CFG}:create-engines-quay-expiration-refresh-token" \
+                      --arg ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_TOKEN "${ENGINES_QUAY_EXPIRATION_REFRESH_TOKEN}" \
+                      --arg ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_API_URL "${ENGINES_QUAY_EXPIRATION_REFRESH_API_URL}" \
+                      '.engines.public.quay += { "refresh-expiration": { "token-file": $ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_TOKEN, "api-url": $ENGINES_PUBLIC_QUAY_EXPIRATION_REFRESH_API_URL } }'
+        fi
+    fi
+}

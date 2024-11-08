@@ -12,6 +12,7 @@ GIT_INSTALL_LOG="/tmp/crucible-git-install.log"
 CRUCIBLE_CONTROLLER_REGISTRY="quay.io/crucible/controller:latest"
 DEFAULT_GIT_REPO="https://github.com/perftool-incubator/crucible"
 DEFAULT_GIT_BRANCH="master"
+DEFAULT_QUAY_EXPIRATION_LENGTH="13w"
 GIT_REPO=""
 GIT_BRANCH=""
 GIT_TAG=""
@@ -35,6 +36,8 @@ EC_PUSHD_FAIL=15
 EC_PULL_FAIL=16
 EC_RELEASE_DEFAULT_REPO_ONLY=18
 EC_RELEASE_CONFLICTS_WITH_BRANCH=19
+EC_INVALID_QUAY_EXPIRATION_LENGTH=20
+EC_OAUTH_FILE_NOT_FOUND=21
 
 # remove a previous installation log
 if [ -e ${GIT_INSTALL_LOG} ]; then
@@ -153,6 +156,15 @@ function usage {
 
     optional:
 
+        --quay-engine-expiration-refresh-token <authentication file>>
+        Quay OAuth authentication token file for refreshing engine image expiration timestamps.
+
+        --quay-engine-expiration-refresh-api-url <api url>
+        Quay API URL that is used to operate on the engine registry.
+
+        --quay-engine-expiration-length <length>
+        How long should a Quay repo allow the engine images to live before they expire.
+
         --engine-auth-file <authentication file>
         Authentication file for pushing images to the remote registry.
   
@@ -189,11 +201,12 @@ _USAGE_
 
 # list available tags from the remote repository
 function list_releases {
-# only default repo is supported for the release mechanism
+    # only default repo is supported for the release mechanism
     git ls-remote --tags \
-	    --sort='version:refname' \
-	    https://github.com/perftool-incubator/crucible.git \
-	    | awk -F/ '{print$NF}'
+        --sort='version:refname' \
+        https://github.com/perftool-incubator/crucible.git \
+        | awk -F/ '{print$NF}' \
+        | grep -E '20[0-9]{2}\.[1234]'
 }
 
 # cleanup previous installation
@@ -358,7 +371,8 @@ function update_repos_config() {
 
 longopts="name:,email:,help,list-releases,verbose"
 longopts+=",client-server-registry:,client-server-auth-file:,client-server-tls-verify:"
-longopts+=",engine-registry:,engine-auth-file:,engine-tls-verify:"
+longopts+=",engine-registry:,engine-auth-file:,engine-tls-verify:,quay-engine-expiration-length:"
+longopts+=",quay-engine-expiration-refresh-token:,quay-engine-expiration-refresh-api-url:"
 longopts+=",controller-registry:,git-repo:,git-branch:,release:"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
@@ -368,6 +382,21 @@ fi
 eval set -- "$opts";
 while true; do
     case "$1" in
+        --quay-engine-expiration-refresh-token)
+            shift;
+            CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN="$1"
+            shift;
+            ;;
+        --quay-engine-expiration-refresh-api-url)
+            shift;
+            CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_API_URL="$1"
+            shift;
+            ;;
+        --quay-engine-expiration-length)
+            shift;
+            CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH="$1"
+            shift;
+            ;;
         --client-server-tls-verify|--engine-tls-verify)
             shift;
             CRUCIBLE_ENGINE_TLS_VERIFY="$1"
@@ -441,7 +470,7 @@ done
 
 # --release conflicts with --git-repo or --git-branch
 if [ -n "${GIT_TAG}" ]; then
-    if [ -n "${GIT_REPO}" ]; then
+    if [ -n "${GIT_REPO}" -a "${GIT_REPO}" != "${DEFAULT_GIT_REPO}" ]; then
         exit_error "Only default repo is supported for installing a release." $EC_RELEASE_DEFAULT_REPO_ONLY
     fi
     if [ -n "${GIT_BRANCH}" ]; then
@@ -469,6 +498,18 @@ identity
 for dep in $DEPENDENCIES; do
     has_dependency $dep
 done
+
+if [ -n "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH}" ]; then
+    if ! echo "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH}" | grep -q "[1-9][0-9]*[wm]"; then
+        exit_error "Invalid syntax for engine Quay expiration length.  Expecting either '<integer>w' (for weeks) or '<integer>m' (for months)" ${EC_INVALID_QUAY_EXPIRATION_LENGTH}
+    fi
+fi
+
+if [ -n "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN}" ]; then
+    if [ ! -f "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN}" ]; then
+        exit_error "Crucible Quay engine refresh token file not found. See --quay-engine-expiration-refresh-token for details." $EC_OAUTH_FILE_NOT_FOUND
+    fi
+fi
 
 if [ ! -z ${CRUCIBLE_ENGINE_AUTH_FILE+x} ]; then
     if [ ! -f $CRUCIBLE_ENGINE_AUTH_FILE ]; then
@@ -515,16 +556,65 @@ $INSTALL_PATH/bin/subprojects-install $GIT_TAG >>"$GIT_INSTALL_LOG" 2>&1 ||
 
 SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY="${CRUCIBLE_ENGINE_REGISTRY}"
 SYSCONFIG_CRUCIBLE_ENGINE_AUTH=""
-SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="\"true\""
-if [ ! -z ${CRUCIBLE_ENGINE_AUTH_FILE+x} ]; then
-    SYSCONFIG_CRUCIBLE_ENGINE_AUTH="\"${CRUCIBLE_ENGINE_AUTH_FILE}\""
+SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY=""
+SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="true"
+SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH="${DEFAULT_QUAY_EXPIRATION_LENGTH}"
+SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN=""
+SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_API_URL=""
+
+if [ -n "${CRUCIBLE_ENGINE_AUTH_FILE}" ]; then
+    SYSCONFIG_CRUCIBLE_ENGINE_AUTH="${CRUCIBLE_ENGINE_AUTH_FILE}"
 fi
-if [ ! -z ${CRUCIBLE_ENGINE_TLS_VERIFY+x} ]; then
-    SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="\"${CRUCIBLE_ENGINE_TLS_VERIFY}\""
+if [ -n "${CRUCIBLE_ENGINE_TLS_VERIFY}" ]; then
+    SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="${CRUCIBLE_ENGINE_TLS_VERIFY}"
+fi
+if [ -n "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH}" ]; then
+    SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH="${CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH}"
+fi
+if [ -n "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN}" ]; then
+    SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN="${CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN}"
+fi
+if [ -n "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_API_URL}" ]; then
+    SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_API_URL="${CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_API_URL}"
 fi
 
-# native crucible install script already created this, only append
-cat << _SYSCFG_ >> $SYSCONFIG
+REGISTRIES_CFG=${INSTALL_PATH}/config/registries.json
+REGISTRIES_CFG_SCHEMA=${INSTALL_PATH}/schema/registries.json
+
+if [ -e ${INSTALL_PATH}/bin/_registries.lib ]; then
+    source ${INSTALL_PATH}/bin/_registries.lib
+
+    cat << _SYSCFG_ >> $SYSCONFIG
+CRUCIBLE_USE_CONTAINERS=1
+CRUCIBLE_USE_LOGGER=1
+_SYSCFG_
+
+    create_registries_json \
+        ${CRUCIBLE_CONTROLLER_REGISTRY} \
+        ${SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY} \
+        ${SYSCONFIG_CRUCIBLE_ENGINE_AUTH} \
+        ${SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY}
+
+    registries_json_add_quay \
+        ${SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH} \
+        ${SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_TOKEN} \
+        ${SYSCONFIG_CRUCIBLE_ENGINE_QUAY_EXPIRATION_REFRESH_API_URL}
+
+    # when the 'base' file is sourced with this particular parameter
+    # set it will force the registries.json to be validated
+    CRUCIBLE_CFG_JSON_VALIDATION="yes"
+    SESSION_ID="installer"
+    CRUCIBLE_HOME=${INSTALL_PATH} source ${INSTALL_PATH}/bin/base
+else
+    SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="\"${SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY}\""
+    if [ -n "${SYSCONFIG_CRUCIBLE_ENGINE_AUTH_FILE}" ]; then
+        SYSCONFIG_CRUCIBLE_ENGINE_AUTH="\"${SYSCONFIG_CRUCIBLE_ENGINE_AUTH}\""
+    fi
+    if [ -n "${CRUCIBLE_ENGINE_TLS_VERIFY}" ]; then
+        SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="\"${SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY}\""
+    fi
+
+    cat << _SYSCFG_ >> $SYSCONFIG
 CRUCIBLE_USE_CONTAINERS=1
 CRUCIBLE_USE_LOGGER=1
 CRUCIBLE_CONTROLLER_IMAGE=${CRUCIBLE_CONTROLLER_REGISTRY}
@@ -532,6 +622,7 @@ CRUCIBLE_ENGINE_REPO=${SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY}
 CRUCIBLE_ENGINE_REPO_AUTH_TOKEN=${SYSCONFIG_CRUCIBLE_ENGINE_AUTH}
 CRUCIBLE_ENGINE_REPO_TLS_VERIFY=${SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY}
 _SYSCFG_
+fi
 
 if [ ${VERBOSE} == 1 ]; then
     echo
@@ -542,6 +633,11 @@ if [ ${VERBOSE} == 1 ]; then
     if [ -e ${INSTALL_PATH}/bin/jqlib ]; then
         echo
         ${INSTALL_PATH}/bin/crucible repo config show
+    fi
+    if [ -e ${REGISTRIES_CFG} ]; then
+        echo
+        echo "Contents of registries config file ${REGISTRIES_CFG}:"
+        cat ${REGISTRIES_CFG}
     fi
 fi
 
