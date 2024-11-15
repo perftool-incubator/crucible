@@ -381,6 +381,8 @@ function extract_primary_periods() {
     RUN_DIR=${1}
     shift
 
+    cdmver=`cat $CRUCIBLE_HOME/subprojects/core/CommonDataModel/VERSION`
+
     if [ -e ${RUN_DIR} -a -d ${RUN_DIR} ]; then
         json_files=$(find -L "${RUN_DIR}" -name primary-period.json)
         if [ -n "${json_files}" ]; then
@@ -411,9 +413,14 @@ function extract_primary_periods() {
                 if [ -z "${SAMPLE_NUM}" -o ${SAMPLE_RC} != 0 ]; then
                     SAMPLE_RC=1
                 else
-                    PRIMARY_PERIOD_ID=$(${podman_run} --name crucible-extract-primary-periods-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"period\".\"id\"'")
+                    if [ "$cdmver" == "v7dev" ]; then
+                        PRIMARY_PERIOD_ID=$(${podman_run} --name crucible-extract-primary-periods-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"period\".\"id\"'")
+                    elif [ "$cdmver" == "v8dev" ]; then
+                        PRIMARY_PERIOD_ID=$(${podman_run} --name crucible-extract-primary-periods-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${result_dumper} ${json_file} | jq -r '. \"period\".\"period-uuid\"'")
+                    else
+                        exit_error "CommonDataModel version ($cdmver) is not supported, exiting"
+                    fi
                     PRIMARY_PERIOD_RC=$?
-
                     if [ -z "${PRIMARY_PERIOD_ID}" -o ${PRIMARY_PERIOD_RC} != 0 ]; then
                         SAMPLE_RC=1
                     fi
