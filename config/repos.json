@@ -191,6 +191,16 @@
             }
         },
         {
+            "name": "pytorch",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-pytorch",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "ilab",
             "type": "benchmark",
             "repository": "https://github.com/perftool-incubator/bench-ilab",
