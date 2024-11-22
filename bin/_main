@@ -412,6 +412,7 @@ elif [ "${1}" == "run" ]; then
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
       --registries-json=${REGISTRIES_CFG}\
       --base-run-dir=$base_run_dir\
+      --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs\
       ${passthru_args[@]}"
 
     echo "rickshaw-run command: $rs_run_cmd"

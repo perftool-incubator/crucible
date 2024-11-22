@@ -72,7 +72,7 @@ fi
 
 no_clone=""
 pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change directory to $crucible_repo_dir"
-/bin/mkdir -p subprojects/benchmarks subprojects/tools subprojects/core subprojects/docs
+/bin/mkdir -p subprojects/benchmarks subprojects/tools subprojects/core subprojects/docs subprojects/userenvs
 for link in $(find subprojects -type l); do
     type_dir=$(echo "${link}" | awk -F'/' '{ print $2 }')
     name_link=$(echo "${link}" | awk -F'/' '{ print $3 }')
@@ -97,6 +97,11 @@ for link in $(find subprojects -type l); do
                 ;;
             "doc")
                 if [ "${type_dir}" == "docs" ]; then
+                    active=1
+                fi
+                ;;
+            "userenvs")
+                if [ "${type_dir}" == "userenvs" ]; then
                     active=1
                 fi
                 ;;
@@ -146,6 +151,9 @@ for subproject in "${!subprojects[@]}"; do
             ;;
         "doc")
             sp_dir_prefix="docs/"
+            ;;
+        "userenvs")
+            sp_dir_prefix="userenvs/"
             ;;
     esac
 
