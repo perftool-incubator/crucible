@@ -220,12 +220,98 @@ function config_show() {
     done
 }
 
+function config_add_repo() {
+    local name=""
+    local type=""
+    local repository=""
+    local primary_branch=""
+    local checkout_mode=""
+    local checkout_target=""
+    local error=0
+
+    local required="name type repository primary-branch checkout-mode checkout-target"
+
+    for key_value in $@; do
+        key=$(echo "${key_value}" | awk -F= '{ print $1 }')
+        value=$(echo "${key_value}" | awk -F= '{ print $2 }')
+        #echo "key=${key} value=${value}"
+
+        case "${key}" in
+            "name")
+                name="${value}"
+                required=${required//name/}
+                ;;
+            "type")
+                type="${value}"
+                required=${required//type/}
+                ;;
+            "repository")
+                repository="${value}"
+                required=${required//repository/}
+                ;;
+            "primary-branch")
+                primary_branch="${value}"
+                required=${required//primary-branch/}
+                ;;
+            "checkout-mode")
+                checkout_mode="${value}"
+                required=${required//checkout-mode/}
+                ;;
+            "checkout-target")
+                checkout_target="${value}"
+                required=${required//checkout-target/}
+                ;;
+            *)
+                echo "ERROR: Invalid key=value pair: ${key_value}"
+                error=1
+        esac
+    done
+
+    local param
+    for param in ${required}; do
+        echo "ERROR: You must specify parameter ${param}"
+        error=1
+    done
+
+    if [ ${error} -ne 0 ]; then
+        exit 1
+    fi
+
+    jq_update ${CRUCIBLE_HOME}/config/repos.json "repos:add-unofficial-repo" \
+              --arg repo_name "${name}" \
+              --arg repo_type "${type}" \
+              --arg repo_repository "${repository}" \
+              --arg repo_primary_branch "${primary_branch}" \
+              --arg repo_checkout_mode "${checkout_mode}" \
+              --arg repo_checkout_target "${checkout_target}" \
+              '.unofficial += [
+                                {
+                                  "name": $repo_name,
+                                  "type": $repo_type,
+                                  "repository": $repo_repository,
+                                  "primary-branch": $repo_primary_branch,
+                                  "checkout": {
+                                    "mode": $repo_checkout_mode,
+                                    "target": $repo_checkout_target
+                                  }
+                                }
+                              ]'
+
+    echo "Successfully added repo with name '${name}'"
+
+    if pushd ${CRUCIBLE_HOME} > /dev/null; then
+        git diff config/repos.json
+        popd > /dev/null
+    fi
+}
+
 function config_help() {
     echo "Config Usage:"
     echo "  repo config [<command> <command-specific-options>]"
     echo
     echo "The following command are supported"
     echo
+    echo "add           |  Add an unofficial repository"
     echo "show          |  Dump the configuration information in tabular form (default)"
     echo
 }
@@ -261,6 +347,9 @@ case "${command}" in
         fi
 
         case "${config_subcommand}" in
+            add)
+                config_add_repo "$@"
+                ;;
             show)
                 config_show
                 ;;
