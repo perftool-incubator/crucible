@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# registries management infrastructure
+
+source /etc/sysconfig/crucible
+
+if [ ! -e "${CRUCIBLE_HOME}" ]; then
+    echo "Could not find $CRUCIBLE_HOME, exiting."
+    exit 1
+fi
+
+source "${CRUCIBLE_HOME}/bin/base"
+source "${CRUCIBLE_HOME}/bin/jqlib"
+
+function help() {
+    echo "Usage:"
+    echo "  registries <command> [command-specific-options]"
+    echo ""
+    echo "The following commands are supported"
+    echo ""
+    echo "add           |  Add a registry to the configruation.  Either 'private-engine' or 'userenv' are currently supported."
+    echo "info          |  Give high level info about configured registries (default)"
+    echo ""
+}
+
+function add_private_engine() {
+    local url=""
+    local push_token=""
+    local pull_token=""
+    local tls_verify=""
+    local quay_expiration_length=""
+    local quay_refresh_token=""
+    local quay_refresh_api_url=""
+    local error=0
+
+    local required="url push-token pull-token tls-verify quay-expiration-length"
+
+    for key_value in $@; do
+        key=$(echo "${key_value}" | awk -F= '{ print $1 }')
+        value=$(echo "${key_value}" | awk -F= '{ print $2 }')
+        #echo "key=${key} value=${value}"
+
+        case "${key}" in
+            "url")
+                url="${value}"
+                required=${required//url}
+                ;;
+            "push-token")
+                push_token="${value}"
+                required=${required//push-token}
+                ;;
+            "pull-token")
+                pull_token="${value}"
+                required=${required//pull-token}
+                ;;
+            "tls-verify")
+                tls_verify="${value}"
+                required=${required//tls-verify}
+                ;;
+            "quay-expiration-length")
+                quay_expiration_length="${value}"
+                required=${required//quay-expiration-length}
+                ;;
+            "quay-refresh-token")
+                quay_refresh_token="${value}"
+                ;;
+            "quay-refresh-api-url")
+                quay_refresh_api_url="${value}"
+                ;;
+            *)
+                echo "ERROR: Invalid key=value pair: ${key_value}"
+                error=1
+                ;;
+        esac
+    done
+
+    local param
+    for param in ${required}; do
+        echo "ERROR: You must specify parameter ${param}"
+        error=1
+    done
+
+    if [ ${error} -ne 0 ]; then
+        exit 1
+    fi
+
+    local add_refresh=0
+    if [ -n "${quay_refresh_token}" -a -n "${quay_refresh_api_url}" ]; then
+        add_refresh=1
+    else
+        if [ -n "${quay_refresh_token}" -o -n "${quay_refresh_api_url}" ]; then
+            echo "ERROR: You must specify 'quay-refresh-token' and 'quay-refresh-api-url' together"
+            exit 1
+        fi
+    fi
+
+    local private_exists
+    private_exists=$(jq_query ${REGISTRIES_CFG} '.engines.private.url')
+    if [ "${private_exists}" != "null" ]; then
+        echo "ERROR: A private engines registry is already configured"
+        show_registries
+        exit 1
+    fi
+
+    jq_update ${REGISTRIES_CFG} "registries:add-private-engine" \
+              --arg url "${url}" \
+              --arg push_token "${push_token}" \
+              --arg pull_token "${pull_token}" \
+              --argjson tls_verify "${tls_verify}" \
+              --arg quay_expiration_length "${quay_expiration_length}" \
+              '.engines.private = {
+                                    "url": $url,
+                                    "tokens": {
+                                      "push": $push_token,
+                                      "pull": $pull_token
+                                    },
+                                    "tls-verify": $tls_verify,
+                                    "quay": {
+                                      "expiration-length": $quay_expiration_length
+                                    }
+                                  }'
+
+    if [ ${add_refresh} -eq 1 ]; then
+        jq_update ${REGISTRIES_CFG} "registries:add-private-engine-refresh" \
+                  --arg quay_refresh_token "${quay_refresh_token}" \
+                  --arg quay_refresh_api_url "${quay_refresh_api_url}" \
+                  '.engines.private.quay."refresh-expiration" = {
+                                                                  "token-file": $quay_refresh_token,
+                                                                  "api-url": $quay_refresh_api_url
+                                                                }'
+    fi
+
+    echo "Successfully added userenv library with url '${url}'"
+
+    show_registries
+}
+
+function add_userenv() {
+    local url=""
+    local pull_token=""
+    local tls_verify=""
+    local error=0
+
+    local required="url pull-token tls-verify"
+
+    for key_value in $@; do
+        key=$(echo "${key_value}" | awk -F= '{ print $1 }')
+        value=$(echo "${key_value}" | awk -F= '{ print $2 }')
+        #echo "key=${key} value=${value}"
+
+        case "${key}" in
+            "url")
+                url="${value}"
+                required=${required//url}
+                ;;
+            "pull-token")
+                pull_token="${value}"
+                required=${required//pull-token}
+                ;;
+            "tls-verify")
+                tls_verify="${value}"
+                required=${required//tls-verify}
+                ;;
+            *)
+                echo "ERROR: Invalid key=value pair: ${key_value}"
+                error=1
+                ;;
+        esac
+    done
+
+    local param
+    for param in ${required}; do
+        echo "ERROR: You must specify parameter ${param}"
+        error=1
+    done
+
+    if [ ${error} -ne 0 ]; then
+        exit 1
+    fi
+
+    local url_exists
+    url_exists=$(jq_query ${REGISTRIES_CFG} --arg url "${url}" '.userenvs[] | select(.url == $url) | .url')
+    if [ "${url_exists}" == "${url}" ]; then
+        echo "ERROR: The requested URL '${url}' already exists"
+        exit 1
+    fi
+
+    jq_update ${REGISTRIES_CFG} "registries:add-userenv" \
+              --arg url "${url}" \
+              --arg pull_token "${pull_token}" \
+              --argjson tls_verify "${tls_verify}" \
+              '.userenvs += [
+                              {
+                                "url": $url,
+                                "pull-token": $pull_token,
+                                "tls-verify": $tls_verify
+                              }
+                            ]'
+
+    echo "Successfully added userenv library with url '${url}'"
+
+    show_registries
+}
+
+function show_registries() {
+    jq . ${REGISTRIES_CFG}
+}
+
+if [ "$1" == "help" ]; then
+    help
+    exit
+elif [ -z "$1" ]; then
+    command="info"
+else
+    command=$1
+    shift
+fi
+
+case "${command}" in
+    info)
+        show_registries
+        ;;
+    add)
+        add_type=${1}
+        shift
+
+        case "${add_type}" in
+            private-engine)
+                add_private_engine "$@"
+                ;;
+            userenv)
+                add_userenv "$@"
+                ;;
+            *)
+                echo "ERROR: Unknown registries add type '${add_type}'"
+                echo "       Specify either 'private-engine' or 'userenv'"
+                exit 1
+        esac
+        ;;
+    *)
+        echo "ERROR: Uknown registries command '${command}'"
+        exit 1
+        ;;
+esac

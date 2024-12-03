@@ -40,6 +40,15 @@ elif [ "${1}" == "ls" -o "${1}" == "tags" -o "${1}" == "result-completion" ]; th
             EXIT_VAL=$?
             ;;
     esac
+elif [ "${1}" == "registries" ]; then
+    shift
+    if [ -z "${1}" ]; then
+        ${CRUCIBLE_HOME}/bin/registries info
+        EXIT_VAL=$?
+    else
+        ${CRUCIBLE_HOME}/bin/registries "$@"
+        EXIT_VAL=$?
+    fi
 elif [ "${1}" == "repo" ]; then
     shift
     if [ -z "${1}" ]; then

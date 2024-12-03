@@ -11,6 +11,7 @@ function help() {
     echo "help                         |  Show this help message"
     echo "run                          |  Run a benchmark"
     echo "log                          |  Manage with the crucible log"
+    echo "registries                   |  Get info on or configure the container image registries"
     echo "repo                         |  Get info on or configure the crucible and subproject git repos"
     echo "update                       |  Update all or part of the crucible software"
     echo "console                      |  Run user supplied programs inside a crucible wrapper for logging purposes"
