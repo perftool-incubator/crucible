@@ -161,6 +161,16 @@
             }
         },
         {
+            "name": "osnoise",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-osnoise",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "tracer",
             "type": "benchmark",
             "repository": "https://github.com/perftool-incubator/bench-tracer",
