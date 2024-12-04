@@ -181,7 +181,7 @@ function add_userenv() {
     fi
 
     local url_exists
-    url_exists=$(jq_query ${REGISTRIES_CFG} --arg url "${url}" '.userenvs[] | select(.url == $url) | .url')
+    url_exists=$(jq_query ${REGISTRIES_CFG} --arg url "${url}" 'try .userenvs[] | select(.url == $url) | .url')
     if [ "${url_exists}" == "${url}" ]; then
         echo "ERROR: The requested URL '${url}' already exists"
         exit 1
