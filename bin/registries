@@ -132,7 +132,7 @@ function add_private_engine() {
                                                                 }'
     fi
 
-    echo "Successfully added userenv library with url '${url}'"
+    echo "Successfully added private engine registry with url '${url}'"
 
     show_registries
 }

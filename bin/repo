@@ -303,6 +303,8 @@ function config_add_repo() {
         git diff config/repos.json
         popd > /dev/null
     fi
+
+    ${CRUCIBLE_HOME}/bin/subprojects-install
 }
 
 function config_help() {
