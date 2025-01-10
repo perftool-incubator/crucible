@@ -1,0 +1,24 @@
+---
+name: crucible-release-schedule
+on:    # yamllint disable-line rule:truthy
+  schedule:
+    # Runs every 3 months (1st day of the quarter)
+    - cron: "0 0 1 */3 *"
+
+jobs:
+  call-crucible-release-schedule:
+    uses: ./.github/workflows/crucible-release.yaml
+    with:
+      action: "push"
+    secrets:
+      PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
+
+  # TO-DO: add a job to remove old tags (2years?)
+
+  crucible-release-ci-complete:
+    runs-on: [ self-hosted, workflow-overhead ]
+    timeout-minutes: 10
+    needs: call-crucible-release-schedule
+    steps:
+    - name: complete
+      run: echo "crucible-release-schedule-complete"

@@ -1,9 +1,6 @@
 ---
 name: crucible-release
 on:    # yamllint disable-line rule:truthy
-  schedule:
-    # Runs every 3 months (1st day of the quarter)
-    - cron: "0 0 1 */3 *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -35,7 +32,6 @@ on:    # yamllint disable-line rule:truthy
         required: false
         type: boolean
         description: Do NOT push/delete tag to/from the repositories
-        default: false
       custom_tag:
         required: false
         type: string
@@ -44,13 +40,11 @@ on:    # yamllint disable-line rule:truthy
       action:
         required: true
         type: string
-        description: Action to perform with the custom-tag (push or delete)
-        default: 'push'
+        description: Action to perform (push or delete)
       force_push:
         required: false
         type: boolean
         description: FORCE push (override tag)
-        default: false
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE:
         required: true
