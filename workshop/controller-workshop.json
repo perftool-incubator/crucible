@@ -146,12 +146,15 @@
     },
     {
       "name": "opensearch-repo",
-      "type": "manual",
-        "manual_info": {
-          "commands": [
-            "dnf config-manager --add-repo https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/opensearch-2.x.repo"
-          ]
-        }
+      "type": "files",
+      "files_info": {
+        "files": [
+          {
+            "src": "https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/opensearch-2.x.repo",
+            "dst": "/etc/yum.repos.d/opensearch-2.x.repo"
+          }
+        ]
+      }
     },
     {
       "name": "opensearch",
