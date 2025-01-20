@@ -246,10 +246,13 @@
     },
     {
       "name": "gh-cli-repo",
-      "type": "manual",
-      "manual_info": {
-        "commands": [
-          "dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo"
+      "type": "files",
+      "files_info": {
+        "files": [
+          {
+            "src": "https://cli.github.com/packages/rpm/gh-cli.repo",
+            "dst": "/etc/yum.repos.d/gh-cli.repo"
+          }
         ]
       }
     },
