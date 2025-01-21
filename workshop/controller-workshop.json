@@ -15,7 +15,7 @@
         "build-tools",
         "python39",
         "non-distro-python-deps",
-        "redis",
+        "valkey",
         "distro-perl-tools",
         "distro-perl-modules",
         "container-tools",
@@ -105,11 +105,11 @@
       }
     },
     {
-      "name": "redis",
+      "name": "valkey",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "redis"
+          "valkey"
         ]
       }
     },
