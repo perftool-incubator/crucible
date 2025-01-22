@@ -16,6 +16,7 @@
         "python39",
         "non-distro-python-deps",
         "valkey",
+        "redis-compat",
         "distro-perl-tools",
         "distro-perl-modules",
         "container-tools",
@@ -110,6 +111,17 @@
       "distro_info": {
         "packages": [
           "valkey"
+        ]
+      }
+    },
+    {
+      "name": "redis-compat",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "ln -s /usr/bin/valkey-server /usr/bin/redis-server",
+          "mkdir -pv /var/lib/redis",
+          "mkdir -pv /var/log/redis"
         ]
       }
     },
