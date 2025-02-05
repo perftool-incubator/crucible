@@ -13,7 +13,7 @@ jobs:
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
 
-  # TO-DO: add a job to remove old tags (2years?)
+  # TO-DO: add a job to remove old releases
 
   crucible-release-ci-complete:
     runs-on: [ self-hosted, workflow-overhead ]
