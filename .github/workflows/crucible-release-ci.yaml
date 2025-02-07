@@ -24,7 +24,7 @@ jobs:
   call-crucible-release-remove:
     uses: ./.github/workflows/crucible-release.yaml
     with:
-      custom_tag: "ci-version-test"
+      custom_release: "ci-version-test"
       action: "delete"
       force_push: true
     secrets:
@@ -34,7 +34,7 @@ jobs:
     uses: ./.github/workflows/crucible-release.yaml
     needs: call-crucible-release-remove
     with:
-      custom_tag: "ci-version-test"
+      custom_release: "ci-version-test"
       action: "push"
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}

@@ -6,12 +6,12 @@ on:    # yamllint disable-line rule:truthy
       dry_run:
         required: false
         type: boolean
-        description: Do NOT push/delete tag to/from the repositories
+        description: Do NOT push/delete branch to/from the repositories
         default: false
-      custom_tag:
+      custom_release:
         required: false
         type: string
-        description: Custom tag to push/delete
+        description: Custom release (branch) to push/delete
         default: ''
       action:
         required: true
@@ -19,23 +19,23 @@ on:    # yamllint disable-line rule:truthy
         options:
           - push
           - delete
-        description: Action to perform with the custom-tag (push or delete)
+        description: Action to perform with the custom_release (push or delete)
         default: 'push'
       force_push:
         required: false
         type: boolean
-        description: FORCE push (override tag)
+        description: FORCE push (override branch)
         default: false
   workflow_call:
     inputs:
       dry_run:
         required: false
         type: boolean
-        description: Do NOT push/delete tag to/from the repositories
-      custom_tag:
+        description: Do NOT push/delete branch to/from the repositories
+      custom_release:
         required: false
         type: string
-        description: Custom tag to push/delete
+        description: Custom release (branch) to push/delete
         default: ''
       action:
         required: true
@@ -44,7 +44,7 @@ on:    # yamllint disable-line rule:truthy
       force_push:
         required: false
         type: boolean
-        description: FORCE push (override tag)
+        description: FORCE push (override branch)
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE:
         required: true
@@ -54,38 +54,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-tag:
+  release-branch:
     runs-on: [ self-hosted, workflow-overhead ]
     timeout-minutes: 10
     outputs:
-      tag: ${{ steps.gen-release-tag.outputs.tag }}
+      branch: ${{ steps.gen-release-branch.outputs.release }}
       repos: ${{ steps.get-repos.outputs.repos }}
     steps:
-      - name: Generate release tag
-        id: gen-release-tag
+      - name: Generate release branch
+        id: gen-release-branch
         run: |
-            if [ "${{ inputs.custom_tag }}" == "" ]; then
+            if [ "${{ inputs.custom_release }}" == "" ]; then
                 year="$(date -u +%Y)"
                 month="$(date -u +%m)"
                 month=${month#0}
                 quarter="$(((month-1)/3+1))"
-                echo "tag=$year.$quarter" >> $GITHUB_OUTPUT
+                echo "release=$year.$quarter" >> $GITHUB_OUTPUT
             else
-                echo "tag=${{ inputs.custom_tag }}" >> $GITHUB_OUTPUT
+                echo "release=${{ inputs.custom_release }}" >> $GITHUB_OUTPUT
             fi
       - name: Display params
         id: get-params
         env:
-          TAG: ${{ steps.gen-release-tag.outputs.tag }}
+          BRANCH: ${{ steps.gen-release-branch.outputs.release }}
           DRY_RUN: ${{ inputs.dry_run }}
-          CUSTOM_TAG: ${{ inputs.custom_tag }}
+          CUSTOM_RELEASE: ${{ inputs.custom_release }}
           ACTION: ${{ inputs.action }}
           GITHUB_EVENT: ${{ github.event_name }}
           FORCE_PUSH: ${{ inputs.force_push }}
         run: |
-          echo "tag=$TAG"
+          echo "branch=$BRANCH"
           echo "dry_run=$DRY_RUN"
-          echo "custom_tag=$CUSTOM_TAG"
+          echo "custom_release=$CUSTOM_RELEASE"
           echo "action=$ACTION"
           echo "github_event=$GITHUB_EVENT"
           echo "force_push=$FORCE_PUSH"
@@ -103,55 +103,38 @@ jobs:
           ref: ${{ github.ref }}
           path: crucible
           set-safe-directory: false
-          fetch-tags: true
           token: ${{ steps.generate-token.outputs.token }}
-      - name: push/delete tag to/from the crucible repo
+      - name: push/delete branch to/from the crucible repo
         if: ${{ inputs.dry_run == false }}
         env:
-          TAG: ${{ steps.gen-release-tag.outputs.tag }}
+          BRANCH: ${{ steps.gen-release-branch.outputs.release }}
         run: |
             cd $GITHUB_WORKSPACE
             cd crucible
-            echo "Fetching remote heads/tags..."
-            git fetch --prune --prune-tags
-            echo "Tags:"
-            git ls-remote --tags origin
-            echo "Local Tags:"
-            git tag
             echo "Branches:"
             git ls-remote --heads origin
             echo "Local Branches:"
             git branch
             echo "Current commit's object name:"
             git rev-parse --verify HEAD
-            echo "Current object name for tag $TAG (if it exists):"
-            git rev-parse --verify tags/$TAG || true
-            echo "Current object name for branch $TAG (if it exists):"
-            git rev-parse --verify remotes/origin/$TAG || true
+            echo "Current object name for branch $BRANCH (if it exists):"
+            git rev-parse --verify remotes/origin/$BRANCH || true
             if [ "${{ inputs.action }}" == "push" ]; then
                 ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
                     ARGS="--force"
                 fi
-                git checkout -B $TAG
-                git push origin heads/$TAG $ARGS #branch
-                git tag $TAG $ARGS
-                git push origin tags/$TAG $ARGS #tag
+                git checkout -B $BRANCH
+                git push origin heads/$BRANCH $ARGS
             elif [ "${{ inputs.action }}" == "delete" ]; then
                 if [ "${{ inputs.force_push }}" == "true" ]; then
-                    git push --delete origin tags/$TAG || true #tag
-                    git push --delete origin heads/$TAG || true #branch
+                    git push --delete origin heads/$BRANCH || true
                 else
-                    git push --delete origin tags/$TAG  #tag
-                    git push --delete origin heads/$TAG #branch
+                    git push --delete origin heads/$BRANCH
                 fi
             fi
-            echo "Tags:"
-            git ls-remote --tags origin
-            echo "Current object name for tag $TAG (if it exists):"
-            git rev-parse --verify tags/$TAG || true
-            echo "Current object name for branch $TAG (if it exists):"
-            git rev-parse --verify remotes/origin/$TAG || true
+            echo "Current object name for branch $branch (if it exists):"
+            git rev-parse --verify remotes/origin/$BRANCH || true
       - name: Get the list of sub-projects
         id: get-repos
         run: |
@@ -171,14 +154,14 @@ jobs:
           REPOS: ${{ steps.get-repos.outputs.repos }}
         run: echo "$REPOS"
 
-  projects-tag:
+  projects-branch:
     runs-on: [ self-hosted, workflow-overhead ]
     timeout-minutes: 10
     needs:
-      - release-tag
+      - release-branch
     strategy:
       matrix:
-        repository: ${{ fromJSON(needs.release-tag.outputs.repos) }}
+        repository: ${{ fromJSON(needs.release-branch.outputs.repos) }}
     steps:
       - name: Display sub-project repository name
         run: |
@@ -196,63 +179,46 @@ jobs:
           repository: perftool-incubator/${{ matrix.repository }}
           path: ${{ matrix.repository }}
           set-safe-directory: false
-          fetch-tags: true
           token: ${{ steps.generate-token.outputs.token }}
-      - name: push/delete release tag
+      - name: push/delete release branch
         if: ${{ inputs.dry_run == false }}
         env:
-          TAG: ${{ needs.release-tag.outputs.tag }}
+          BRANCH: ${{ needs.release-branch.outputs.branch }}
         run: |
             cd $GITHUB_WORKSPACE
             cd ${{ matrix.repository }}
-            echo "Fetching remote heads/tags..."
-            git fetch --prune --prune-tags
-            echo "Tags:"
-            git ls-remote --tags origin
-            echo "Local Tags:"
-            git tag
             echo "Branches:"
             git ls-remote --heads origin
             echo "Local Branches:"
             git branch
             echo "Current commit's object name:"
             git rev-parse --verify HEAD
-            echo "Current object name for tag $TAG (if it exists):"
-            git rev-parse --verify tags/$TAG || true
-            echo "Current object name for branch $TAG (if it exists):"
-            git rev-parse --verify remotes/origin/$TAG || true
+            echo "Current object name for branch $BRANCH (if it exists):"
+            git rev-parse --verify remotes/origin/$BRANCH || true
             if [ "${{ inputs.action }}" == "push" ]; then
                 ARGS=""
                 if [ "${{ inputs.force_push }}" == "true" ]; then
                     ARGS="--force"
                 fi
-                git checkout -B $TAG
-                git push origin heads/$TAG $ARGS #branch
-                git tag $TAG $ARGS
-                git push origin tags/$TAG $ARGS #tag
+                git checkout -B $BRANCH
+                git push origin heads/$BRANCH $ARGS
             elif [ "${{ inputs.action }}" == "delete" ]; then
                 if [ "${{ inputs.force_push }}" == "true" ]; then
-                    git push --delete origin tags/$TAG || true #tag
-                    git push --delete origin heads/$TAG || true #branch
+                    git push --delete origin heads/$BRANCH || true #branch
                 else
-                    git push --delete origin tags/$TAG  #tag
-                    git push --delete origin heads/$TAG #branch
+                    git push --delete origin heads/$BRANCH #branch
                 fi
             fi
-            echo "Tags:"
-            git ls-remote --tags origin
-            echo "Current object name for tag $TAG (if it exists):"
-            git rev-parse --verify tags/$TAG || true
-            echo "Current object name for branch $TAG (if it exists):"
-            git rev-parse --verify remotes/origin/$TAG || true
+            echo "Current object name for branch $BRANCH (if it exists):"
+            git rev-parse --verify remotes/origin/$BRANCH || true
 
   crucible-release-verification:
     if: ${{ inputs.action == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:
-      - release-tag
-      - projects-tag
+      - release-branch
+      - projects-branch
     steps:
       - name: checkout crucible
         uses: actions/checkout@v4
@@ -260,7 +226,6 @@ jobs:
           repository: perftool-incubator/crucible
           ref: ${{ github.ref }}
           path: crucible
-          fetch-tags: true
       - name: prepare installation resources
         run: |
           touch /tmp/auth-file.json
@@ -268,10 +233,10 @@ jobs:
           sudo mkdir -p $(dirname $cfgfile)
       - name: test release install
         env:
-          TAG: ${{ needs.release-tag.outputs.tag }}
+          BRANCH: ${{ needs.release-branch.outputs.branch }}
         run: |
           sudo ./crucible/crucible-install.sh \
-            --release $TAG \
+            --release $BRANCH \
             --engine-registry myregistry.io/crucible \
             --engine-auth-file /tmp/auth-file.json \
             --name "Nobody" \
