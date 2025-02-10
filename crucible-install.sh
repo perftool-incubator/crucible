@@ -191,7 +191,7 @@ function usage {
         Verbose mode that provides more debugging info.
 
 	--list-releases
-        Show all available release tags from the remote repository.
+        Show all available releases from the remote repository.
 
     --help
     Displays this usage output.
@@ -199,10 +199,10 @@ function usage {
 _USAGE_
 }
 
-# list available tags from the remote repository
+# list available branches from the remote repository
 function list_releases {
     # only default repo is supported for the release mechanism
-    git ls-remote --tags \
+    git ls-remote --heads \
         --sort='version:refname' \
         https://github.com/perftool-incubator/crucible.git \
         | awk -F/ '{print$NF}' \
@@ -276,24 +276,24 @@ function has_dependency {
     echo
 }
 
-# process release tag passed as an argument with '--release <TAG>'
-# interactively select from a list of available releases (tags)
-# if none is specified as <TAG>
+# process release tag passed as an argument with '--release <version>'
+# interactively select from a list of available releases
+# if none is specified as <version>
 function select_release {
     release="$1"
     if [ "$release" == "select" ]; then
 	echo
         echo "Releases:"
-        tags=( $(list_releases) )
+        releases=( $(list_releases) )
 
-        numopt=${#tags[@]}
+        numopt=${#releases[@]}
         if [ $numopt -eq 0 ]; then
             echo "No available releases! Using default branch."
 
         else
             PS3="Select release option # [1-${numopt}]: "
-            select release in ${tags[@]}; do
-                echo ${tags[@]} | grep -w -q "$release"
+            select release in ${releases[@]}; do
+                echo ${releases[@]} | grep -w -q "$release"
                 if [ $? -eq 0 ]; then
                     echo "Release '$REPLY) $release' has been selected."
                 else
