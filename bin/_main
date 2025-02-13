@@ -431,7 +431,7 @@ elif [ "${1}" == "run" ]; then
         exit 0
     fi
 
-    start_redis
+    start_valkey
     EXIT_VAL=$?
     if [ ${EXIT_VAL} != 0 ]; then
         exit ${EXIT_VAL}

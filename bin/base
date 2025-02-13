@@ -198,34 +198,34 @@ function stop_httpd() {
     return ${RC}
 }
 
-function start_redis() {
-    local RC redis_cmd
-    redis_cmd="redis-server /etc/redis.conf"
-    echo -n "Checking for redis"
-    if ! podman_running crucible-redis; then
+function start_valkey() {
+    local RC valkey_cmd
+    valkey_cmd="valkey-server /etc/valkey/valkey.conf"
+    echo -n "Checking for valkey"
+    if ! podman_running crucible-valkey; then
         open_firewall_port 6379 tcp
-        ${podman_run} --name crucible-redis "${container_common_args[@]}" "${container_redis_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${redis_cmd} > /dev/null
+        ${podman_run} --name crucible-valkey "${container_common_args[@]}" "${container_valkey_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
-            echo "ERROR: Could not start redis"
+            echo "ERROR: Could not start valkey"
         else
-            echo "Successfully started redis"
+            echo "Successfully started valkey"
         fi
     fi
     return ${RC}
 }
 
-function stop_redis() {
+function stop_valkey() {
     local RC=0
-    echo -n "Checking for redis"
-    if podman_running crucible-redis; then
+    echo -n "Checking for valkey"
+    if podman_running crucible-valkey; then
         close_firewall_port 6379 tcp
-        ${podman_stop} crucible-redis > /dev/null
+        ${podman_stop} crucible-valkey > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
-            echo "ERROR: Could not stop redis"
+            echo "ERROR: Could not stop valkey"
         else
-            echo "Successfully stopped redis"
+            echo "Successfully stopped valkey"
         fi
     fi
     return ${RC}
@@ -786,8 +786,13 @@ function service_control() {
         service="${1}"
         shift
 
+        if [ "${service}" == "redis" ]; then
+            echo "INFO: ${function_name}: Converting service 'redis' to 'valkey'"
+            service="valkey"
+        fi
+
         case "${service}" in
-            "httpd"|"opensearch"|"redis")
+            "httpd"|"opensearch"|"valkey")
                 ${action}_${service}
                 service_rc=$?
                 ;;
@@ -934,9 +939,9 @@ container_log_args=()
 container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
-container_redis_args=()
-container_redis_args+=("-d")
-container_redis_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/redis.conf,destination=/etc/redis.conf")
+container_valkey_args=()
+container_valkey_args+=("-d")
+container_valkey_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/valkey.conf,destination=/etc/valkey/valkey.conf")
 
 container_httpd_args=()
 container_httpd_args+=("-d")

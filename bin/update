@@ -105,7 +105,7 @@ case "${repo}" in
         echo "Controller update:"
         echo
         echo "Shutting down existing controller pods:"
-        if ! service_control stop opensearch httpd redis; then
+        if ! service_control stop opensearch httpd valkey; then
             RC=1
         fi
         echo
