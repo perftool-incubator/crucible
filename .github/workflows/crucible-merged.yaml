@@ -21,7 +21,7 @@ on:
 jobs:
   call-core-crucible-ci_if-merged:
     if: github.event.pull_request.merged == true
-    uses: perftool-incubator/crucible-ci/.github/workflows/core-crucible-ci.yaml@main
+    uses: perftool-incubator/crucible-ci/.github/workflows/core-release-crucible-ci.yaml@main
     with:
       ci_target: "crucible"
       ci_target_branch: "master"
