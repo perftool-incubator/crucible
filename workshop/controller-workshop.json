@@ -6,7 +6,7 @@
   },
   "userenvs": [
     {
-      "name": "fedora40",
+      "name": "fedora",
       "requirements": [
         "motd",
         "dnf-tools",
@@ -15,7 +15,8 @@
         "build-tools",
         "python39",
         "non-distro-python-deps",
-        "redis",
+        "valkey",
+        "redis-compat",
         "distro-perl-tools",
         "distro-perl-modules",
         "container-tools",
@@ -105,11 +106,22 @@
       }
     },
     {
-      "name": "redis",
+      "name": "valkey",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "redis"
+          "valkey"
+        ]
+      }
+    },
+    {
+      "name": "redis-compat",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "ln -s /usr/bin/valkey-server /usr/bin/redis-server",
+          "mkdir -pv /var/lib/redis",
+          "mkdir -pv /var/log/redis"
         ]
       }
     },
@@ -146,12 +158,15 @@
     },
     {
       "name": "opensearch-repo",
-      "type": "manual",
-        "manual_info": {
-          "commands": [
-            "dnf config-manager --add-repo https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/opensearch-2.x.repo"
-          ]
-        }
+      "type": "files",
+      "files_info": {
+        "files": [
+          {
+            "src": "https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/opensearch-2.x.repo",
+            "dst": "/etc/yum.repos.d/opensearch-2.x.repo"
+          }
+        ]
+      }
     },
     {
       "name": "opensearch",
@@ -243,10 +258,13 @@
     },
     {
       "name": "gh-cli-repo",
-      "type": "manual",
-      "manual_info": {
-        "commands": [
-          "dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo"
+      "type": "files",
+      "files_info": {
+        "files": [
+          {
+            "src": "https://cli.github.com/packages/rpm/gh-cli.repo",
+            "dst": "/etc/yum.repos.d/gh-cli.repo"
+          }
         ]
       }
     },

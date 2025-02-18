@@ -19,8 +19,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  call-core-crucible-ci:
-    uses: perftool-incubator/crucible-ci/.github/workflows/core-crucible-ci.yaml@main
+  call-core-release-crucible-ci:
+    uses: perftool-incubator/crucible-ci/.github/workflows/core-release-crucible-ci.yaml@main
     with:
       ci_target: "crucible"
       ci_target_branch: "${{ github.ref }}"
