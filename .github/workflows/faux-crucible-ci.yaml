@@ -18,5 +18,5 @@ on:
     - 'spec/**'
 
 jobs:
-  call-core-crucible-ci:
-    uses: perftool-incubator/crucible-ci/.github/workflows/faux-core-crucible-ci.yaml@main
+  call-core-release-crucible-ci:
+    uses: perftool-incubator/crucible-ci/.github/workflows/faux-core-release-crucible-ci.yaml@main
