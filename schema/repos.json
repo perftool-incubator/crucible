@@ -31,7 +31,8 @@
                             "core",
                             "tool",
                             "benchmark",
-                            "doc"
+                            "doc",
+                            "userenvs"
                         ]
                     },
                     "repository": {
