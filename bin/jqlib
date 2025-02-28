@@ -27,6 +27,36 @@ function jq_update() {
     mv ${TMP_FILE} ${FILE}
 }
 
+function jq_update_validated() {
+    local FILE SCHEMA TMP_FILE REASON
+    FILE=${1}; shift
+    SCHEMA=${1}; shift
+    REASON=${1}; shift
+
+    TMP_FILE=${FILE}.tmp
+
+    jq --indent 4 "$@" ${FILE} > ${TMP_FILE}
+    RC=$?
+
+    if [ ${RC} -ne 0 ]; then
+        exit_error "Failed to update ${REASON} in ${FILE}"
+    fi
+
+    diff ${FILE} ${TMP_FILE} > /dev/null
+    DIFF_RC=$?
+    if [ ${DIFF_RC} -eq 0 ]; then
+        exit_error "Failed to update ${REASON} in ${FILE} -- no changes detected"
+    elif [ ${DIFF_RC} -gt 1 ]; then
+        exit_error "Failed to update ${REASON} in ${FILE} -- an error occurred"
+    fi
+
+    if ! validate_json_schema ${TMP_FILE} ${SCHEMA}; then
+        exit_error "Failed to update ${REASON} in ${FILE} -- JSON schema validation error"
+    fi
+    
+    mv ${TMP_FILE} ${FILE}
+}
+
 function jq_query() {
     local FILE
     FILE=${1}; shift

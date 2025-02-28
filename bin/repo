@@ -277,25 +277,27 @@ function config_add_repo() {
         exit 1
     fi
 
-    jq_update ${CRUCIBLE_HOME}/config/repos.json "repos:add-unofficial-repo" \
-              --arg repo_name "${name}" \
-              --arg repo_type "${type}" \
-              --arg repo_repository "${repository}" \
-              --arg repo_primary_branch "${primary_branch}" \
-              --arg repo_checkout_mode "${checkout_mode}" \
-              --arg repo_checkout_target "${checkout_target}" \
-              '.unofficial += [
-                                {
-                                  "name": $repo_name,
-                                  "type": $repo_type,
-                                  "repository": $repo_repository,
-                                  "primary-branch": $repo_primary_branch,
-                                  "checkout": {
-                                    "mode": $repo_checkout_mode,
-                                    "target": $repo_checkout_target
-                                  }
-                                }
-                              ]'
+    jq_update_validated ${CRUCIBLE_HOME}/config/repos.json \
+                        ${CRUCIBLE_HOME}/schema/repos.json \
+                        "repos:add-unofficial-repo" \
+                        --arg repo_name "${name}" \
+                        --arg repo_type "${type}" \
+                        --arg repo_repository "${repository}" \
+                        --arg repo_primary_branch "${primary_branch}" \
+                        --arg repo_checkout_mode "${checkout_mode}" \
+                        --arg repo_checkout_target "${checkout_target}" \
+                        '.unofficial += [
+                                          {
+                                            "name": $repo_name,
+                                            "type": $repo_type,
+                                            "repository": $repo_repository,
+                                            "primary-branch": $repo_primary_branch,
+                                            "checkout": {
+                                              "mode": $repo_checkout_mode,
+                                              "target": $repo_checkout_target
+                                            }
+                                          }
+                                        ]'
 
     echo "Successfully added repo with name '${name}'"
 

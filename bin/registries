@@ -104,32 +104,36 @@ function add_private_engine() {
         exit 1
     fi
 
-    jq_update ${REGISTRIES_CFG} "registries:add-private-engine" \
-              --arg url "${url}" \
-              --arg push_token "${push_token}" \
-              --arg pull_token "${pull_token}" \
-              --argjson tls_verify "${tls_verify}" \
-              --arg quay_expiration_length "${quay_expiration_length}" \
-              '.engines.private = {
-                                    "url": $url,
-                                    "tokens": {
-                                      "push": $push_token,
-                                      "pull": $pull_token
-                                    },
-                                    "tls-verify": $tls_verify,
-                                    "quay": {
-                                      "expiration-length": $quay_expiration_length
-                                    }
-                                  }'
+    jq_update_validated ${REGISTRIES_CFG} \
+                        ${REGISTRIES_CFG_SCHEMA} \
+                        "registries:add-private-engine" \
+                        --arg url "${url}" \
+                        --arg push_token "${push_token}" \
+                        --arg pull_token "${pull_token}" \
+                        --argjson tls_verify "${tls_verify}" \
+                        --arg quay_expiration_length "${quay_expiration_length}" \
+                        '.engines.private = {
+                                              "url": $url,
+                                              "tokens": {
+                                                "push": $push_token,
+                                                "pull": $pull_token
+                                              },
+                                              "tls-verify": $tls_verify,
+                                              "quay": {
+                                                "expiration-length": $quay_expiration_length
+                                              }
+                                            }'
 
     if [ ${add_refresh} -eq 1 ]; then
-        jq_update ${REGISTRIES_CFG} "registries:add-private-engine-refresh" \
-                  --arg quay_refresh_token "${quay_refresh_token}" \
-                  --arg quay_refresh_api_url "${quay_refresh_api_url}" \
-                  '.engines.private.quay."refresh-expiration" = {
-                                                                  "token-file": $quay_refresh_token,
-                                                                  "api-url": $quay_refresh_api_url
-                                                                }'
+        jq_update_validated ${REGISTRIES_CFG} \
+                            ${REGISTRIES_CFG_SCHEMA} \
+                            "registries:add-private-engine-refresh" \
+                            --arg quay_refresh_token "${quay_refresh_token}" \
+                            --arg quay_refresh_api_url "${quay_refresh_api_url}" \
+                            '.engines.private.quay."refresh-expiration" = {
+                                                                            "token-file": $quay_refresh_token,
+                                                                            "api-url": $quay_refresh_api_url
+                                                                          }'
     fi
 
     echo "Successfully added private engine registry with url '${url}'"
@@ -187,17 +191,19 @@ function add_userenv() {
         exit 1
     fi
 
-    jq_update ${REGISTRIES_CFG} "registries:add-userenv" \
-              --arg url "${url}" \
-              --arg pull_token "${pull_token}" \
-              --argjson tls_verify "${tls_verify}" \
-              '.userenvs += [
-                              {
-                                "url": $url,
-                                "pull-token": $pull_token,
-                                "tls-verify": $tls_verify
-                              }
-                            ]'
+    jq_update_validated ${REGISTRIES_CFG} \
+                        ${REGISTRIES_CFG_SCHEMA} \
+                        "registries:add-userenv" \
+                        --arg url "${url}" \
+                        --arg pull_token "${pull_token}" \
+                        --argjson tls_verify "${tls_verify}" \
+                        '.userenvs += [
+                                        {
+                                          "url": $url,
+                                          "pull-token": $pull_token,
+                                          "tls-verify": $tls_verify
+                                        }
+                                      ]'
 
     echo "Successfully added userenv library with url '${url}'"
 
