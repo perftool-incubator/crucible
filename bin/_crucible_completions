@@ -98,7 +98,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[3]}"))
                 ;;
             config)
-                COMPREPLY=($(compgen -W "help show" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "add help remove show" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "rm" ]; then

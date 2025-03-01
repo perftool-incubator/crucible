@@ -220,6 +220,55 @@ function config_show() {
     done
 }
 
+function subprojects_install() {
+    echo "Calling subprojects-install to ensure proper subproject installation and configuration"
+    ${CRUCIBLE_HOME}/bin/subprojects-install
+}
+
+function config_remove_repo() {
+    local name=""
+    local error=0
+
+    local required="name"
+
+    for key_value in $@; do
+        key=$(echo "${key_value}" | awk -F= '{ print $1 }')
+        value=$(echo "${key_value}" | awk -F= '{ print $2 }')
+        #echo "key=${key} value=${value}"
+
+        case "${key}" in
+            "name")
+                name="${value}"
+                required=${required//name/}
+                ;;
+            *)
+                echo "ERROR: Invalid key=value pair: ${key_value}"
+                error=1
+                ;;
+        esac
+    done
+
+    local param
+    for param in ${required}; do
+        echo "ERROR: You must specify parameter ${param}"
+        error=1
+    done
+
+    if [ ${error} -ne 0 ]; then
+        exit 1
+    fi
+
+    jq_update_validated ${CRUCIBLE_HOME}/config/repos.json \
+                        ${CRUCIBLE_HOME}/schema/repos.json \
+                        "repos:remove-unofficial-repo" \
+                        --arg repo_name "${name}" \
+                        'del(.unofficial[] | select(.name == $repo_name))'
+
+    echo "Successfully removed repo with name '${name}' from repo config file"
+    echo
+    subprojects_install
+}
+
 function config_add_repo() {
     local name=""
     local type=""
@@ -264,6 +313,7 @@ function config_add_repo() {
             *)
                 echo "ERROR: Invalid key=value pair: ${key_value}"
                 error=1
+                ;;
         esac
     done
 
@@ -299,14 +349,14 @@ function config_add_repo() {
                                           }
                                         ]'
 
-    echo "Successfully added repo with name '${name}'"
-
+    echo "Successfully added repo with name '${name}' to repo config file"
+    echo
     if pushd ${CRUCIBLE_HOME} > /dev/null; then
         git diff config/repos.json
         popd > /dev/null
     fi
-
-    ${CRUCIBLE_HOME}/bin/subprojects-install
+    echo
+    subprojects_install
 }
 
 function config_help() {
@@ -316,6 +366,7 @@ function config_help() {
     echo "The following command are supported"
     echo
     echo "add           |  Add an unofficial repository"
+    echo "remove        |  Remove an unofficial repository"
     echo "show          |  Dump the configuration information in tabular form (default)"
     echo
 }
@@ -353,6 +404,9 @@ case "${command}" in
         case "${config_subcommand}" in
             add)
                 config_add_repo "$@"
+                ;;
+            remove)
+                config_remove_repo "$@"
                 ;;
             show)
                 config_show
