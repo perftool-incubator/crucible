@@ -165,6 +165,12 @@ function close_firewall_port() {
     esac
 }
 
+function generate_rand_pass() {
+    local output_file
+    output_file="$1"
+    head -c 4096 /dev/urandom | sha256sum | awk '{print $1}' > $output_file
+}
+
 function start_httpd() {
     local RC httpd_cmd
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
@@ -200,7 +206,8 @@ function stop_httpd() {
 
 function start_valkey() {
     local RC valkey_cmd
-    valkey_cmd="valkey-server /etc/valkey/valkey.conf"
+    generate_rand_pass /tmp/valkey_pass
+    valkey_cmd="valkey-server --requirepass=$(cat /tmp/valkey_pass) /etc/valkey/valkey.conf"
     echo -n "Checking for valkey"
     if ! podman_running crucible-valkey; then
         open_firewall_port 6379 tcp
@@ -218,6 +225,7 @@ function start_valkey() {
 function stop_valkey() {
     local RC=0
     echo -n "Checking for valkey"
+    rm -f /tmp/valkey_pass
     if podman_running crucible-valkey; then
         close_firewall_port 6379 tcp
         ${podman_stop} crucible-valkey > /dev/null
