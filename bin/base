@@ -209,7 +209,7 @@ function start_valkey() {
     echo -n "Checking for valkey"
     if ! podman_running crucible-valkey; then
         generate_rand_pass /tmp/valkey_pass
-        valkey_cmd="valkey-server --requirepass=$(cat /tmp/valkey_pass) /etc/valkey/valkey.conf"
+        valkey_cmd="valkey-server /etc/valkey/valkey.conf --requirepass $(cat /tmp/valkey_pass)"
         open_firewall_port 6379 tcp
         ${podman_run} --name crucible-valkey "${container_common_args[@]}" "${container_valkey_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_cmd} > /dev/null
         RC=$?
