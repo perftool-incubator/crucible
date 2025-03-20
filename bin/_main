@@ -410,12 +410,19 @@ elif [ "${1}" == "run" ]; then
     ${CRUCIBLE_HOME}/bin/repo details > ${base_run_dir}/config/crucible.repo.details
     ${CRUCIBLE_HOME}/bin/repo config show > ${base_run_dir}/config/crucible.repo.config.show
 
+    start_valkey
+    if [ -f "/tmp/valkey_pass" ]; then
+        roadblock_password="$(cat /tmp/valkey_pass)"
+    else
+        roadblock_password="flubber"
+    fi
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
       --id ${SESSION_ID}\
       --bench-dir $benchmark_subproj_dir\
       --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine\
       --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock\
+      --roadblock-password=$roadblock_password\
       --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop\
       --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat\
       --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
@@ -431,7 +438,6 @@ elif [ "${1}" == "run" ]; then
         exit 0
     fi
 
-    start_valkey
     EXIT_VAL=$?
     if [ ${EXIT_VAL} != 0 ]; then
         exit ${EXIT_VAL}
