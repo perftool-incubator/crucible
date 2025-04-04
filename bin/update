@@ -55,9 +55,26 @@ if [ -e "${UPDATE_STATUS_FILE}" ]; then
 fi
 
 case "${repo}" in
+    "all"|"crucible"|"controller-image")
+        echo
+        echo "Shutting down existing controller pods:"
+        echo
+        if ! service_control stop opensearch httpd valkey; then
+            RC=1
+        fi
+        if [ ${RC} -eq 1 ]; then
+            echo
+            echo "ERROR: Failed to stop one or more Crucible services"
+            exit 1
+        fi
+        ;;
+esac
+
+case "${repo}" in
     "all"|"__all"|"crucible"|"__crucible")
         case "${repo}" in
             "all"|"crucible")
+                echo
                 echo "Crucible update pass 1:"
                 ;;
             "__all"|"__crucible")
@@ -101,13 +118,6 @@ esac
 
 case "${repo}" in
     "____all"|"____crucible"|"controller-image")
-        echo
-        echo "Controller update:"
-        echo
-        echo "Shutting down existing controller pods:"
-        if ! service_control stop opensearch httpd valkey; then
-            RC=1
-        fi
         echo
         echo "Checking for new controller image:"
         echo
