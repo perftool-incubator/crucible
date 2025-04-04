@@ -8,6 +8,7 @@
     {
       "name": "fedora",
       "requirements": [
+        "dnf-config-modify",
         "motd",
         "dnf-tools",
         "core-utils",
@@ -34,10 +35,21 @@
   ],
   "requirements": [
     {
+      "name": "dnf-config-modify",
+      "type": "manual",
+      "manual_info": {
+        "commands": [
+          "sed -i -e \"s/tsflags=.*/tsflags=/\" /etc/dnf/dnf.conf",
+          "for pkg in $(rpm -qa | sort); do echo -e \"\\n**** Reinstalling: ${pkg} ****\\n\"; if ! dnf --assumeyes reinstall --skip-unavailable ${pkg}; then echo -e \"\\nERROR: Failed to reinstall ${pkg}\"; exit 1; fi; done"
+        ]
+      }
+    },
+    {
       "name": "core-utils",
       "type": "distro",
       "distro_info": {
         "packages": [
+          "man",
           "curl",
           "tar",
           "cpio",
