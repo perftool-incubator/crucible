@@ -942,6 +942,7 @@ container_common_args+=("--ipc=host")
 container_common_args+=("--pid=host")
 container_common_args+=("--net=host")
 container_common_args+=("--security-opt=label=disable")
+container_common_args+=("--log-driver=none")
 
 container_log_args=()
 container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
