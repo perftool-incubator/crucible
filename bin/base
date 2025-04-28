@@ -536,17 +536,18 @@ function get_result_backend() {
 
 function get_result_to_file() {
     local RC
-
-    local output_file="$1/run/result-summary.txt"; shift
+    local output_dir="$1/run"; shift
+    local output_file="$output_dir/result-summary.txt"
 
     echo "Generating benchmark summary report:"
-    get_result_backend "$@" > ${output_file}
+    echo "get_result_backend $@ --output-format json,yaml,txt --output-dir $output_dir"
+    get_result_backend "$@ --output-format json,yaml,txt --output-dir $output_dir" >/dev/null
     RC=$?
     cat ${output_file}
     if [ ${RC} == 0 ]; then
         echo
         echo "Benchmark summary is complete and can be found in:"
-        echo "${output_file}"
+        echo "$output_dir/result-summary.[txt|json|yaml]"
     else
         echo "ERROR: Could not generate benchmark summary"
         RC=1
