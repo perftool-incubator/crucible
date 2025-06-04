@@ -65,7 +65,8 @@
           "bind-utils",
           "procps-ng",
           "bc",
-          "sshpass"
+          "sshpass",
+          "awk"
         ]
       }
     },
