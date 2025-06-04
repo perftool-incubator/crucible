@@ -14,7 +14,7 @@ echo "plugins.security.disabled: true" >> /etc/opensearch/opensearch.yml
 memtotal_kb=$(grep MemTotal /proc/meminfo | awk '{ print $2 }')
 memtotal_mb=$(echo "${memtotal_kb} / 1024" | bc)
 heapsize_mb=$(echo "${memtotal_mb} / 2" | bc)
-heapsize_gb=$(echo "${heapsize_gb} / 1024" | bc)
+heapsize_gb=$(echo "${heapsize_mb} / 1024" | bc)
 if [ ${heapsize_gb} -gt ${MAX_HEAP_SIZE_GB} ]; then
     heapsize_mb=$(echo "${MAX_HEAP_SIZE_GB} * 1024" | bc)
 fi
