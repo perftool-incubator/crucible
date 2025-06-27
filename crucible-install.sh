@@ -199,14 +199,16 @@ function usage {
 _USAGE_
 }
 
-# list available branches from the remote repository
+# list available "supported" branches from the remote repository
+# the "supported" releases are the 4 most recent ones
 function list_releases {
     # only default repo is supported for the release mechanism
     git ls-remote --heads \
         --sort='version:refname' \
         https://github.com/perftool-incubator/crucible.git \
         | awk -F/ '{print$NF}' \
-        | grep -E '20[0-9]{2}\.[1234]'
+        | grep -E '20[0-9]{2}\.[1234]' \
+        | tail -n 4
 }
 
 # cleanup previous installation

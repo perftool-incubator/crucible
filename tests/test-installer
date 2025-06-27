@@ -217,7 +217,8 @@ releases=$(git ls-remote --heads \
                --sort='version:refname' \
                https://github.com/perftool-incubator/crucible.git \
                | awk -F/ '{print$NF}' \
-               | grep -E '20[0-9]{2}\.[1234]')
+               | grep -E '20[0-9]{2}\.[1234]' \
+               | tail -n 4)
 stop_test
 
 start_test
