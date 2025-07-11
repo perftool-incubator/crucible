@@ -40,6 +40,15 @@ elif [ "${1}" == "ls" -o "${1}" == "tags" -o "${1}" == "result-completion" ]; th
             EXIT_VAL=$?
             ;;
     esac
+elif [ "${1}" == "instances" ]; then
+    shift
+    if [ -z "${1}" ]; then
+        ${podman_run} --name crucible-manage-instances-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info
+        EXIT_VAL=$?
+    else
+        ${podman_run} --name crucible-manage-instances-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} "$@"
+        EXIT_VAL=$?
+    fi
 elif [ "${1}" == "registries" ]; then
     shift
     if [ -z "${1}" ]; then
