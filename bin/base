@@ -981,6 +981,7 @@ podman_ps="podman_wrapper ps"
 # load the jqlib library
 source ${CRUCIBLE_HOME}/bin/jqlib
 
+INSTANCES_CFG=${CRUCIBLE_HOME}/config/instances.json
 REGISTRIES_CFG=${CRUCIBLE_HOME}/config/registries.json
 REGISTRIES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/registries.json
 
