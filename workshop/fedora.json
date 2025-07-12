@@ -6,10 +6,10 @@
   },
   "userenv": {
     "name": "fedora",
-    "label": "Fedora 41",
+    "label": "Fedora 42",
     "origin": {
       "image": "registry.fedoraproject.org/fedora",
-      "tag": "41"
+      "tag": "42"
     },
     "properties": {
       "platform": [
