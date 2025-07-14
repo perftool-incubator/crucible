@@ -6,12 +6,12 @@ on:    # yamllint disable-line rule:truthy
       dry_run:
         required: false
         type: boolean
-        description: Do NOT push/delete branch to/from the repositories
+        description: Do NOT push/delete/update branch to/from the repositories
         default: false
       custom_release:
         required: false
         type: string
-        description: Custom release (branch) to push/delete
+        description: Custom release (branch) to push/delete/update
         default: ''
       action:
         required: true
@@ -19,7 +19,8 @@ on:    # yamllint disable-line rule:truthy
         options:
           - push
           - delete
-        description: Action to perform with the custom_release (push or delete)
+          - update
+        description: Action to perform with the custom_release (push or delete or update)
         default: 'push'
       force_push:
         required: false
@@ -31,16 +32,16 @@ on:    # yamllint disable-line rule:truthy
       dry_run:
         required: false
         type: boolean
-        description: Do NOT push/delete branch to/from the repositories
+        description: Do NOT push/delete/update branch to/from the repositories
       custom_release:
         required: false
         type: string
-        description: Custom release (branch) to push/delete
+        description: Custom release (branch) to push/delete/update
         default: ''
       action:
         required: true
         type: string
-        description: Action to perform (push or delete)
+        description: Action to perform (push or delete or update)
       force_push:
         required: false
         type: boolean
@@ -104,7 +105,7 @@ jobs:
           path: crucible
           set-safe-directory: false
           token: ${{ steps.generate-token.outputs.token }}
-      - name: push/delete branch to/from the crucible repo
+      - name: push/delete/update branch to/from the crucible repo
         if: ${{ inputs.dry_run == false }}
         env:
           BRANCH: ${{ steps.gen-release-branch.outputs.release }}
@@ -131,6 +132,23 @@ jobs:
                     git push --delete origin heads/$BRANCH || true
                 else
                     git push --delete origin heads/$BRANCH
+                fi
+            elif [ "${{ inputs.action }}" == "update" ]; then
+                ARGS=""
+                if [ "${{ inputs.force_push }}" == "true" ]; then
+                    ARGS="--force"
+                fi
+                remote_branch=$(git ls-remote --heads origin ${BRANCH})
+                if [ -z "${remote_branch}" ]; then
+                    echo "The branch does not exist, creating it"
+                    git checkout -B ${BRANCH}
+                    git push origin heads/${BRANCH} ${ARGS}
+                else
+                    primary_branch=$(git branch --show-current)
+                    echo "The branch does exist, rebasing from '${primary_branch}'"
+                    git checkout -B ${BRANCH} origin/${BRANCH}
+                    git rebase ${primary_branch}
+                    git push origin heads/${BRANCH} ${ARGS}
                 fi
             fi
             echo "Current object name for branch $branch (if it exists):"
@@ -180,7 +198,7 @@ jobs:
           path: ${{ matrix.repository }}
           set-safe-directory: false
           token: ${{ steps.generate-token.outputs.token }}
-      - name: push/delete release branch
+      - name: push/delete/update release branch
         if: ${{ inputs.dry_run == false }}
         env:
           BRANCH: ${{ needs.release-branch.outputs.branch }}
@@ -208,12 +226,29 @@ jobs:
                 else
                     git push --delete origin heads/$BRANCH #branch
                 fi
+            elif [ "${{ inputs.action }}" == "update" ]; then
+                ARGS=""
+                if [ "${{ inputs.force_push }}" == "true" ]; then
+                    ARGS="--force"
+                fi
+                remote_branch=$(git ls-remote --heads origin ${BRANCH})
+                if [ -z "${remote_branch}" ]; then
+                    echo "The branch does not exist, creating it"
+                    git checkout -B ${BRANCH}
+                    git push origin heads/${BRANCH} ${ARGS}
+                else
+                    primary_branch=$(git branch --show-current)
+                    echo "The branch does exist, rebasing from '${primary_branch}'"
+                    git checkout -B ${BRANCH} origin/${BRANCH}
+                    git rebase ${primary_branch}
+                    git push origin heads/${BRANCH} ${ARGS}
+                fi
             fi
             echo "Current object name for branch $BRANCH (if it exists):"
             git rev-parse --verify remotes/origin/$BRANCH || true
 
   crucible-release-verification:
-    if: ${{ inputs.action == 'push' }}
+    if: ${{ inputs.action == 'push' || inputs.action == 'update' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:
