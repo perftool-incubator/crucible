@@ -27,7 +27,7 @@ jobs:
     with:
       custom_release: "ci-version-test"
       action: "delete"
-      force_push: true
+      force_create: true
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
 
@@ -36,7 +36,7 @@ jobs:
     needs: call-crucible-release-remove
     with:
       custom_release: "ci-version-test"
-      action: "push"
+      action: "create"
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
 

@@ -9,7 +9,7 @@ jobs:
   call-crucible-release-schedule:
     uses: ./.github/workflows/crucible-release.yaml
     with:
-      action: "push"
+      action: "create"
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
 
