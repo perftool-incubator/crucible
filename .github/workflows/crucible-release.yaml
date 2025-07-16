@@ -103,6 +103,7 @@ jobs:
           repository: perftool-incubator/crucible
           ref: ${{ github.ref }}
           path: crucible
+          fetch-depth: 0
           set-safe-directory: false
           token: ${{ steps.generate-token.outputs.token }}
       - name: create/delete/update branch to/from the crucible repo
@@ -196,6 +197,7 @@ jobs:
         with:
           repository: perftool-incubator/${{ matrix.repository }}
           path: ${{ matrix.repository }}
+          fetch-depth: 0
           set-safe-directory: false
           token: ${{ steps.generate-token.outputs.token }}
       - name: create/delete/update release branch
