@@ -40,10 +40,19 @@ jobs:
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
 
+  call-crucible-release-update:
+    uses: ./.github/workflows/crucible-release.yaml
+    needs: call-crucible-release-create
+    with:
+      custom_release: "ci-version-test"
+      action: "update"
+    secrets:
+      PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
+
   crucible-release-ci-complete:
     runs-on: [ self-hosted, workflow-overhead ]
     timeout-minutes: 10
-    needs: call-crucible-release-create
+    needs: call-crucible-release-update
     steps:
     - name: complete
       run: echo "crucible-release-ci-complete"
