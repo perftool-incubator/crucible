@@ -6,45 +6,46 @@ on:    # yamllint disable-line rule:truthy
       dry_run:
         required: false
         type: boolean
-        description: Do NOT push/delete branch to/from the repositories
+        description: Do NOT create/delete/update branch to/from the repositories
         default: false
       custom_release:
         required: false
         type: string
-        description: Custom release (branch) to push/delete
+        description: Custom release (branch) to create/delete/update
         default: ''
       action:
         required: true
         type: choice
         options:
-          - push
+          - create
           - delete
-        description: Action to perform with the custom_release (push or delete)
-        default: 'push'
-      force_push:
+          - update
+        description: Action to perform with the custom_release (create or delete or update)
+        default: 'create'
+      force_create:
         required: false
         type: boolean
-        description: FORCE push (override branch)
+        description: FORCE create (override branch)
         default: false
   workflow_call:
     inputs:
       dry_run:
         required: false
         type: boolean
-        description: Do NOT push/delete branch to/from the repositories
+        description: Do NOT create/delete/update branch to/from the repositories
       custom_release:
         required: false
         type: string
-        description: Custom release (branch) to push/delete
+        description: Custom release (branch) to create/delete/update
         default: ''
       action:
         required: true
         type: string
-        description: Action to perform (push or delete)
-      force_push:
+        description: Action to perform (create or delete or update)
+      force_create:
         required: false
         type: boolean
-        description: FORCE push (override branch)
+        description: FORCE create (override branch)
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE:
         required: true
@@ -81,14 +82,14 @@ jobs:
           CUSTOM_RELEASE: ${{ inputs.custom_release }}
           ACTION: ${{ inputs.action }}
           GITHUB_EVENT: ${{ github.event_name }}
-          FORCE_PUSH: ${{ inputs.force_push }}
+          FORCE_CREATE: ${{ inputs.force_create }}
         run: |
           echo "branch=$BRANCH"
           echo "dry_run=$DRY_RUN"
           echo "custom_release=$CUSTOM_RELEASE"
           echo "action=$ACTION"
           echo "github_event=$GITHUB_EVENT"
-          echo "force_push=$FORCE_PUSH"
+          echo "force_create=$FORCE_CREATE"
       - name: Generate token
         id: generate-token
         uses: actions/create-github-app-token@v1
@@ -102,9 +103,10 @@ jobs:
           repository: perftool-incubator/crucible
           ref: ${{ github.ref }}
           path: crucible
+          fetch-depth: 0
           set-safe-directory: false
           token: ${{ steps.generate-token.outputs.token }}
-      - name: push/delete branch to/from the crucible repo
+      - name: create/delete/update branch to/from the crucible repo
         if: ${{ inputs.dry_run == false }}
         env:
           BRANCH: ${{ steps.gen-release-branch.outputs.release }}
@@ -119,18 +121,35 @@ jobs:
             git rev-parse --verify HEAD
             echo "Current object name for branch $BRANCH (if it exists):"
             git rev-parse --verify remotes/origin/$BRANCH || true
-            if [ "${{ inputs.action }}" == "push" ]; then
+            if [ "${{ inputs.action }}" == "create" ]; then
                 ARGS=""
-                if [ "${{ inputs.force_push }}" == "true" ]; then
+                if [ "${{ inputs.force_create }}" == "true" ]; then
                     ARGS="--force"
                 fi
                 git checkout -B $BRANCH
                 git push origin heads/$BRANCH $ARGS
             elif [ "${{ inputs.action }}" == "delete" ]; then
-                if [ "${{ inputs.force_push }}" == "true" ]; then
+                if [ "${{ inputs.force_create }}" == "true" ]; then
                     git push --delete origin heads/$BRANCH || true
                 else
                     git push --delete origin heads/$BRANCH
+                fi
+            elif [ "${{ inputs.action }}" == "update" ]; then
+                ARGS=""
+                if [ "${{ inputs.force_create }}" == "true" ]; then
+                    ARGS="--force"
+                fi
+                remote_branch=$(git ls-remote --heads origin ${BRANCH})
+                if [ -z "${remote_branch}" ]; then
+                    echo "The branch does not exist, creating it"
+                    git checkout -B ${BRANCH}
+                    git push origin heads/${BRANCH} ${ARGS}
+                else
+                    primary_branch=$(git branch --show-current)
+                    echo "The branch does exist, rebasing from '${primary_branch}'"
+                    git checkout -B ${BRANCH} origin/${BRANCH}
+                    git rebase ${primary_branch}
+                    git push origin heads/${BRANCH} ${ARGS}
                 fi
             fi
             echo "Current object name for branch $branch (if it exists):"
@@ -178,9 +197,10 @@ jobs:
         with:
           repository: perftool-incubator/${{ matrix.repository }}
           path: ${{ matrix.repository }}
+          fetch-depth: 0
           set-safe-directory: false
           token: ${{ steps.generate-token.outputs.token }}
-      - name: push/delete release branch
+      - name: create/delete/update release branch
         if: ${{ inputs.dry_run == false }}
         env:
           BRANCH: ${{ needs.release-branch.outputs.branch }}
@@ -195,25 +215,42 @@ jobs:
             git rev-parse --verify HEAD
             echo "Current object name for branch $BRANCH (if it exists):"
             git rev-parse --verify remotes/origin/$BRANCH || true
-            if [ "${{ inputs.action }}" == "push" ]; then
+            if [ "${{ inputs.action }}" == "create" ]; then
                 ARGS=""
-                if [ "${{ inputs.force_push }}" == "true" ]; then
+                if [ "${{ inputs.force_create }}" == "true" ]; then
                     ARGS="--force"
                 fi
                 git checkout -B $BRANCH
                 git push origin heads/$BRANCH $ARGS
             elif [ "${{ inputs.action }}" == "delete" ]; then
-                if [ "${{ inputs.force_push }}" == "true" ]; then
+                if [ "${{ inputs.force_create }}" == "true" ]; then
                     git push --delete origin heads/$BRANCH || true #branch
                 else
                     git push --delete origin heads/$BRANCH #branch
+                fi
+            elif [ "${{ inputs.action }}" == "update" ]; then
+                ARGS=""
+                if [ "${{ inputs.force_create }}" == "true" ]; then
+                    ARGS="--force"
+                fi
+                remote_branch=$(git ls-remote --heads origin ${BRANCH})
+                if [ -z "${remote_branch}" ]; then
+                    echo "The branch does not exist, creating it"
+                    git checkout -B ${BRANCH}
+                    git push origin heads/${BRANCH} ${ARGS}
+                else
+                    primary_branch=$(git branch --show-current)
+                    echo "The branch does exist, rebasing from '${primary_branch}'"
+                    git checkout -B ${BRANCH} origin/${BRANCH}
+                    git rebase ${primary_branch}
+                    git push origin heads/${BRANCH} ${ARGS}
                 fi
             fi
             echo "Current object name for branch $BRANCH (if it exists):"
             git rev-parse --verify remotes/origin/$BRANCH || true
 
   crucible-release-verification:
-    if: ${{ inputs.action == 'push' }}
+    if: ${{ inputs.action == 'create' || inputs.action == 'update' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:
