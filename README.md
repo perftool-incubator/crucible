@@ -63,10 +63,10 @@ fio | Traditional block IO testing | https://github.com/perftool-incubator/bench
 hwlatdetect | Baremetal HW latency spike detector | https://github.com/perftool-incubator/bench-hwlatdetect
 flexran | Radio Access Network (RAN) edge framework testing | https://github.com/perftool-incubator/bench-flexran
 ilab | AI/LLM workload based on InstructLab | https://github.com/perftool-incubator/bench-ilab
-oslat | Latency measurement tool that simulates a continously polling application (ie. DPDK PMD) | https://github.com/perftool-incubator/bench-oslat
+oslat | Latency measurement tool that simulates a continuously polling application (ie. DPDK PMD) | https://github.com/perftool-incubator/bench-oslat
 iperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-iperf
 tracer | Framework for Linux kernel latency tracer/workload tools (ie. osnoise & timerlat) | https://github.com/perftool-incubator/bench-tracer
-trafficgen | TRex based high speed packet forwarding througput and loss analysis using binary search logic | https://github.com/perftool-incubator/bench-trafficgen
+trafficgen | TRex based high speed packet forwarding throughput and loss analysis using binary search logic | https://github.com/perftool-incubator/bench-trafficgen
 uperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-uperf
 **Tools** | |
 forkstat | A tool to capture fork+exec statistics | https://github.com/perftool-incubator/tool-forkstat
@@ -74,5 +74,5 @@ ftrace | Linux kernel tracing | https://github.com/perftool-incubator/tool-ftrac
 kernel | Various kernel tools (turbostat, perf, sst, tracing) | https://github.com/perftool-incubator/tool-kernel
 ovs | Open vSwitch data collection | https://github.com/perftool-incubator/tool-ovs
 procstat | Custom utilities for capturing various /proc information | https://github.com/perftool-incubator/tool-procstat
-rt-trace-bpf | A eBPF based tool used to indentify preemption causers in latency sensitive workloads | https://github.com/perftool-incubator/tool-rt-trace-bpf
+rt-trace-bpf | An eBPF based tool used to identify preemption causers in latency sensitive workloads | https://github.com/perftool-incubator/tool-rt-trace-bpf
 sysstat | Traditional Linux performance tools (sar, mpstat, iostat, etc.) | https://github.com/perftool-incubator/tool-sysstat

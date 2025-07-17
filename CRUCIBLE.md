@@ -13,13 +13,13 @@ Rickshaw          run             Coordinate a full "run"   Implemented with
                                   or more iterations        and k8s endpoints
 
 Multiplex         <TBD>           Convert a user's list     Currently only
-                                  of benchamrk params       supported via
+                                  of benchmark params       supported via
                                   (--opt val1,val2)         --mv-params with
                                   into multiple benchmark   run command (and
                                   iterations                requires mv-params
                                                             JSON format
 
-Roadblock         none            Provide synchrnization    Fully integrated
+Roadblock         none            Provide synchronization   Fully integrated
                                   and message passing
                                   across all participants
                                   in benchmark execution
@@ -29,7 +29,7 @@ Workshop          none            Dynamic, multi-distro     Fully integrated
                                   all SW needed for bench-
                                   marks and tools.
 
-Tools             none            Helper scripts for tool   Framework intregated,
+Tools             none            Helper scripts for tool   Framework integrated,
 subprojects                       execution and post-       per-tool status with
                                   processing                post-processed metrics
                                                             supported below:
@@ -40,7 +40,7 @@ subprojects                       execution and post-       per-tool status with
                                                             pidstat:
                                                             perf:
 
-Benchmarks                      Helper scripts for         Framework intregated,
+Benchmarks                      Helper scripts for         Framework integrated,
 subprojects       none          benchmark execution        per-benchmark status
                                 and post-processing        below:
                                                            uperf: fully integrated
