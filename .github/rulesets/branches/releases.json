@@ -9,7 +9,8 @@
     "ref_name": {
       "exclude": [],
       "include": [
-        "refs/heads/20[2-9][0-9]\\.[1234]"
+        "refs/heads/20[2-9][0-9]\\.[1234]",
+        "refs/heads/ci-version-test"
       ]
     }
   },
@@ -35,5 +36,11 @@
       "type": "deletion"
     }
   ],
-  "bypass_actors": []
+  "bypass_actors": [
+    {
+      "actor_id": 962037,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ]
 }
