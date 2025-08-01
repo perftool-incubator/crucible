@@ -233,6 +233,20 @@ elif [ "${1}" == "run" ]; then
         passthru_args+=("--from-file")
         passthru_args+=("${base_run_dir}/config/${run_file_json}")
     else
+        echo "********************************************************************************"
+        echo "********************************************************************************"
+        echo "**                                                                            **"
+        echo "** ATTENTION: Usage of the legacy CLI interface is deprecated and will be     **"
+        echo "**            removed by the end of the 3rd quarter of 2025 (September 30th). **"
+        echo "**            Please migrate to the new JSON runfile interface as soon as     **"
+        echo "**            possible to avoid disruption.                                   **"
+        echo "**                                                                            **"
+        printf "** %-74s **\n" "See ${CRUCIBLE_HOME}/subprojects/docs/examples/runfile/ for runfile details"
+        echo "**                                                                            **"
+        echo "********************************************************************************"
+        echo "********************************************************************************"
+        sleep 10
+
         bench_params="bench-params.json"
         tool_params="tool-params.json"
         use_mv_params=0
