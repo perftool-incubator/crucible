@@ -485,16 +485,23 @@ function post_process_run() {
 }
 
 function index_run() {
-    local rs_index_cmd cdm_query_cmd
+    local rs_gendocs_opt rs_gendocs_cmd
+    local cdm_index_opt cdm_index_cmd
     local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
+    local access_opt cdmver_opt
 
+    access_opt=${1}
+    echo "access_opt: [$access_opt]"
+    shift
+    cdmver_opt=${1}
+    echo "cdmver_opt: [$cdmver_opt]"
+    shift
     RUN_DIR=${1}
-    echo "Benchmark result is in ${RUN_DIR}"
+    echo "RUN_DIR: [$RUN_DIR]"
     shift
 
-    rs_index_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index\
-      --base-run-dir=${RUN_DIR}"
+    echo "Benchmark result is in ${RUN_DIR}"
 
     start_httpd
     RC=$?
@@ -513,10 +520,32 @@ function index_run() {
         return ${RC}
     fi
 
-    ${podman_run} --name crucible-rickshaw-index-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_index_cmd}
+    # Generate the CDM documents
+    ${podman_run}\
+        --name crucible-rickshaw-gen-docs-${SESSION_ID}\
+        "${container_common_args[@]}"\
+        "${container_rs_args[@]}"\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs\
+        --base-run-dir=${RUN_DIR} ${cdmver_opt}
     RC=$?
     if [ ${RC} == 0 ]; then
-        echo "Benchmark result now in OpenSearch, localhost:9200"
+        echo "Opensearch documents have been created"
+        RC=$?
+    else
+        echo "ERROR: Could not generate OpenSearch documents [rc=${RC}]"
+    fi
+
+    # Index the documents
+    ${podman_run}\
+        --name crucible-cdm-index-${SESSION_ID}\
+        "${container_common_args[@]}"\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/add-run.sh\
+        --dir ${RUN_DIR}/run/opensearch $access_opt
+    RC=$?
+    if [ ${RC} == 0 ]; then
+        echo "Benchmark result now in OpenSearch, using ${access_opt} $cdmver_opt" | sed -e 's/--userpass\s\S*\s//'
         RC=$?
     else
         echo "ERROR: Could not index result into OpenSearch [rc=${RC}]"
@@ -527,8 +556,10 @@ function index_run() {
 
 function get_result_backend() {
     local RC
+    local cdm_query_opt cdm_query_cmd
 
-    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@"
+    cdm_query_opt=$(${podman_run} --name crucible-get-result-opt-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
+    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@ $cdm_query_opt"
     ${podman_run} --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
     return ${RC}
