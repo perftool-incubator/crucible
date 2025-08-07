@@ -244,6 +244,7 @@ function start_opensearch() {
     local opensearch_start_cmd opensearch_status_cmd common_container_args
     local RC stage
     opensearch_start_cmd="${CRUCIBLE_HOME}/config/start-opensearch.sh ${opensearch_dir}"
+    # localhost:9200 hardcoded here because this should only ever be used for local opensearch
     opensearch_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cluster/health"
     echo -n "Checking for OpenSearch"
     if ! podman_running crucible-opensearch; then
@@ -316,17 +317,6 @@ function stop_opensearch() {
         else
             echo "Successfully stopped OpenSearch"
         fi
-    fi
-    return ${RC}
-}
-
-function init_opensearch() {
-    local RC opensearch_init_cmd
-    opensearch_init_cmd="${CRUCIBLE_HOME}/config/init-opensearch.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
-    ${podman_run} --name crucible-init-opensearch-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_init_cmd}
-    RC=$?
-    if [ ${RC} != 0 ]; then
-        echo "ERROR: Could not init OpenSearch"
     fi
     return ${RC}
 }
@@ -492,13 +482,10 @@ function index_run() {
     local access_opt cdmver_opt
 
     access_opt=${1}
-    echo "access_opt: [$access_opt]"
     shift
     cdmver_opt=${1}
-    echo "cdmver_opt: [$cdmver_opt]"
     shift
     RUN_DIR=${1}
-    echo "RUN_DIR: [$RUN_DIR]"
     shift
 
     echo "Benchmark result is in ${RUN_DIR}"
@@ -511,11 +498,6 @@ function index_run() {
 
     start_opensearch
     RC=$?
-    if [ ${RC} != 0 ]; then
-        return ${RC}
-    fi
-
-    init_opensearch
     if [ ${RC} != 0 ]; then
         return ${RC}
     fi
@@ -741,7 +723,6 @@ function reinit_opensearch() {
 
     delete_opensearch_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
     if ${podman_run} --name crucible-opensearch-delete "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${delete_opensearch_cmd}; then
-        init_opensearch
         RC=${?}
     else
         RC=${?}
@@ -754,6 +735,7 @@ function repair_opensearch() {
     local RC
     RC=0
 
+    # localhost:9200 hardcoded here because this should only ever be used for local opensearch
     opensearch_put_cmd="curl --silent --show-error --stderr - -X PUT localhost:9200/_all/_settings"
 
     echo "Clearing read-only bit:"

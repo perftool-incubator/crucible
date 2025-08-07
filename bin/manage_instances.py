@@ -10,14 +10,19 @@ import os
 DEFAULT_DATA = {
   "instances": [
     {
-      "name": "local",
+      "name": "local-v8",
       "host": "localhost:9200",
       "cdmver": "v8dev"
+    },
+    {
+      "name": "local-v9",
+      "host": "localhost:9200",
+      "cdmver": "v9dev"
     }
   ],
-  "index-to": "local",
+  "index-to": "local-v9",
   "query-from": [
-    "local"
+    "local-v9", "local-v8"
   ]
 }
 

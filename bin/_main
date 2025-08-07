@@ -121,6 +121,7 @@ elif [ "${1}" == "rm" ]; then
     access_opt=""
 
     if [ "$instance" = "" ]; then
+        # Use the default instance
         instance=$(${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\
@@ -129,7 +130,7 @@ elif [ "${1}" == "rm" ]; then
             --cfg ${INSTANCES_CFG}\
             index-instance)
     fi
-    echo "instance: [$instance]"
+
     cdmver_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
         ${container_common_args[@]}\
@@ -137,7 +138,11 @@ elif [ "${1}" == "rm" ]; then
         ${CRUCIBLE_HOME}/bin/manage_instances.py\
         --cfg ${INSTANCES_CFG}\
         instance-cdmver-opt --name ${instance})
-    echo "found cdmver [$cdmver_opt] for instance [$instance]"
+    if [ "$cdmver_opt" == "" ]; then
+        echo "ERROR: CDM version informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+        exit 1
+    fi
+
     access_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
         ${container_common_args[@]}\
@@ -145,6 +150,10 @@ elif [ "${1}" == "rm" ]; then
         ${CRUCIBLE_HOME}/bin/manage_instances.py\
         --cfg ${INSTANCES_CFG}\
         instance-host-access-opt --name ${instance})
+    if [ "$access_opt" == "" ]; then
+        echo "ERROR: access informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+        exit 1
+    fi
 
     if start_opensearch; then
         # Delete the run
@@ -157,6 +166,7 @@ elif [ "${1}" == "rm" ]; then
         RC=$?
     fi
     EXIT_VAL=$?
+
 elif [ "${1}" == "index" ]; then
     shift
     instance=""
@@ -218,7 +228,6 @@ elif [ "${1}" == "index" ]; then
             --cfg ${INSTANCES_CFG}\
             index-instance)
     fi
-    echo "instance: [$instance]"
 
     cdmver_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
@@ -227,7 +236,6 @@ elif [ "${1}" == "index" ]; then
         ${CRUCIBLE_HOME}/bin/manage_instances.py\
         --cfg ${INSTANCES_CFG}\
         instance-cdmver-opt --name ${instance})
-    echo "found cdmver [$cdmver_opt] for instance [$instance]"
     access_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
         ${container_common_args[@]}\
@@ -247,15 +255,6 @@ elif [ "${1}" == "index" ]; then
     if start_opensearch; then
         index_run "${access_opt}" "${cdmver_opt}" "$base_run_dir"
     fi
-        ## Delete the run
-        #${podman_run}\
-            #--name crucible-manage-instances--${SESSION_ID}\
-            #${container_common_args[@]}\
-            #${CRUCIBLE_CONTROLLER_IMAGE}\
-            #${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh\
-            #${access_opt} ${cdmver_opt} "$@"
-        RC=$?
-    EXIT_VAL=$?
 elif [ "${1}" == "extract" ]; then
     shift
     case "${1}" in
@@ -279,33 +278,8 @@ elif [ "${1}" == "extract" ]; then
 elif [ "${1}" == "opensearch" ]; then
     shift
     if start_opensearch; then
-        if [ "${1}" == "init" ]; then
-            init_opensearch
-        elif [ "${1}" == "rebuild" ]; then
-            reinit_opensearch
-        elif [ "${1}" == "repair" ]; then
+        if [ "${1}" == "repair" ]; then
             repair_opensearch
-        fi
-        if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
-            if pushd ${var_run_crucible} >/dev/null; then
-                for base_run_dir in `/bin/ls | grep -v latest`; do
-                    if [ -d "$base_run_dir" ]; then
-                        echo "Going to post-process and index $base_run_dir"
-                        post_process_run "${var_run_crucible}/${base_run_dir}"
-                        index_run "${var_run_crucible}/${base_run_dir}"
-                        this_id=$(extract_run_id "${var_run_crucible}/${base_run_dir}")
-                        get_result_to_file "${base_run_dir}" --run ${this_id}
-                        RC=$?
-                        if [ ${RC} != 0 ]; then
-                            echo "ERROR: Failed to post-process ${base_run_dir} [rc=${RC}]"
-                        fi
-                    fi
-                done
-                popd >/dev/null
-            else
-                echo "ERROR: Could not chdir to ${var_run_crucible}"
-                EXIT_VAL=1
-            fi
         fi
     else
         EXIT_VAL=$?
@@ -506,7 +480,7 @@ elif [ "${1}" == "run" ]; then
                     else
                         echo "Skipping benchmark requirements validation because there is no ${this_benchmark_subproj_dir}/multiplex.json"
                     fi
-    
+
                     multiplex_cmd="${podman_run} -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${multiplex_cmd}"
                     ${multiplex_cmd} > ${bench_params_run_output} 2>&1
                     EXIT_VAL=$?
@@ -662,6 +636,7 @@ elif [ "${1}" == "reset" ]; then
                 RC=$?
                 EXIT_VAL=${RC}
             fi
+
         fi
     else
         EXIT_VAL=$?
