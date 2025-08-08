@@ -244,6 +244,7 @@ function start_opensearch() {
     local opensearch_start_cmd opensearch_status_cmd common_container_args
     local RC stage
     opensearch_start_cmd="${CRUCIBLE_HOME}/config/start-opensearch.sh ${opensearch_dir}"
+    # localhost:9200 hardcoded here because this should only ever be used for local opensearch
     opensearch_status_cmd="curl --silent --show-error --stderr - -X GET localhost:9200/_cluster/health"
     echo -n "Checking for OpenSearch"
     if ! podman_running crucible-opensearch; then
@@ -316,17 +317,6 @@ function stop_opensearch() {
         else
             echo "Successfully stopped OpenSearch"
         fi
-    fi
-    return ${RC}
-}
-
-function init_opensearch() {
-    local RC opensearch_init_cmd
-    opensearch_init_cmd="${CRUCIBLE_HOME}/config/init-opensearch.sh ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates"
-    ${podman_run} --name crucible-init-opensearch-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_init_cmd}
-    RC=$?
-    if [ ${RC} != 0 ]; then
-        echo "ERROR: Could not init OpenSearch"
     fi
     return ${RC}
 }
@@ -485,16 +475,20 @@ function post_process_run() {
 }
 
 function index_run() {
-    local rs_index_cmd cdm_query_cmd
+    local rs_gendocs_opt rs_gendocs_cmd
+    local cdm_index_opt cdm_index_cmd
     local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
+    local access_opt cdmver_opt
 
+    access_opt=${1}
+    shift
+    cdmver_opt=${1}
+    shift
     RUN_DIR=${1}
-    echo "Benchmark result is in ${RUN_DIR}"
     shift
 
-    rs_index_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-index\
-      --base-run-dir=${RUN_DIR}"
+    echo "Benchmark result is in ${RUN_DIR}"
 
     start_httpd
     RC=$?
@@ -508,15 +502,32 @@ function index_run() {
         return ${RC}
     fi
 
-    init_opensearch
-    if [ ${RC} != 0 ]; then
-        return ${RC}
-    fi
-
-    ${podman_run} --name crucible-rickshaw-index-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_index_cmd}
+    # Generate the CDM documents
+    ${podman_run}\
+        --name crucible-rickshaw-gen-docs-${SESSION_ID}\
+        "${container_common_args[@]}"\
+        "${container_rs_args[@]}"\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs\
+        --base-run-dir=${RUN_DIR} ${cdmver_opt}
     RC=$?
     if [ ${RC} == 0 ]; then
-        echo "Benchmark result now in OpenSearch, localhost:9200"
+        echo "Opensearch documents have been created"
+        RC=$?
+    else
+        echo "ERROR: Could not generate OpenSearch documents [rc=${RC}]"
+    fi
+
+    # Index the documents
+    ${podman_run}\
+        --name crucible-cdm-index-${SESSION_ID}\
+        "${container_common_args[@]}"\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/add-run.sh\
+        --dir ${RUN_DIR}/run/opensearch $access_opt
+    RC=$?
+    if [ ${RC} == 0 ]; then
+        echo "Benchmark result now in OpenSearch, using ${access_opt} $cdmver_opt" | sed -e 's/--userpass\s\S*\s//'
         RC=$?
     else
         echo "ERROR: Could not index result into OpenSearch [rc=${RC}]"
@@ -527,8 +538,10 @@ function index_run() {
 
 function get_result_backend() {
     local RC
+    local cdm_query_opt cdm_query_cmd
 
-    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@"
+    cdm_query_opt=$(${podman_run} --name crucible-get-result-opt-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
+    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@ $cdm_query_opt"
     ${podman_run} --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
     return ${RC}
@@ -710,7 +723,6 @@ function reinit_opensearch() {
 
     delete_opensearch_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
     if ${podman_run} --name crucible-opensearch-delete "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${delete_opensearch_cmd}; then
-        init_opensearch
         RC=${?}
     else
         RC=${?}
@@ -723,6 +735,7 @@ function repair_opensearch() {
     local RC
     RC=0
 
+    # localhost:9200 hardcoded here because this should only ever be used for local opensearch
     opensearch_put_cmd="curl --silent --show-error --stderr - -X PUT localhost:9200/_all/_settings"
 
     echo "Clearing read-only bit:"
