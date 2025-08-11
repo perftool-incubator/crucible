@@ -1090,5 +1090,5 @@ fi
 
 # If the instances.json is missing, generate the default one
 if [ ! -e ${INSTANCES_CFG} ]; then
-    ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info >/dev/null
+    ${podman_run} --name crucible-gen-instances-cfg-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info >/dev/null
 fi
