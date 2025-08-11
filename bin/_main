@@ -584,7 +584,36 @@ elif [ "${1}" == "run" ]; then
 
     if [ ${RC} == 0 ]; then
         post_process_run ${base_run_dir} &&\
-        index_run ${base_run_dir} &&\
+        instance=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            index-instance)
+        cdmver_opt=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            instance-cdmver-opt --name ${instance})
+        access_opt=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            instance-host-access-opt --name ${instance})
+        if [ "$access_opt" == "" ]; then
+            echo "ERROR: access informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+            exit 1
+        fi
+        if [ "$cdmver_opt" == "" ]; then
+            echo "ERROR: CDM version informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+            exit 1
+        fi
+        index_run "${access_opt}" "${cdmver_opt}" "$base_run_dir" &&\
         get_result_to_file "${base_run_dir}" --run $(extract_run_id "${base_run_dir}")
         EXIT_VAL=$?
     else
