@@ -591,6 +591,7 @@ elif [ "${1}" == "run" ]; then
             ${CRUCIBLE_HOME}/bin/manage_instances.py\
             --cfg ${INSTANCES_CFG}\
             index-instance)
+        echo "Using instance ${instance} for indexing"
         cdmver_opt=$(${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\

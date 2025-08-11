@@ -455,12 +455,15 @@ function post_process_run() {
       --base-run-dir=${RUN_DIR}"
 
     post_process_fail=0
+    echo "Post-processing benchmark data with $rs_pp_b_cmd"
     ${podman_run} --name crucible-rickshaw-pp-bench-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_pp_b_cmd}
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Failed to post-process the benchmark [rc=${RC}]"
         post_process_fail=1
     fi
+
+    echo "Post-processing tool data with $rs_pp_t_cmd"
     ${podman_run} --name crucible-rickshaw-pp-tools-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_pp_t_cmd}
     RC=$?
     if [ ${RC} != 0 ]; then
@@ -1083,4 +1086,9 @@ if [ -e ${REGISTRIES_CFG} ]; then
     fi
 else
     exit_error "Could not locate ${REGISTRIES_CFG}"
+fi
+
+# If the instances.json is missing, generate the default one
+if [ ! -e ${INSTANCES_CFG} ]; then
+    ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info >/dev/null
 fi
