@@ -359,6 +359,138 @@ function config_add_repo() {
     subprojects_install
 }
 
+function config_update_repo() {
+    local name=""
+    local type=""
+    local repository=""
+    local primary_branch=""
+    local checkout_mode=""
+    local checkout_target=""
+    local error=0
+
+    local required="name"
+    local optional=""
+
+    for key_value in $@; do
+        key=$(echo "${key_value}" | awk -F= '{ print $1 }')
+        value=$(echo "${key_value}" | awk -F= '{ print $2 }')
+        #echo "key=${key} value=${value}"
+
+        case "${key}" in
+            "name")
+                name="${value}"
+                required=${required//name}
+                ;;
+            "repository")
+                repository="${value}"
+                optional+="repository "
+                ;;
+            "primary-branch")
+                primary_branch="${value}"
+                optional+="primary-branch "
+                ;;
+            "checkout-mode")
+                checkout_mode="${value}"
+                optional+="checkout-mode "
+                ;;
+            "checkout-target")
+                checkout_target="${value}"
+                optional+="checkout-target "
+                ;;
+            *)
+                echo "ERROR: Invalid key=value pair: ${key_value}"
+                error=1
+                ;;
+        esac
+    done
+
+    local param
+    for param in ${required}; do
+        echo "ERROR: You must specify parameter ${param}"
+        error=1
+    done
+
+    if [ -z "${optional}" ]; then
+        echo "ERROR: You must specify a parameter to update."
+        echo "       Available parameters are:"
+        echo "           repository"
+        echo "           primary-branch"
+        echo "           checkout-mode"
+        echo "           checkout-target"
+        error=1
+    fi
+
+    if [ ${error} -ne 0 ]; then
+        exit 1
+    fi
+
+    local run_subprojects_installer=0
+    local do_target_checkout=0
+
+    if echo "${optional}" | grep -q "primary-branch"; then
+        if echo "${optional}" | grep -q "repository"; then
+            jq_update_validated ${CRUCIBLE_HOME}/config/repos.json \
+                                ${CRUCIBLE_HOME}/schema/repos.json \
+                                "repos:update-repo-primary-branch" \
+                                --arg repo_name "${name}" \
+                                --arg repo_primary_branch "${primary_branch}" \
+                                '(.official[], .unofficial[] | select(.name == $repo_name) | ."primary-branch") |= $repo_primary_branch'
+        else
+            echo "ERROR: It does not make sense (from a Crucible perspective) to change the primary branch without changing the repository"
+            exit 1
+        fi
+    fi
+
+    if echo "${optional}" | grep -q "repository"; then
+        jq_update_validated ${CRUCIBLE_HOME}/config/repos.json \
+                            ${CRUCIBLE_HOME}/schema/repos.json \
+                            "repos:update-repo-repository" \
+                            --arg repo_name "${name}" \
+                            --arg repo_repository "${repository}" \
+                            '(.official[], .unofficial[] | select(.name == $repo_name) | .repository) |= $repo_repository'
+
+        run_subprojects_installer=1
+    fi
+
+    if echo "${optional}" | grep -q "checkout-mode"; then
+        jq_update_validated ${CRUCIBLE_HOME}/config/repos.json \
+                            ${CRUCIBLE_HOME}/schema/repos.json \
+                            "repos:update-repo-checkout-mode" \
+                            --arg repo_name "${name}" \
+                            --arg repo_checkout_mode "${checkout_mode}" \
+                            '(.official[], .unofficial[] | select(.name == $repo_name) | .checkout.mode) |= $repo_checkout_mode'
+    fi
+
+    if echo "${optional}" | grep -q "checkout-target"; then
+        jq_update_validated ${CRUCIBLE_HOME}/config/repos.json \
+                            ${CRUCIBLE_HOME}/schema/repos.json \
+                            "repos:update-repo-checkout-target" \
+                            --arg repo_name "${name}" \
+                            --arg repo_checkout_target "${checkout_target}" \
+                            '(.official[], .unofficial[] | select(.name == $repo_name) | .checkout.target) |= $repo_checkout_target'
+
+        do_target_checkout=1
+    fi
+
+    if [ ${run_subprojects_installer} -eq 1 ]; then
+        subprojects_install
+    elif [ ${do_target_checkout} -eq 1 ]; then
+        subproject_type=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg repo_name "${name}" '.official[], .unofficial[] | select(.name == $repo_name) | .type')
+        subproject_type_dir=$(get_project_type_dir "${subproject_type}")
+        if pushd ${CRUCIBLE_HOME}/subprojects/${subproject_type_dir}/${name} > /dev/null; then
+            if ! git checkout ${checkout_target}; then
+                echo "ERROR: Failed to checkout target '${checkout_target}' for subproject '${name}'"
+                exit 1
+            fi
+
+            popd > /dev/null
+        else
+            echo "ERROR: Could not locate subproject directory for repository '${name}'"
+            exit 1
+        fi
+    fi
+}
+
 function config_help() {
     echo "Config Usage:"
     echo "  repo config [<command> <command-specific-options>]"
@@ -368,6 +500,7 @@ function config_help() {
     echo "add           |  Add an unofficial repository"
     echo "remove        |  Remove an unofficial repository"
     echo "show          |  Dump the configuration information in tabular form (default)"
+    echo "update        |  Update one of the repositories"
     echo
 }
 
@@ -410,6 +543,9 @@ case "${command}" in
                 ;;
             show)
                 config_show
+                ;;
+            update)
+                config_update_repo "$@"
                 ;;
             help)
                 config_help
