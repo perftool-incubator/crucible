@@ -10,14 +10,19 @@ import os
 DEFAULT_DATA = {
   "instances": [
     {
-      "name": "local",
+      "name": "local-v8",
       "host": "localhost:9200",
       "cdmver": "v8dev"
+    },
+    {
+      "name": "local-v9",
+      "host": "localhost:9200",
+      "cdmver": "v9dev"
     }
   ],
-  "index-to": "local",
+  "index-to": "local-v9",
   "query-from": [
-    "local"
+    "local-v9", "local-v8"
   ]
 }
 
@@ -232,17 +237,48 @@ def find_instance(instances, target_name):
                 return instance
     return None
 
-def query_opt(filepath, data):
+def list_instance_names(data):
+    for instance in data["instances"]:
+        if "name" in instance:
+            print(instance["name"])
+
+def instance_host_access_opt(data, name):
+    """Displays host access info for a specific instance."""
+    instance_obj = find_instance(data["instances"], name)
+    cmdline = "";
+    if instance_obj != None:
+        cmdline = cmdline + " --host " + instance_obj["host"]
+        if "userpass" in instance_obj:
+            cmdline = cmdline + " --userpass " + instance_obj["userpass"]
+    print(cmdline);
+
+def query_opt(data):
     """Displays cmdline options to be passed to cdmq (in project CDM)."""
     cmdline = ""
     for instance_name in data["query-from"]:
-        instance_obj = find_instance(data["instances"], instance_name)
-        if instance_obj != None:
-            cmdline = cmdline + " --host " + instance_obj["host"]
-            if "userpass" in instance_obj:
-                cmdline = cmdline + " --userpass " + instance_obj["userpass"]
+        instance_host_access_opt(data, instance_name)
 
-    print(cmdline)
+def index_instance(data):
+    """Displays the default instance to index to."""
+    instance_name = None
+    if "index-to" in data:
+        instance_name = data["index-to"]
+    if instance_name != None:
+        print(instance_name)
+
+def instance_cdmver_opt(data, name):
+    """Displays common-data-model version for a specific instance."""
+    instance_obj = find_instance(data["instances"], name)
+    if instance_obj != None:
+        print("--ver " + instance_obj["cdmver"])
+
+
+def gendocs_opt(data):
+    """Displays cmdline options to be passed to document generation (in project rickshaw)."""
+    cmdline = ""
+    instance_name = None
+    if "index-to" in data:
+        instance_cdmver_opt(data, data["index-to"])
 
 def main():
     """Main function to parse arguments and dispatch actions."""
@@ -288,8 +324,18 @@ def main():
 
     # --- Info action ---
     parser_info = subparsers.add_parser('info', help='Display the current configuration from the JSON file.')
-    parser_info = subparsers.add_parser('query-opt', help='Display the cmdline options to pass to CDM queries.')
-    # No specific arguments for info other than the global --cfg
+
+    parser_queryopt = subparsers.add_parser('query-opt', help='Display the cmdline options to pass to query utils.')
+
+    parser_indexinstance = subparsers.add_parser('index-instance', help='Display the default instance to index to.')
+
+    parser_gethostaccss = subparsers.add_parser('instance-host-access-opt', help='Display the host access options for a specific instance.')
+    parser_gethostaccss.add_argument('--name', type=str, required=True, help='Name of the instance.')
+
+    parser_getcdmver = subparsers.add_parser('instance-cdmver-opt', help='Display the CDM version for a specific instance.')
+    parser_getcdmver.add_argument('--name', type=str, required=True, help='Name of the instance')
+
+    parser_listinstancenames = subparsers.add_parser('list-instance-names', help='Display a list of all instance names.')
 
     args = parser.parse_args()
 
@@ -329,7 +375,22 @@ def main():
         display_info(config_filepath, data)
 
     elif args.action == 'query-opt':
-        query_opt(config_filepath, data)
+        query_opt(data)
+
+    elif args.action == 'index-instance':
+        index_instance(data)
+
+    elif args.action == 'gendocs-opt':
+        gendocs_opt(data)
+
+    elif args.action == 'instance-cdmver-opt':
+        instance_cdmver_opt(data, args.name)
+
+    elif args.action == 'instance-host-access-opt':
+        instance_host_access_opt(data, args.name)
+
+    elif args.action == 'list-instance-names':
+        list_instance_names(data)
 
     if write_required:
         print("writing config file");

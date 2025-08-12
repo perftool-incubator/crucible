@@ -95,8 +95,9 @@ elif [ "${1}" == "get" ]; then
             EXIT_VAL=$?
         elif [ "${1}" == "metric" ]; then
             shift
-            get_metric_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh"
-            ${podman_run} --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${get_metric_cmd} "$@"
+            cdm_query_opt=$(${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
+            cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh $@ $cdm_query_opt"
+            ${podman_run} --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
             EXIT_VAL=$?
         else
             echo "ERROR: unsupported 'get' argument [${1}]"
@@ -105,18 +106,155 @@ elif [ "${1}" == "get" ]; then
     fi
 elif [ "${1}" == "rm" ]; then
     shift
+    instance=""
+    # This is an optional positional argument for 'crucible rm', which overrides the
+    # default opensearch instance when deleting a run (default is whatever instance
+    # is used for indexing).
+    if ! [[ "${1}" =~ ^-- ]]; then
+        instance=${1}
+        shift
+    fi
+
+    # Get the options needed to delete the documents (the host and optional password
+    # information for the default opensearch instance for indexing)
+    cdmver_opt=""
+    access_opt=""
+
+    if [ "$instance" = "" ]; then
+        # Use the default instance
+        instance=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            index-instance)
+    fi
+
+    cdmver_opt=$(${podman_run}\
+        --name crucible-manage-instances--${SESSION_ID}\
+        ${container_common_args[@]}\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/bin/manage_instances.py\
+        --cfg ${INSTANCES_CFG}\
+        instance-cdmver-opt --name ${instance})
+    if [ "$cdmver_opt" == "" ]; then
+        echo "ERROR: CDM version informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+        exit 1
+    fi
+
+    access_opt=$(${podman_run}\
+        --name crucible-manage-instances--${SESSION_ID}\
+        ${container_common_args[@]}\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/bin/manage_instances.py\
+        --cfg ${INSTANCES_CFG}\
+        instance-host-access-opt --name ${instance})
+    if [ "$access_opt" == "" ]; then
+        echo "ERROR: access informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+        exit 1
+    fi
+
     if start_opensearch; then
-       rm_result_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh"
-       ${podman_run} --name crucible-rm-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rm_result_cmd} "$@"
+        # Delete the run
+        ${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh\
+            ${access_opt} ${cdmver_opt} "$@"
+        RC=$?
     fi
     EXIT_VAL=$?
+
 elif [ "${1}" == "index" ]; then
     shift
-    if start_opensearch; then
-        base_run_dir=$(echo "$@" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
-        index_run "$base_run_dir"
+    instance=""
+    base_run_dir=""
+    # There is an optional positional argument for which overrides the
+    # default opensearch instance.  This argument must come immediately
+    # after "crucible index" and before any arguments passed to rickshaw
+    # or CDM.  We need to figure out if the optional
+    # argument is here, or the arguments are all for rickshaw/cdm utils.
+    # Just checking for lack of '--' in the
+    # argument and assuming it is an argument to be passed to rickshaw/cdm
+    # does not work here because of previous work to allow
+    # skipping "--base-run-dir" and only specifying the run directory.
+    if [ $# -eq 1 ]; then
+        # There is only 1 argument, and the only two valid options are:
+        # <dir>
+        # --base-run-dir=<dir>
+        # and there is no optional argument to sopeficy the instance
+        base_run_dir=$(echo "${1}" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
+        shift
+    elif [ $# -eq 2 ]; then
+        # There are only 2 arguments...
+        if [[ "${1}" =~ ^-- ]]; then
+            # ...and the first argument starts
+            # with '--', so it must be --base-run-dir and <dir>
+            # and the optional argument to specify the instance is
+            # not present
+            shift
+            base_run_dir=${1}
+            shift
+        else
+            # ...and the first argument does not start
+            # with '--', so the first argument must be the optional
+            # argument speficying the instance to use, and the second
+            # argument is the <dir>
+            instance=${1}
+            shift
+            base_run_dir=$(echo "${1}" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
+            shift
+        fi
+    elif [ $# -eq 3 ]; then
+        # There are 3 agruments, therefore it must be:
+        # <instance>
+        # --base-run-dir
+        # <dir>
+        instance=${1}
+        shift; shift
+        base_run_dir=${1}
+        shift
     fi
-    EXIT_VAL=$?
+
+    if [ "$instance" = "" ]; then
+        # Get the default instance to use
+        instance=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            index-instance)
+    fi
+
+    cdmver_opt=$(${podman_run}\
+        --name crucible-manage-instances--${SESSION_ID}\
+        ${container_common_args[@]}\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/bin/manage_instances.py\
+        --cfg ${INSTANCES_CFG}\
+        instance-cdmver-opt --name ${instance})
+    access_opt=$(${podman_run}\
+        --name crucible-manage-instances--${SESSION_ID}\
+        ${container_common_args[@]}\
+        ${CRUCIBLE_CONTROLLER_IMAGE}\
+        ${CRUCIBLE_HOME}/bin/manage_instances.py\
+        --cfg ${INSTANCES_CFG}\
+        instance-host-access-opt --name ${instance})
+    if [ "$access_opt" == "" ]; then
+        echo "ERROR: access informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+        exit 1
+    fi
+    if [ "$cdmver_opt" == "" ]; then
+        echo "ERROR: CDM version informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+        exit 1
+    fi
+
+    if start_opensearch; then
+        index_run "${access_opt}" "${cdmver_opt}" "$base_run_dir"
+    fi
 elif [ "${1}" == "extract" ]; then
     shift
     case "${1}" in
@@ -140,33 +278,8 @@ elif [ "${1}" == "extract" ]; then
 elif [ "${1}" == "opensearch" ]; then
     shift
     if start_opensearch; then
-        if [ "${1}" == "init" ]; then
-            init_opensearch
-        elif [ "${1}" == "rebuild" ]; then
-            reinit_opensearch
-        elif [ "${1}" == "repair" ]; then
+        if [ "${1}" == "repair" ]; then
             repair_opensearch
-        fi
-        if [ ${EXIT_VAL} == 0 -a "${1}" == "rebuild" ]; then
-            if pushd ${var_run_crucible} >/dev/null; then
-                for base_run_dir in `/bin/ls | grep -v latest`; do
-                    if [ -d "$base_run_dir" ]; then
-                        echo "Going to post-process and index $base_run_dir"
-                        post_process_run "${var_run_crucible}/${base_run_dir}"
-                        index_run "${var_run_crucible}/${base_run_dir}"
-                        this_id=$(extract_run_id "${var_run_crucible}/${base_run_dir}")
-                        get_result_to_file "${base_run_dir}" --run ${this_id}
-                        RC=$?
-                        if [ ${RC} != 0 ]; then
-                            echo "ERROR: Failed to post-process ${base_run_dir} [rc=${RC}]"
-                        fi
-                    fi
-                done
-                popd >/dev/null
-            else
-                echo "ERROR: Could not chdir to ${var_run_crucible}"
-                EXIT_VAL=1
-            fi
         fi
     else
         EXIT_VAL=$?
@@ -367,7 +480,7 @@ elif [ "${1}" == "run" ]; then
                     else
                         echo "Skipping benchmark requirements validation because there is no ${this_benchmark_subproj_dir}/multiplex.json"
                     fi
-    
+
                     multiplex_cmd="${podman_run} -i --name crucible-multiplex-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${multiplex_cmd}"
                     ${multiplex_cmd} > ${bench_params_run_output} 2>&1
                     EXIT_VAL=$?
@@ -471,7 +584,37 @@ elif [ "${1}" == "run" ]; then
 
     if [ ${RC} == 0 ]; then
         post_process_run ${base_run_dir} &&\
-        index_run ${base_run_dir} &&\
+        instance=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            index-instance)
+        echo "Using instance ${instance} for indexing"
+        cdmver_opt=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            instance-cdmver-opt --name ${instance})
+        access_opt=$(${podman_run}\
+            --name crucible-manage-instances--${SESSION_ID}\
+            ${container_common_args[@]}\
+            ${CRUCIBLE_CONTROLLER_IMAGE}\
+            ${CRUCIBLE_HOME}/bin/manage_instances.py\
+            --cfg ${INSTANCES_CFG}\
+            instance-host-access-opt --name ${instance})
+        if [ "$access_opt" == "" ]; then
+            echo "ERROR: access informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+            exit 1
+        fi
+        if [ "$cdmver_opt" == "" ]; then
+            echo "ERROR: CDM version informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
+            exit 1
+        fi
+        index_run "${access_opt}" "${cdmver_opt}" "$base_run_dir" &&\
         get_result_to_file "${base_run_dir}" --run $(extract_run_id "${base_run_dir}")
         EXIT_VAL=$?
     else
@@ -523,6 +666,7 @@ elif [ "${1}" == "reset" ]; then
                 RC=$?
                 EXIT_VAL=${RC}
             fi
+
         fi
     else
         EXIT_VAL=$?
