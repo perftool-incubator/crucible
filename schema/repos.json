@@ -42,6 +42,7 @@
                     "primary-branch": {
                         "type": "string",
                         "enum": [
+                            "HEAD",
                             "main",
                             "master"
                         ]
