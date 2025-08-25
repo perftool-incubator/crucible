@@ -2,27 +2,49 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
-GIT_TAG=$1
-
-default_git_host_org="https://github.com/perftool-incubator"
-
 function exit_error() {
     echo $1
     exit 1
 }
 
-# Check for dependencies
-missing_bins=""
-for bin in sed git; do
-    $bin --version >/dev/null 2>&1 || missing_bins="$missing_bins $bin"
-done
-if [ ! -z "$missing_bins" ]; then
-    exit_error "Could not find the following, please install and try again: $missing_bins"
+CRUCIBLE_SUBPROJECT_NAME=""
+GIT_TAG=""
+
+longopts="name:,git-tag:"
+opts=$(getopt -q -o "" --longoptions "${longopts}" -n "$0" -- "$@")
+if [ $? -ne 0 ]; then
+    opts=$(echo "$@")
+    exit_error "Unrecognized option specified: ${opts}"
 fi
+eval set -- "${opts}"
+while true; do
+    case "${1}" in
+        --git-tag)
+            shift
+            GIT_TAG="${1}"
+            shift
+            ;;
+        --name)
+            shift
+            CRUCIBLE_SUBPROJECT_NAME="${1}"
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            exit_error "Unexpected argument [${1}]"
+            ;;
+    esac
+done
+
+default_git_host_org="https://github.com/perftool-incubator"
 
 # Find the git repo base directory
 crucible_repo_bin_dir=$(dirname `readlink -e $0`)
 crucible_repo_dir=$(echo $crucible_repo_bin_dir | sed -e 'sX/binXX')
+export CRUCIBLE_HOME="$crucible_repo_dir"
 source ${crucible_repo_dir}/bin/jqlib
 
 # The three sections below use sudo to install files and links as root.
@@ -37,25 +59,27 @@ else
     sudo_cmd="sudo"
 fi
 
-# Create or update /etc/sysconfig/crucible
-$sudo_cmd /bin/bash -c "if [ -e /etc/sysconfig/crucible ]; then echo Updating existing /etc/sysconfig/crucible; sed -i '/^CRUCIBLE_HOME=/d' /etc/sysconfig/crucible; fi"
-$sudo_cmd /bin/bash -c "echo \"CRUCIBLE_HOME=$crucible_repo_dir\" >>/etc/sysconfig/crucible"
-export CRUCIBLE_HOME="$crucible_repo_dir"
+if [ -z "${CRUCIBLE_SUBPROJECT_NAME}" ]; then
+    # Create or update /etc/sysconfig/crucible
+    $sudo_cmd /bin/bash -c "if [ -e /etc/sysconfig/crucible ]; then echo Updating existing /etc/sysconfig/crucible; sed -i '/^CRUCIBLE_HOME=/d' /etc/sysconfig/crucible; fi"
+    $sudo_cmd /bin/bash -c "echo \"CRUCIBLE_HOME=$crucible_repo_dir\" >>/etc/sysconfig/crucible"
 
-# Install the tab completions for crucible
-if [ -d /etc/profile.d ]; then
-    if [ -e "$crucible_repo_bin_dir/_crucible_completions" ]; then
-        $sudo_cmd ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
-        . "$crucible_repo_bin_dir/_crucible_completions"
-    else
-        exit_error "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
+    # Install the tab completions for crucible
+    if [ -d /etc/profile.d ]; then
+        if [ -e "$crucible_repo_bin_dir/_crucible_completions" ]; then
+            $sudo_cmd ln -sf "$crucible_repo_bin_dir/_crucible_completions" /etc/profile.d/crucible_completions.sh
+            . "$crucible_repo_bin_dir/_crucible_completions"
+        else
+            exit_error "file $crucible_repo_bin_dir/_crucible_completions was not found, exiting"
+        fi
     fi
-fi
-# Install the only bin we need for crucible in /usr/bin
-if [ -e "$crucible_repo_bin_dir/crucible" ]; then
-    $sudo_cmd ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
-else
-    exit_error "file $crucible_repo_bin_dir/crucible was not found, exiting"
+
+    # Install the only bin we need for crucible in /usr/bin
+    if [ -e "$crucible_repo_bin_dir/crucible" ]; then
+        $sudo_cmd ln -sf "$crucible_repo_bin_dir/crucible" /usr/bin/crucible
+    else
+        exit_error "file $crucible_repo_bin_dir/crucible was not found, exiting"
+    fi
 fi
 
 # Load the subprojects
@@ -73,7 +97,12 @@ fi
 no_clone=""
 pushd "$crucible_repo_dir" >/dev/null || exit_error "Could not change directory to $crucible_repo_dir"
 /bin/mkdir -p subprojects/benchmarks subprojects/tools subprojects/core subprojects/docs subprojects/userenvs
-for link in $(find subprojects -type l); do
+
+find_args=""
+if [ -n "${CRUCIBLE_SUBPROJECT_NAME}" ]; then
+    find_args=" -name ${CRUCIBLE_SUBPROJECT_NAME} "
+fi
+for link in $(find subprojects -type l ${find_args}); do
     type_dir=$(echo "${link}" | awk -F'/' '{ print $2 }')
     name_link=$(echo "${link}" | awk -F'/' '{ print $3 }')
     active=0
@@ -113,8 +142,18 @@ for link in $(find subprojects -type l); do
     fi
 done
 echo
+if [ -n "${CRUCIBLE_SUBPROJECT_NAME}" ]; then
+    if [ -z "${subprojects[$CRUCIBLE_SUBPROJECT_NAME]}" ]; then
+        echo "Subproject ${CRUCIBLE_SUBPROJECT_NAME} has been deactivated"
+        exit
+    fi
+fi
 echo "Ensuring each subproject is properly configured:"
 for subproject in "${!subprojects[@]}"; do
+    if [ -n "${CRUCIBLE_SUBPROJECT_NAME}" -a "${subproject}" != "${CRUCIBLE_SUBPROJECT_NAME}" ]; then
+        continue
+    fi
+
     echo
     echo "Processing subproject: ${subproject}"
 
