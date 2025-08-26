@@ -222,7 +222,7 @@ function config_show() {
 
 function subprojects_install() {
     echo "Calling subprojects-install to ensure proper subproject installation and configuration"
-    ${CRUCIBLE_HOME}/bin/subprojects-install
+    ${CRUCIBLE_HOME}/bin/subprojects-install "$@"
 }
 
 function config_remove_repo() {
@@ -266,7 +266,7 @@ function config_remove_repo() {
 
     echo "Successfully removed repo with name '${name}' from repo config file"
     echo
-    subprojects_install
+    subprojects_install --name ${name}
 }
 
 function config_add_repo() {
@@ -356,7 +356,7 @@ function config_add_repo() {
         popd > /dev/null
     fi
     echo
-    subprojects_install
+    subprojects_install --name ${name}
 }
 
 function config_update_repo() {
@@ -473,7 +473,7 @@ function config_update_repo() {
     fi
 
     if [ ${run_subprojects_installer} -eq 1 ]; then
-        subprojects_install
+        subprojects_install --name ${name}
     elif [ ${do_target_checkout} -eq 1 ]; then
         subproject_type=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg repo_name "${name}" '.official[], .unofficial[] | select(.name == $repo_name) | .type')
         subproject_type_dir=$(get_project_type_dir "${subproject_type}")

@@ -553,8 +553,16 @@ if [ -e ${INSTALL_PATH}/bin/jqlib ]; then
     update_repos_config ${GIT_REPO} ${INSTALL_PATH} ${GIT_BRANCH}
 fi
 
-$INSTALL_PATH/bin/subprojects-install $GIT_TAG >>"$GIT_INSTALL_LOG" 2>&1 ||
-    exit_error "Failed to execute crucible-project install, check $GIT_INSTALL_LOG for details" $EC_FAIL_INSTALL
+git_tag_arg=""
+if [ -n "${GIT_TAG}" ]; then
+    if [ -e ${INSTALL_PATH}/bin/subprojects-install.new-interface ]; then
+        git_tag_arg=" --git-tag ${GIT_TAG} "
+    else
+        git_tag_arg=" ${GIT_TAG} "
+    fi
+fi
+${INSTALL_PATH}/bin/subprojects-install ${git_tag_arg} >> "${GIT_INSTALL_LOG}" 2>&1 ||
+    exit_error "Failed to execute crucible subproject install, check ${GIT_INSTALL_LOG} for details" ${EC_FAIL_INSTALL}
 
 SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY="${CRUCIBLE_ENGINE_REGISTRY}"
 SYSCONFIG_CRUCIBLE_ENGINE_AUTH=""
