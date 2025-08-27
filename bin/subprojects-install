@@ -157,11 +157,17 @@ for subproject in "${!subprojects[@]}"; do
     echo
     echo "Processing subproject: ${subproject}"
 
-    sp_type=$(jq_query ${REPOS_FILE} --arg name "${subproject}" '.official[], .unofficial[] | select(.name == $name) | .type')
     sp_repository=$(jq_query ${REPOS_FILE} --arg name "${subproject}" '.official[], .unofficial[] | select(.name == $name) | .repository')
-    # sp_repository has two possible formats:
+    # sp_repository has three possible formats:
     #   https://github.com/perftool-incubator/crucible.git
     #   git@github.com:perftool-incubator/crucible.git
+    #   CRUCIBLE-CI
+
+    if [ "${sp_repository}" == "CRUCIBLE-CI" ]; then
+        echo
+        echo "Bypassing modifications to subproject since it is the crucible-ci target"
+        continue
+    fi
 
     sp_git_proj=$(echo ${sp_repository} | awk -F/ '{print $NF}')
     sp_git_user_host_org=$(echo ${sp_repository} | sed -e s/${sp_git_proj}$// -e s,/$,,)
@@ -183,6 +189,7 @@ for subproject in "${!subprojects[@]}"; do
         fi
     fi
 
+    sp_type=$(jq_query ${REPOS_FILE} --arg name "${subproject}" '.official[], .unofficial[] | select(.name == $name) | .type')
     case "$sp_type" in
         "benchmark")
             sp_dir_prefix="benchmarks/"
