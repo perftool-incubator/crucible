@@ -46,6 +46,11 @@ fi
 current_dir=$(pwd)
 echo "Attempting to update project repo ${PROJECT_NAME} at '${current_dir}' -> '$(readlink -e ${current_dir})'"
 
+if [ "${PROJECT_REPOSITORY}" == "CRUCIBLE-CI" ]; then
+    echo "Bypassing updates to project repo ${PROJECT_NAME} since it is the crucible-ci target"
+    exit 0
+fi
+
 if [ -d "./.git" ]; then
     # validate that the current repository matches the expected repository
     ORIGIN_REPOSITORY=$(git remote get-url origin)
