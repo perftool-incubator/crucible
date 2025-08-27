@@ -164,7 +164,6 @@ for subproject in "${!subprojects[@]}"; do
     #   CRUCIBLE-CI
 
     if [ "${sp_repository}" == "CRUCIBLE-CI" ]; then
-        echo
         echo "Bypassing modifications to subproject since it is the crucible-ci target"
         continue
     fi
