@@ -1,0 +1,25 @@
+name: crucible-weekly-ci
+
+# The intention of this workflow is to run often (ie. weekly) and to
+# force everything to be built.  This will hopefully catch build
+# errors caused by external changes more quickly than what we are
+# currently experiencing.
+
+on:
+  schedule:
+    # Runs every Sunday at 00:00
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+
+jobs:
+  call-core-release-crucible-ci_weekly-ci:
+    if: github.repository == 'perftool-incubator/crucible'
+    uses: perftool-incubator/crucible-ci/.github/workflows/core-release-crucible-ci.yaml@main
+    with:
+      ci_target: "crucible"
+      ci_target_branch: "master"
+      github_workspace: "$GITHUB_WORKSPACE"
+      force_controller_build: "yes"
+    secrets:
+      weekly_ci_registry_auth: ${{ secrets.CRUCIBLE_WEEKLY_CI_ENGINES_REGISTRY_AUTH }}
+      quay_oauth_token: ${{ secrets.CRUCIBLE_QUAYIO_OAUTH_TOKEN }}
