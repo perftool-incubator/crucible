@@ -502,8 +502,8 @@ for dep in $DEPENDENCIES; do
 done
 
 if [ -n "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH}" ]; then
-    if ! echo "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH}" | grep -q "[1-9][0-9]*[wm]"; then
-        exit_error "Invalid syntax for engine Quay expiration length.  Expecting either '<integer>w' (for weeks) or '<integer>m' (for months)" ${EC_INVALID_QUAY_EXPIRATION_LENGTH}
+    if ! echo "${CRUCIBLE_ENGINE_QUAY_EXPIRATION_LENGTH}" | grep -q "^[1-9][0-9]*[wd]$"; then
+        exit_error "Invalid syntax for engine Quay expiration length.  Expecting either '<integer>w' (for weeks) or '<integer>d' (for days)" ${EC_INVALID_QUAY_EXPIRATION_LENGTH}
     fi
 fi
 
