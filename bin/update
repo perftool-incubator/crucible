@@ -203,4 +203,8 @@ ${CRUCIBLE_HOME}/bin/repo info
 echo
 ${CRUCIBLE_HOME}/bin/repo config show
 
+if [ ${RC} != 0 ]; then
+    echo
+    echo "WARNING: An error occured.  Please review the log for details."
+fi
 exit ${RC}
