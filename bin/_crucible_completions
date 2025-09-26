@@ -35,7 +35,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
                 ;;
             run)
-                COMPREPLY=($(compgen -W "$(cd $CRUCIBLE_HOME/subprojects/benchmarks/; find . -mindepth 1 -maxdepth 1 -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -f -- "${COMP_WORDS[2]}"))
                 ;;
             start|stop)
                 COMPREPLY=($(compgen -W "httpd opensearch valkey" -- "${COMP_WORDS[2]}"))
@@ -124,13 +124,6 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "first last sessionid" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "run" ]; then
-        params=""
-        rickshaw_params_file="$CRUCIBLE_HOME/subprojects/core/rickshaw/params"
-        if [ -e $rickshaw_params_file ]; then
-            params="$params $(cat $rickshaw_params_file)"
-        fi
-        COMPREPLY=($(compgen -W "$params" -- "${COMP_WORDS[$num_index]}"))
     fi
 }
 
