@@ -396,8 +396,22 @@ elif [ "${1}" == "run" ]; then
         exit ${EXIT_VAL}
     fi
 
+    # create and add SSH key
+    RUN_SSH_DIR="${base_run_dir}/config/ssh"
+    SSH_AUTH_KEYS_FILE="/root/.ssh/authorized_keys"
+    SSH_KEY_PREFIX="crucible-run"
+    echo "Creating run SSH key"
+    mkdir ${RUN_SSH_DIR}
+    ssh-keygen -f ${RUN_SSH_DIR}/${SESSION_ID} -C "${SSH_KEY_PREFIX}-${SESSION_ID}@$(hostname -f)" -N "" > ${RUN_SSH_DIR}/${SESSION_ID}.log.txt
+    echo "Adding run SSH key as an authorized key"
+    cat ${RUN_SSH_DIR}/${SESSION_ID}.pub >> ${SSH_AUTH_KEYS_FILE}
+
     ${podman_run} --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_run_cmd}
     RC=$?
+
+    # remove SSH key
+    echo "Removing run SSH key as an authorized key"
+    sed -i "/${SSH_KEY_PREFIX}-${SESSION_ID}/d" ${SSH_AUTH_KEYS_FILE}
 
     if [ ${RC} == 0 ]; then
         post_process_run ${base_run_dir} &&\
