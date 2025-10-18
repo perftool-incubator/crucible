@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# clean up any stale SSH run keys -- that is SSH run keys that failed to get cleaned up at runtime
+
+. /etc/sysconfig/crucible
+
+if [ -z "${CRUCIBLE_HOME}" ]; then
+    echo "CRUCIBLE_HOME not defined, exiting."
+    exit 1
+fi
+
+if [ ! -e ${CRUCIBLE_HOME} ]; then
+    echo "Could not find ${CRUCIBLE_HOME}, exiting."
+    exit 1
+fi
+
+source ${CRUCIBLE_HOME}/bin/base
+
+PROCESS_FILE_PREFIX="${USER_STORE}/ssh-key-mgmt"
+PROCESS_LOCK_FILE="${PROCESS_FILE_PREFIX}.process-lock"
+PROCESS_LOG_FILE="${PROCESS_FILE_PREFIX}.log"
+
+touch "${PROCESS_LOCK_FILE}"
+
+{
+    flock --nonblock --exclusive 9 || exit 0
+    chmod 666 "${PROCESS_LOCK_FILE}"
+
+    {
+	AUTHORIZED_KEYS="/root/.ssh/authorized_keys"
+	HOSTNAME=$(hostname -f)
+
+	echo "Running Crucible Stale SSH Key Management at $(date -u)"
+	echo
+	echo "Managing authorized keys in ${AUTHORIZED_KEYS}"
+	echo
+	echo
+
+	echo "Legacy Key Management:"
+	echo
+	LEGACY_KEY_COMMENT="root@${HOSTNAME}"
+	echo "LEGACY_KEY_COMMENT=${LEGACY_KEY_COMMENT}"
+	STALE_LEGACY_KEYS=$(grep "${LEGACY_KEY_COMMENT}" "${AUTHORIZED_KEYS}" | wc -l)
+	echo "Found ${STALE_LEGACY_KEYS} stale legacy keys"
+	if [ ${STALE_LEGACY_KEYS} -gt 0 ]; then
+	    echo "Removing stale legacy keys"
+	    sed -i "/${LEGACY_KEY_COMMENT}/d" "${AUTHORIZED_KEYS}"
+	else
+	    echo "No stale legacy keys to remove"
+	fi
+	echo
+	echo
+
+	echo "Current Key Management:"
+	echo
+	CURRENT_KEY_SIGNATURE="crucible-run-"
+	echo "CURRENT_KEY_SIGNATURE=${CURRENT_KEY_SIGNATURE}"
+	CURRENT_KEYS=$(grep "${CURRENT_KEY_SIGNATURE}" "${AUTHORIZED_KEYS}" | wc -l)
+	echo "Found ${CURRENT_KEYS} current keys"
+	if [ ${CURRENT_KEYS} -gt 0 ]; then
+	    echo "Analyzing current keys for stale status"
+
+	    for run_id in $(grep "${CURRENT_KEY_SIGNATURE}" "${AUTHORIZED_KEYS}" | sed -e "s/.*\s${CURRENT_KEY_SIGNATURE}\([a-z0-9-]\+\)@.*/\1/"); do
+		echo "Processing key for run ID '${run_id}'"
+
+		logger_pod="crucible-logger-${run_id}"
+
+		if ${podman_exists} ${logger_pod}; then
+		    echo "A logger pod exists for run ID '${run_id}' so it is not stale"
+		else
+		    echo "No logger pod exists for run ID '${run_id}' so it is stale"
+
+		    echo "Removing stale current key"
+		    sed -i "/${CURRENT_KEY_SIGNATURE}${run_id}/d" "${AUTHORIZED_KEYS}"
+		fi
+
+		echo
+	    done
+	else
+	    echo "No current keys to analyze"
+	fi
+    } > "${PROCESS_LOG_FILE}" 2>&1
+
+} 9<"${PROCESS_LOCK_FILE}"
