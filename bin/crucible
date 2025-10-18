@@ -65,6 +65,8 @@ if [ "${1}" != "update" ]; then
     fi
 fi
 
+${CRUCIBLE_HOME}/bin/_ssh-key-cleaner &
+
 # special case some log operations so they don't happen under log
 # redirection
 log_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
