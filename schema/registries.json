@@ -147,6 +147,9 @@
 			"api-url": {
 			    "type": "string",
 			    "minLength": 1
+			},
+			"require-success": {
+			    "type": "boolean"
 			}
 		    },
 		    "additionalProperties": false,
