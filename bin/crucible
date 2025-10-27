@@ -51,6 +51,8 @@ function setup_pipe() {
 
 if [ "${1}" != "update" ]; then
     ${CRUCIBLE_HOME}/bin/_git-fetch &
+    disown $!
+
     if [ -e "${UPDATE_STATUS_FILE}" ]; then
         {
             flock --timeout 2 --shared 9 || exit_error "Failed to shared acquire ${UPDATE_STATUS_LOCK_FILE}"
@@ -66,6 +68,7 @@ if [ "${1}" != "update" ]; then
 fi
 
 ${CRUCIBLE_HOME}/bin/_ssh-key-cleaner &
+disown $!
 
 # special case some log operations so they don't happen under log
 # redirection
