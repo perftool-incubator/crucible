@@ -41,6 +41,10 @@ if [ $? -gt 0 ]; then
     exit 1
 fi
 
+# make sure the JSON config files validate against their schemas before proceeding
+validate_json_schema ${SERVICES_CFG} ${SERVICES_CFG_SCHEMA} || exit_error "Services Configuration Error: ${SERVICES_CFG} does not validate against ${SERVICES_CFG_SCHEMA}"
+validate_json_schema ${REGISTRIES_CFG} ${REGISTRIES_CFG_SCHEMA} || exit_error "Registries Configuration Error: ${REGISTRIES_CFG} does not validate against ${REGISTRIES_CFG_SCHEMA}"
+
 check_id
 
 function setup_pipe() {
