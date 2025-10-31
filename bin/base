@@ -205,7 +205,10 @@ function stop_httpd() {
 }
 
 function start_valkey() {
-    local RC valkey_cmd
+    local RC valkey_cmd valkey_monitor_cmd valkey_monitor_enabled
+
+    valkey_monitor_enabled=$(jq_query ${SERVICES_CFG} '.valkey.monitor.enabled')
+
     echo -n "Checking for valkey"
     if ! podman_running crucible-valkey; then
         generate_rand_pass /tmp/valkey_pass
@@ -215,15 +218,44 @@ function start_valkey() {
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start valkey"
+            return ${RC}
         else
             echo "Successfully started valkey"
         fi
     fi
+
+    if [ "${valkey_monitor_enabled}" == "true" ]; then
+        echo -n "Checking for valkey-monitor"
+        if ! podman_running crucible-valkey-monitor; then
+            valkey_monitor_cmd="${CRUCIBLE_HOME}/subprojects/core/roadblock/utilities/redis-monitor.py --redis-server localhost --redis-password $(cat /tmp/valkey_pass)"
+            ${podman_run} --name crucible-valkey-monitor "${container_common_args[@]}" "${container_valkey_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_monitor_cmd} > /dev/null
+            RC=$?
+            if [ ${RC} != 0 ]; then
+                echo "ERROR: Could not start valkey-monitor"
+                return ${RC}
+            else
+                echo "Successfully started valkey-monitor"
+            fi
+        fi
+    fi
+
     return ${RC}
 }
 
 function stop_valkey() {
     local RC=0
+
+    echo -n "Checking for valkey-monitor"
+    if podman_running crucible-valkey-monitor; then
+        ${podman_stop} crucible-valkey-monitor > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop valkey-monitor"
+        else
+            echo "Successfully stopped valkey-monitor"
+        fi
+    fi
+
     echo -n "Checking for valkey"
     if podman_running crucible-valkey; then
         rm -f /tmp/valkey_pass
@@ -236,6 +268,7 @@ function stop_valkey() {
             echo "Successfully stopped valkey"
         fi
     fi
+
     return ${RC}
 }
 
@@ -946,6 +979,8 @@ podman_ps="podman_wrapper ps"
 # load the jqlib library
 source ${CRUCIBLE_HOME}/bin/jqlib
 
+SERVICES_CFG=${CRUCIBLE_HOME}/config/services.json
+SERVICES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/services.json
 INSTANCES_CFG=${CRUCIBLE_HOME}/config/instances.json
 REGISTRIES_CFG=${CRUCIBLE_HOME}/config/registries.json
 REGISTRIES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/registries.json
