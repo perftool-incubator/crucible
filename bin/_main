@@ -31,22 +31,22 @@ elif [ "${1}" == "ls" -o "${1}" == "tags" -o "${1}" == "result-completion" ]; th
     result_process_cmd="${CRUCIBLE_HOME}/bin/result-processor.py"
     case "${1}" in
         ls|tags)
-            ${podman_run} --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${result_process_cmd} "$@"
+            ${podman_run} --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${result_process_cmd} "$@"
             EXIT_VAL=$?
             ;;
         result-completion)
             shift
-            ${podman_run} --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${result_process_cmd} completion "$@"
+            ${podman_run} --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${result_process_cmd} completion "$@"
             EXIT_VAL=$?
             ;;
     esac
 elif [ "${1}" == "instances" ]; then
     shift
     if [ -z "${1}" ]; then
-        ${podman_run} --name crucible-manage-instances-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info
+        ${podman_run} --name crucible-manage-instances-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info
         EXIT_VAL=$?
     else
-        ${podman_run} --name crucible-manage-instances-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} "$@"
+        ${podman_run} --name crucible-manage-instances-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} "$@"
         EXIT_VAL=$?
     fi
 elif [ "${1}" == "registries" ]; then
@@ -97,7 +97,7 @@ elif [ "${1}" == "get" ]; then
             shift
             cdm_query_opt=$(${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
             cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh $@ $cdm_query_opt"
-            ${podman_run} --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
+            ${podman_run} --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
             EXIT_VAL=$?
         else
             echo "ERROR: unsupported 'get' argument [${1}]"
@@ -125,6 +125,7 @@ elif [ "${1}" == "rm" ]; then
         instance=$(${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\
+            ${container_non_service_args[@]}\
             ${CRUCIBLE_CONTROLLER_IMAGE}\
             ${CRUCIBLE_HOME}/bin/manage_instances.py\
             --cfg ${INSTANCES_CFG}\
@@ -134,6 +135,7 @@ elif [ "${1}" == "rm" ]; then
     cdmver_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
         ${container_common_args[@]}\
+        ${container_non_service_args[@]}\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
         ${CRUCIBLE_HOME}/bin/manage_instances.py\
         --cfg ${INSTANCES_CFG}\
@@ -146,6 +148,7 @@ elif [ "${1}" == "rm" ]; then
     access_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
         ${container_common_args[@]}\
+        ${container_non_service_args[@]}\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
         ${CRUCIBLE_HOME}/bin/manage_instances.py\
         --cfg ${INSTANCES_CFG}\
@@ -160,6 +163,7 @@ elif [ "${1}" == "rm" ]; then
         ${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\
+            ${container_non_service_args[@]}\
             ${CRUCIBLE_CONTROLLER_IMAGE}\
             ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/delete-run.sh\
             ${access_opt} ${cdmver_opt} "$@"
@@ -223,6 +227,7 @@ elif [ "${1}" == "index" ]; then
         instance=$(${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\
+            ${container_non_service_args[@]}\
             ${CRUCIBLE_CONTROLLER_IMAGE}\
             ${CRUCIBLE_HOME}/bin/manage_instances.py\
             --cfg ${INSTANCES_CFG}\
@@ -232,6 +237,7 @@ elif [ "${1}" == "index" ]; then
     cdmver_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
         ${container_common_args[@]}\
+        ${container_non_service_args[@]}\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
         ${CRUCIBLE_HOME}/bin/manage_instances.py\
         --cfg ${INSTANCES_CFG}\
@@ -239,6 +245,7 @@ elif [ "${1}" == "index" ]; then
     access_opt=$(${podman_run}\
         --name crucible-manage-instances--${SESSION_ID}\
         ${container_common_args[@]}\
+        ${container_non_service_args[@]}\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
         ${CRUCIBLE_HOME}/bin/manage_instances.py\
         --cfg ${INSTANCES_CFG}\
@@ -406,7 +413,7 @@ elif [ "${1}" == "run" ]; then
     echo "Adding run SSH key as an authorized key"
     cat ${RUN_SSH_DIR}/${SESSION_ID}.pub >> ${SSH_AUTH_KEYS_FILE}
 
-    ${podman_run} --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_run_cmd}
+    ${podman_run} --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_run_cmd}
     RC=$?
 
     # remove SSH key
@@ -418,6 +425,7 @@ elif [ "${1}" == "run" ]; then
         instance=$(${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\
+            ${container_non_service_args[@]}\
             ${CRUCIBLE_CONTROLLER_IMAGE}\
             ${CRUCIBLE_HOME}/bin/manage_instances.py\
             --cfg ${INSTANCES_CFG}\
@@ -426,6 +434,7 @@ elif [ "${1}" == "run" ]; then
         cdmver_opt=$(${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\
+            ${container_non_service_args[@]}\
             ${CRUCIBLE_CONTROLLER_IMAGE}\
             ${CRUCIBLE_HOME}/bin/manage_instances.py\
             --cfg ${INSTANCES_CFG}\
@@ -433,6 +442,7 @@ elif [ "${1}" == "run" ]; then
         access_opt=$(${podman_run}\
             --name crucible-manage-instances--${SESSION_ID}\
             ${container_common_args[@]}\
+            ${container_non_service_args[@]}\
             ${CRUCIBLE_CONTROLLER_IMAGE}\
             ${CRUCIBLE_HOME}/bin/manage_instances.py\
             --cfg ${INSTANCES_CFG}\
@@ -504,7 +514,7 @@ elif [ "${1}" == "reset" ]; then
     fi
 elif [ "${1}" == "wrapper" ]; then
     shift
-    ${podman_run} --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} $@
+    ${podman_run} --name crucible-wrapper-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} $@
     EXIT_VAL=$?
 else
     echo "ERROR: This function has not been implemented"

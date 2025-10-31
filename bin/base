@@ -71,7 +71,7 @@ function check_id {
 
 function crucible_log() {
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-        ${podman_run} --name crucible-log-${SESSION_ID} ${container_log_args[@]} ${container_common_args[@]} ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/log $@
+        ${podman_run} --name crucible-log-${SESSION_ID} ${container_log_args[@]} ${container_common_args[@]} ${container_non_service_args[@]} ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/log $@
     else
         $CRUCIBLE_HOME/bin/log $@
     fi
@@ -177,7 +177,7 @@ function start_httpd() {
     echo -n "Checking for httpd"
     if ! podman_running crucible-httpd; then
         open_firewall_port 8080 tcp
-        ${podman_run} --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${httpd_cmd} > /dev/null
+        ${podman_run} --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${httpd_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start httpd"
@@ -205,25 +205,57 @@ function stop_httpd() {
 }
 
 function start_valkey() {
-    local RC valkey_cmd
+    local RC valkey_cmd valkey_monitor_cmd valkey_monitor_enabled
+
+    valkey_monitor_enabled=$(jq_query ${SERVICES_CFG} '.valkey.monitor.enabled')
+
     echo -n "Checking for valkey"
     if ! podman_running crucible-valkey; then
         generate_rand_pass /tmp/valkey_pass
         valkey_cmd="valkey-server /etc/valkey/valkey.conf --requirepass $(cat /tmp/valkey_pass)"
         open_firewall_port 6379 tcp
-        ${podman_run} --name crucible-valkey "${container_common_args[@]}" "${container_valkey_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_cmd} > /dev/null
+        ${podman_run} --name crucible-valkey "${container_common_args[@]}" "${container_valkey_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start valkey"
+            return ${RC}
         else
             echo "Successfully started valkey"
         fi
     fi
+
+    if [ "${valkey_monitor_enabled}" == "true" ]; then
+        echo -n "Checking for valkey-monitor"
+        if ! podman_running crucible-valkey-monitor; then
+            valkey_monitor_cmd="${CRUCIBLE_HOME}/subprojects/core/roadblock/utilities/redis-monitor.py --redis-server localhost --redis-password $(cat /tmp/valkey_pass)"
+            ${podman_run} --name crucible-valkey-monitor "${container_common_args[@]}" "${container_valkey_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_monitor_cmd} > /dev/null
+            RC=$?
+            if [ ${RC} != 0 ]; then
+                echo "ERROR: Could not start valkey-monitor"
+                return ${RC}
+            else
+                echo "Successfully started valkey-monitor"
+            fi
+        fi
+    fi
+
     return ${RC}
 }
 
 function stop_valkey() {
     local RC=0
+
+    echo -n "Checking for valkey-monitor"
+    if podman_running crucible-valkey-monitor; then
+        ${podman_stop} crucible-valkey-monitor > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop valkey-monitor"
+        else
+            echo "Successfully stopped valkey-monitor"
+        fi
+    fi
+
     echo -n "Checking for valkey"
     if podman_running crucible-valkey; then
         rm -f /tmp/valkey_pass
@@ -236,6 +268,7 @@ function stop_valkey() {
             echo "Successfully stopped valkey"
         fi
     fi
+
     return ${RC}
 }
 
@@ -258,7 +291,7 @@ function start_opensearch() {
                 common_container_args+=("${arg}")
             fi
         done
-        ${podman_run} --name crucible-opensearch "${common_container_args[@]}" "${container_opensearch_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_start_cmd} > /dev/null
+        ${podman_run} --name crucible-opensearch "${common_container_args[@]}" "${container_opensearch_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_start_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start OpenSearch"
@@ -272,7 +305,7 @@ function start_opensearch() {
                 case "${stage}" in
                     1)
                         pod_name=crucible-opensearch-status-check-${SESSION_ID}-$(uuidgen)
-                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_status_cmd})
+                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_status_cmd})
                         if echo "${status_check}" | grep -q "Connection refused"; then
                             sleep 1
                         else
@@ -281,7 +314,7 @@ function start_opensearch() {
                         ;;
                     2)
                         pod_name=crucible-opensearch-status-check-json-query-${SESSION_ID}-$(uuidgen)
-                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${opensearch_status_cmd} | jq -r '. \"status\"'")
+                        status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${opensearch_status_cmd} | jq -r '. \"status\"'")
                         if [ "${status_check}" == "yellow" -o "${status_check}" == "green" ]; then
                             echo "OpenSearch is online after ${count} seconds"
                             opensearch_available=1
@@ -340,12 +373,12 @@ function extract_run_id() {
             fi
         fi
 
-        THIS_ID=`${podman_run} --name crucible-extract-run-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
+        THIS_ID=`${podman_run} --name crucible-extract-run-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"run-id\"'"`
         if [ -n "${THIS_ID}" -a "${THIS_ID}" != "null" ]; then
             echo "${THIS_ID}"
             return 0
         else
-            THIS_ID=`${podman_run} --name crucible-extract-run-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"id\"'"`
+            THIS_ID=`${podman_run} --name crucible-extract-run-id-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${result_dumper} ${run_json} | jq -r '. \"id\"'"`
             if [ -n "${THIS_ID}" -a "${THIS_ID}" != "null" ]; then
                 echo "${THIS_ID}"
                 return 0
@@ -372,9 +405,9 @@ function extract_primary_periods() {
     shift
     RUN_ID=$(extract_run_id ${RUN_DIR})
 
-    cdm_query_opt=$(${podman_run} --name crucible-get-result-opt-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
+    cdm_query_opt=$(${podman_run} --name crucible-get-result-opt-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
     cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-primary-periods.sh $cdm_query_opt --run ${RUN_ID}"
-    ${podman_run} --name crucible-get-primary-periods-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
+    ${podman_run} --name crucible-get-primary-periods-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Failed to get primary period IDs [rc=${RC}]"
@@ -398,7 +431,7 @@ function post_process_run() {
 
     post_process_fail=0
     echo "Post-processing benchmark data with $rs_pp_b_cmd"
-    ${podman_run} --name crucible-rickshaw-pp-bench-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_pp_b_cmd}
+    ${podman_run} --name crucible-rickshaw-pp-bench-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_pp_b_cmd}
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Failed to post-process the benchmark [rc=${RC}]"
@@ -406,7 +439,7 @@ function post_process_run() {
     fi
 
     echo "Post-processing tool data with $rs_pp_t_cmd"
-    ${podman_run} --name crucible-rickshaw-pp-tools-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_pp_t_cmd}
+    ${podman_run} --name crucible-rickshaw-pp-tools-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_pp_t_cmd}
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Failed to post-process the tools [rc=${RC}]"
@@ -452,6 +485,7 @@ function index_run() {
         --name crucible-rickshaw-gen-docs-${SESSION_ID}\
         "${container_common_args[@]}"\
         "${container_rs_args[@]}"\
+        "${container_non_service_args[@]}"\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
         ${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs\
         --base-run-dir=${RUN_DIR} ${cdmver_opt}
@@ -467,6 +501,7 @@ function index_run() {
     ${podman_run}\
         --name crucible-cdm-index-${SESSION_ID}\
         "${container_common_args[@]}"\
+        "${container_non_service_args[@]}"\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
         ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/add-run.sh\
         --dir ${RUN_DIR}/run/opensearch $access_opt
@@ -485,9 +520,9 @@ function get_result_backend() {
     local RC
     local cdm_query_opt cdm_query_cmd
 
-    cdm_query_opt=$(${podman_run} --name crucible-get-result-opt-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
+    cdm_query_opt=$(${podman_run} --name crucible-get-result-opt-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} query-opt)
     cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@ $cdm_query_opt"
-    ${podman_run} --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
+    ${podman_run} --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
     return ${RC}
 }
@@ -569,7 +604,7 @@ function unarchive_run() {
     UNARCHIVE_CMD="unxz --threads=0 --stdout ${ARCHIVE_FILE} | tar --extract --directory=${var_run_crucible}"
 
     echo "Unpacking archive:"
-    ${podman_run} --name crucible-unarchive-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${UNARCHIVE_CMD}"
+    ${podman_run} --name crucible-unarchive-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${UNARCHIVE_CMD}"
     if [ $? == 0 ]; then
         echo "${ARCHIVE_FILE} successfully unpacked to ${var_run_crucible}/${RUN_NAME}"
 
@@ -635,7 +670,7 @@ function archive_run() {
     ARCHIVE_CMD="pushd ${BASE_DIR} > /dev/null && tar --create ${RUN_NAME} | xz --threads=0 --stdout > ${var_archive_crucible}/${ARCHIVE_NAME}"
 
     echo "Creating archive:"
-    ${podman_run} --name crucible-archive-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${ARCHIVE_CMD}"
+    ${podman_run} --name crucible-archive-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${ARCHIVE_CMD}"
     if [ $? == 0 ]; then
         echo "${RUN_DIR} successfully archived to ${var_archive_crucible}/${ARCHIVE_NAME}"
 
@@ -667,7 +702,7 @@ function reinit_opensearch() {
     RC=0
 
     delete_opensearch_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/templates/delete.sh"
-    if ${podman_run} --name crucible-opensearch-delete "${container_common_args[@]}" "${container_rs_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${delete_opensearch_cmd}; then
+    if ${podman_run} --name crucible-opensearch-delete "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${delete_opensearch_cmd}; then
         RC=${?}
     else
         RC=${?}
@@ -685,14 +720,14 @@ function repair_opensearch() {
 
     echo "Clearing read-only bit:"
     pod_name="crucible-clear-opensearch-read-only"
-    ${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_put_cmd}  -H 'Content-Type: application/json' --data '{ "index": { "blocks": { "read_only": false } } }'
+    ${podman_run} --name ${pod_name} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_put_cmd}  -H 'Content-Type: application/json' --data '{ "index": { "blocks": { "read_only": false } } }'
     RC=$?
     if [ ${RC} != 0 ]; then
         echo "ERROR: Failed to clear read-only bit on OpenSearch indices"
     else
         echo "Clearing read-only-allow-delete bit:"
         pod_name="crucible-clear-opensearch-read-only-allow-delete"
-        ${podman_run} --name ${pod_name} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_put_cmd}  -H 'Content-Type: application/json' --data '{ "index": { "blocks": { "read_only_allow_delete": false } } }'
+        ${podman_run} --name ${pod_name} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${opensearch_put_cmd}  -H 'Content-Type: application/json' --data '{ "index": { "blocks": { "read_only_allow_delete": false } } }'
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Failed to clear read-only-allow-delete bit on OpenSearch indices"
@@ -848,7 +883,7 @@ function validate_json_schema() {
     JSON=$1
     SCHEMA=$2
 
-    ${podman_run} --name crucible-json-validator-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${TOOLBOX_HOME}/bin/json-validator.py --json ${JSON} --schema ${SCHEMA}
+    ${podman_run} --name crucible-json-validator-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${TOOLBOX_HOME}/bin/json-validator.py --json ${JSON} --schema ${SCHEMA}
     return $?
 }
 
@@ -901,7 +936,12 @@ container_common_args+=("--ipc=host")
 container_common_args+=("--pid=host")
 container_common_args+=("--net=host")
 container_common_args+=("--security-opt=label=disable")
-container_common_args+=("--log-driver=none")
+
+container_service_args=()
+container_service_args+=("--log-driver=journald")
+
+container_non_service_args=()
+container_non_service_args+=("--log-driver=none")
 
 container_log_args=()
 container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
@@ -939,6 +979,8 @@ podman_ps="podman_wrapper ps"
 # load the jqlib library
 source ${CRUCIBLE_HOME}/bin/jqlib
 
+SERVICES_CFG=${CRUCIBLE_HOME}/config/services.json
+SERVICES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/services.json
 INSTANCES_CFG=${CRUCIBLE_HOME}/config/instances.json
 REGISTRIES_CFG=${CRUCIBLE_HOME}/config/registries.json
 REGISTRIES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/registries.json
@@ -1032,5 +1074,5 @@ fi
 
 # If the instances.json is missing, generate the default one
 if [ ! -e ${INSTANCES_CFG} ]; then
-    ${podman_run} --name crucible-gen-instances-cfg-${SESSION_ID} "${container_common_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info >/dev/null
+    ${podman_run} --name crucible-gen-instances-cfg-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/manage_instances.py --cfg ${INSTANCES_CFG} info >/dev/null
 fi

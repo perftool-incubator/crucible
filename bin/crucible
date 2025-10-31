@@ -41,6 +41,10 @@ if [ $? -gt 0 ]; then
     exit 1
 fi
 
+# make sure the JSON config files validate against their schemas before proceeding
+validate_json_schema ${SERVICES_CFG} ${SERVICES_CFG_SCHEMA} || exit_error "Services Configuration Error: ${SERVICES_CFG} does not validate against ${SERVICES_CFG_SCHEMA}"
+validate_json_schema ${REGISTRIES_CFG} ${REGISTRIES_CFG_SCHEMA} || exit_error "Registries Configuration Error: ${REGISTRIES_CFG} does not validate against ${REGISTRIES_CFG_SCHEMA}"
+
 check_id
 
 function setup_pipe() {
@@ -117,7 +121,7 @@ elif [ "$1" == "help" -o -z "$1" ]; then
     shift
     exec ${CRUCIBLE_HOME}/bin/_help ${CRUCIBLE_HOME} "$@"
 elif [ "$1" == "console" ]; then
-    exec ${podman_run_interactive} --name crucible-console-${SESSION_ID} --tty --interactive "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash
+    exec ${podman_run_interactive} --name crucible-console-${SESSION_ID} --tty --interactive "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash
 elif [ "${1}" == "reset" ]; then
     # this input has to be done outside of the logger redirect scope
 
@@ -170,7 +174,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     container_logger_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
     container_logger_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
-    ${podman_run} ${container_logger_args[@]} ${container_common_args[@]} ${CRUCIBLE_CONTROLLER_IMAGE} ${logger_cmd} &
+    ${podman_run} ${container_logger_args[@]} ${container_common_args[@]} ${container_non_service_args[@]} ${CRUCIBLE_CONTROLLER_IMAGE} ${logger_cmd} &
     LOGGER_PID=$!
 
     # redirect the output to the pipes
