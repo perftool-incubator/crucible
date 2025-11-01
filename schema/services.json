@@ -1,0 +1,35 @@
+{
+    "title": "Crucible Services Schema",
+    "description": "This schema defines the Crucible services configuration file",
+    "type": "object",
+    "properties": {
+        "valkey": {
+            "description": "The valkey object contains configuration settings for the valkey service",
+            "type": "object",
+            "properties": {
+                "monitor": {
+                    "description": "The monitor object contains configuration settings for valkey monitor service",
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "description": "This parameter controls whether or not the valkey monitor service is enabled",
+                            "type": "boolean"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "enabled"
+                    ]
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "monitor"
+            ]
+        }
+    },
+    "additionalProperties": false,
+    "required": [
+        "valkey"
+    ]
+}
