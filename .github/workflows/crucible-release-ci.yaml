@@ -8,7 +8,6 @@ on:
     - '**.md'
     - '.github/rulesets/**'
     - .github/workflows/run-crucible-tracking.yaml
-    - .github/workflows/crucible-merged.yaml
     - .github/workflows/crucible-weekly-ci.yaml
     - .github/workflows/crucible-scheduled.yaml
     - .github/workflows/faux-crucible-release-ci.yaml
