@@ -371,10 +371,10 @@ elif [ "${1}" == "run" ]; then
     ${CRUCIBLE_HOME}/bin/repo config show > ${base_run_dir}/config/crucible.repo.config.show
 
     start_valkey
-    if [ -f "/tmp/valkey_pass" ]; then
-        roadblock_password="$(cat /tmp/valkey_pass)"
+    if [ -f "${CRUCIBLE_HOME}/config/valkey_pass" ]; then
+        roadblock_password="$(cat ${CRUCIBLE_HOME}/config/valkey_pass)"
     else
-        roadblock_password="flubber"
+        exit_error "Could not find the valkey service password.  Consider restarting valkey"
     fi
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\

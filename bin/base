@@ -211,8 +211,8 @@ function start_valkey() {
 
     echo -n "Checking for valkey"
     if ! podman_running crucible-valkey; then
-        generate_rand_pass /tmp/valkey_pass
-        valkey_cmd="valkey-server /etc/valkey/valkey.conf --requirepass $(cat /tmp/valkey_pass)"
+        generate_rand_pass ${CRUCIBLE_HOME}/config/valkey_pass
+        valkey_cmd="valkey-server /etc/valkey/valkey.conf --requirepass $(cat ${CRUCIBLE_HOME}/config/valkey_pass)"
         open_firewall_port 6379 tcp
         ${podman_run} --name crucible-valkey "${container_common_args[@]}" "${container_valkey_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_cmd} > /dev/null
         RC=$?
@@ -227,7 +227,7 @@ function start_valkey() {
     if [ "${valkey_monitor_enabled}" == "true" ]; then
         echo -n "Checking for valkey-monitor"
         if ! podman_running crucible-valkey-monitor; then
-            valkey_monitor_cmd="${CRUCIBLE_HOME}/subprojects/core/roadblock/utilities/redis-monitor.py --redis-server localhost --redis-password $(cat /tmp/valkey_pass)"
+            valkey_monitor_cmd="${CRUCIBLE_HOME}/subprojects/core/roadblock/utilities/redis-monitor.py --redis-server localhost --redis-password $(cat ${CRUCIBLE_HOME}/config/valkey_pass)"
             ${podman_run} --name crucible-valkey-monitor "${container_common_args[@]}" "${container_valkey_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${valkey_monitor_cmd} > /dev/null
             RC=$?
             if [ ${RC} != 0 ]; then
@@ -258,7 +258,7 @@ function stop_valkey() {
 
     echo -n "Checking for valkey"
     if podman_running crucible-valkey; then
-        rm -f /tmp/valkey_pass
+        rm -f ${CRUCIBLE_HOME}/config/valkey_pass
         close_firewall_port 6379 tcp
         ${podman_stop} crucible-valkey > /dev/null
         RC=$?

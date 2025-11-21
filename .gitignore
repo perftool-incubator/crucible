@@ -1,2 +1,5 @@
 repos/
 subprojects/
+config/instances.json
+config/registries.json
+config/valkey_pass
