@@ -409,7 +409,10 @@ elif [ "${1}" == "run" ]; then
     SSH_KEY_PREFIX="crucible-run"
     echo "Creating run SSH key"
     mkdir ${RUN_SSH_DIR}
-    ssh-keygen -f ${RUN_SSH_DIR}/${SESSION_ID} -C "${SSH_KEY_PREFIX}-${SESSION_ID}@$(hostname -f)" -N "" > ${RUN_SSH_DIR}/${SESSION_ID}.log.txt
+    ssh-keygen -f ${RUN_SSH_DIR}/${SESSION_ID} -C "${SSH_KEY_PREFIX}-${SESSION_ID}@$(hostname -f)" -N "" > ${RUN_SSH_DIR}/${SESSION_ID}.log.txt 2>&1
+    if [ ! -e ${RUN_SSH_DIR}/${SESSION_ID} -o ! -e ${RUN_SSH_DIR}/${SESSION_ID}.pub ]; then
+        exit_error "SSH key generation failed"
+    fi
     echo "Adding run SSH key as an authorized key"
     cat ${RUN_SSH_DIR}/${SESSION_ID}.pub >> ${SSH_AUTH_KEYS_FILE}
 
