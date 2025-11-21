@@ -409,6 +409,12 @@ elif [ "${1}" == "run" ]; then
     SSH_KEY_PREFIX="crucible-run"
     echo "Creating run SSH key"
     mkdir ${RUN_SSH_DIR}
+    if [ "$(cat /sys/fs/selinux/enforce)" == "1" ]; then
+        echo "Setting proper SELinux label on ${RUN_SSH_DIR}"
+        if ! chcon -R -t ssh_home_t ${RUN_SSH_DIR}; then
+            exit_error "Setting ssh_home_t SELinux label on ${RUN_SSH_DIR} failed"
+        fi
+    fi
     ssh-keygen -f ${RUN_SSH_DIR}/${SESSION_ID} -C "${SSH_KEY_PREFIX}-${SESSION_ID}@$(hostname -f)" -N "" > ${RUN_SSH_DIR}/${SESSION_ID}.log.txt 2>&1
     RC=$?
     if [ ${RC} != 0 ]; then
