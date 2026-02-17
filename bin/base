@@ -380,7 +380,7 @@ function start_cdm_server() {
         cdm_server_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/start-server.sh ${cdm_query_opt}"
 
         open_firewall_port 3000 tcp
-        ${podman_run} --name crucible-cdm-server "${container_common_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_server_cmd} > /dev/null
+        ${podman_run} --name crucible-cdm-server "${container_common_args[@]}" "${container_cdm_server_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_server_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start CDM server"
@@ -1037,6 +1037,7 @@ container_common_args+=("--net=host")
 container_common_args+=("--security-opt=label=disable")
 
 container_service_args=()
+container_service_args+=("-d")
 container_service_args+=("--log-driver=journald")
 
 container_non_service_args=()
@@ -1047,16 +1048,15 @@ container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
 
 container_valkey_args=()
-container_valkey_args+=("-d")
 container_valkey_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/valkey.conf,destination=/etc/valkey/valkey.conf")
 
 container_httpd_args=()
-container_httpd_args+=("-d")
 container_httpd_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/httpd/,destination=/etc/httpd/")
 
 container_opensearch_args=()
-container_opensearch_args+=("-d")
 container_opensearch_args+=("--mount=type=bind,source=${opensearch_dir}/,destination=/usr/share/opensearch/data/")
+
+container_cdm_server_args=()
 
 container_build_args=()
 container_build_args+=("--mount=type=bind,source=/var/lib/containers,destination=/var/lib/containers")
