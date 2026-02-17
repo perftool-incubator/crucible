@@ -331,6 +331,13 @@ function start_opensearch() {
             else
                 echo "Successfully started OpenSearch"
                 RC=0
+                # Start the CDM server companion service
+                start_cdm_server
+                local CDM_RC=$?
+                if [ ${CDM_RC} != 0 ]; then
+                    echo "WARNING: OpenSearch started but CDM server failed to start"
+                    RC=${CDM_RC}
+                fi
             fi
         fi
     fi
@@ -339,16 +346,63 @@ function start_opensearch() {
 
 function stop_opensearch() {
     local RC=0
+
+    # Stop the CDM server first
+    stop_cdm_server
+    local CDM_RC=$?
+    if [ ${CDM_RC} != 0 ]; then
+        RC=${CDM_RC}
+    fi
+
     echo -n "Checking for OpenSearch"
     if podman_running crucible-opensearch; then
         close_firewall_port 9200 tcp
         close_firewall_port 9300 tcp
         ${podman_stop} crucible-opensearch > /dev/null
-        RC=$?
-        if [ ${RC} != 0 ]; then
+        local OS_RC=$?
+        if [ ${OS_RC} != 0 ]; then
             echo "ERROR: Could not stop OpenSearch"
+            RC=${OS_RC}
         else
             echo "Successfully stopped OpenSearch"
+        fi
+    fi
+    return ${RC}
+}
+
+function start_cdm_server() {
+    local RC cdm_server_cmd cdm_query_opt
+
+    echo -n "Checking for CDM server"
+    if ! podman_running crucible-cdm-server; then
+        # Get the OpenSearch connection options (--host, --userpass, --ver)
+        cdm_query_opt=$(run_manage_instances query-opt)
+        cdm_server_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/start-server.sh ${cdm_query_opt}"
+
+        open_firewall_port 3000 tcp
+        ${podman_run} --name crucible-cdm-server "${container_common_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_server_cmd} > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not start CDM server"
+        else
+            echo "Successfully started CDM server"
+        fi
+    fi
+    return ${RC}
+}
+
+function stop_cdm_server() {
+    local RC=0
+
+    echo -n "Checking for CDM server"
+    if podman_running crucible-cdm-server; then
+        close_firewall_port 3000 tcp
+        ${podman_stop} crucible-cdm-server > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop CDM server"
+        else
+            echo "Successfully stopped CDM server"
         fi
     fi
     return ${RC}
@@ -796,6 +850,10 @@ function service_control() {
         case "${service}" in
             "httpd"|"opensearch"|"valkey")
                 ${action}_${service}
+                service_rc=$?
+                ;;
+            "cdm-server")
+                ${action}_cdm_server
                 service_rc=$?
                 ;;
             *)
