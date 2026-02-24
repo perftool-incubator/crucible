@@ -253,10 +253,15 @@ def instance_host_access_opt(data, name):
     print(cmdline);
 
 def query_opt(data):
-    """Displays cmdline options to be passed to cdmq (in project CDM)."""
-    cmdline = ""
+    """Displays host, cdmver and optional userpass info for a specific instance."""
     for instance_name in data["query-from"]:
-        instance_host_access_opt(data, instance_name)
+        instance_obj = find_instance(data["instances"], instance_name)
+        cmdline = "";
+        if instance_obj != None:
+            cmdline = cmdline + " --host " + instance_obj["host"] + " --ver " + instance_obj["cdmver"]
+            if "userpass" in instance_obj:
+                cmdline = cmdline + " --userpass " + instance_obj["userpass"]
+            print(cmdline);
 
 def index_instance(data):
     """Displays the default instance to index to."""
