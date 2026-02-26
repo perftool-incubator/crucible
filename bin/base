@@ -1027,6 +1027,12 @@ container_common_args+=("--mount=type=bind,source=/etc/sysconfig/crucible,destin
 container_common_args+=("--mount=type=bind,source=/root,destination=/root")
 container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME}/config/.bashrc,destination=/root/.bashrc")
 container_common_args+=("--mount=type=bind,source=/home,destination=/home")
+# ensure that the repo being tested is mapped into the containers when
+# run in the AWS runner environment
+AWS_RUNNER_DIR="/opt/actions-runner"
+if [ -d "${AWS_RUNNER_DIR}" ]; then
+    container_common_args+=("--mount=type=bind,source=${AWS_RUNNER_DIR},destination=${AWS_RUNNER_DIR}")
+fi
 container_common_args+=("--mount=type=bind,source=/var/lib/crucible,destination=/var/lib/crucible")
 container_common_args+=("--mount=type=bind,source=${CRUCIBLE_HOME},destination=${CRUCIBLE_HOME}")
 container_common_args+=("--mount=type=bind,source=/,destination=/hostfs")
