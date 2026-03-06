@@ -17,7 +17,8 @@ if pushd ${CRUCIBLE_HOME} > /dev/null; then
 
     export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
     
-    exec ./subprojects/core/workshop/workshop.pl --userenv ./workshop/${controller_userenv_file} --requirements ./workshop/controller-workshop.json --label crucible-controller "$@"
+    exec ./subprojects/core/workshop/workshop.pl --userenv ./workshop/${controller_userenv_file} --requirements ./workshop/controller-workshop.json --label crucible-controller "$@" \
+	 --requirements ./subprojects/core/rickshaw/workshop.json
 else
     echo "ERROR: Failed to pushd to \$CRUCIBLE_HOME [${CRUCIBLE_HOME}]"
     exit 1
