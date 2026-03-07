@@ -306,6 +306,25 @@ elif [ "${1}" == "run" ]; then
     else
         exit_error "Could not find the valkey service password.  Consider restarting valkey"
     fi
+
+    image_sourcing_url=""
+    image_sourcing_use=$(jq_query ${SERVICES_CFG} '."image-sourcing".use')
+    if [ "${image_sourcing_use}" == "true" ]; then
+           image_sourcing_start=$(jq_query ${SERVICES_CFG} '."image-sourcing".start')
+           if [ "${image_sourcing_start}" == "true" ]; then
+               start_image_sourcing
+           fi
+
+           image_sourcing_address=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.address')
+           image_sourcing_port=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.port')
+           image_sourcing_protocol=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.protocol')
+
+           image_sourcing_url="${image_sourcing_protocol}://${image_sourcing_address}:${image_sourcing_port}"
+           echo "Using image-sourcing service @ ${image_sourcing_url}"
+
+           image_sourcing_url="--source-images-service-url=${image_sourcing_url}"
+    fi
+
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
       ${params_args}\
       --id ${SESSION_ID}\
@@ -319,6 +338,7 @@ elif [ "${1}" == "run" ]; then
       --registries-json=${REGISTRIES_CFG}\
       --base-run-dir=$base_run_dir\
       --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs\
+      ${image_sourcing_url}\
       ${rickshaw_run_args[@]}"
 
     echo "rickshaw-run command: $rs_run_cmd"

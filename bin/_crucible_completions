@@ -38,7 +38,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -f -- "${COMP_WORDS[2]}"))
                 ;;
             start|stop)
-                COMPREPLY=($(compgen -W "httpd opensearch valkey" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "httpd image-sourcing opensearch valkey" -- "${COMP_WORDS[2]}"))
                 ;;
             rm)
                 COMPREPLY=($(compgen -W "--run" -- "${COMP_WORDS[2]}"))

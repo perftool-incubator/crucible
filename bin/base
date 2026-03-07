@@ -272,6 +272,75 @@ function stop_valkey() {
     return ${RC}
 }
 
+function start_image_sourcing() {
+    local image_sourcing_start image_sourcing_service_address
+    local image_sourcing_port image_sourcing_protocol
+    local image_sourcing_start_cmd image_sourcing_status_cmd
+    local image_sourcing_available image_sourcing_timeout
+    local count RC
+
+    image_sourcing_start=$(jq_query ${SERVICES_CFG} '."image-sourcing".start')
+    if [ "${image_sourcing_start}" != "true" ]; then
+        echo "WARNING: The image sourcing service is disabled"
+        return 0
+    fi
+
+    image_sourcing_address=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.address')
+    image_sourcing_port=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.port')
+    image_sourcing_protocol=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.protocol')
+
+    image_sourcing_start_cmd="python3 -m source_images_service.main"
+    image_sourcing_status_cmd="curl --silent --show-error --stderr - -X GET  ${image_sourcing_protocol}://${image_sourcing_address}:${image_sourcing_port}/api/v1/health"
+    echo -n "Checking for image-sourcing service"
+    if ! podman_running crucible-image-sourcing; then
+        ${podman_run} --name crucible-image-sourcing --env "SIS_PORT=${image_sourcing_port}" "${container_common_args[@]}" "${container_image_sourcing_args[@]}" "${container_build_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${image_sourcing_start_cmd} > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not start image-sourcing service"
+        else
+            image_sourcing_available=0
+            count=1
+            image_sourcing_timeout=60
+            echo "Waiting for image-sourcing service to be available (${image_sourcing_timeout} seconds maximum)..."
+            while [ ${image_sourcing_available} != 1 -a ${count} -lt ${image_sourcing_timeout} ]; do
+                pod_name=crucible-image-sourcing-status-check-${SESSION_ID}-$(uuidgen)
+                status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${image_sourcing_status_cmd} | jq -r '. \"status\"'")
+                if [ "${status_check}" == "healthy" ]; then
+                    echo "image-sourcing service is online after ${count} seconds"
+                    image_sourcing_available=1
+                else
+                    sleep 1
+                fi
+                (( count += 1 ))
+            done
+            if [ ${image_sourcing_available} -eq 0 ]; then
+                echo "ERROR: image-sourcing service failed to launch properly"
+                RC=1
+            else
+                echo "Successfully started image-sourcing service"
+                RC=0
+            fi
+        fi
+    fi
+    return ${RC}
+}
+
+function stop_image_sourcing() {
+    local RC
+
+    echo -n "Checking for image-sourcing service"
+    if podman_running crucible-image-sourcing; then
+        ${podman_stop} crucible-image-sourcing > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop image-sourcing service"
+        else
+            echo "Successfully stopped image-sourcing service"
+        fi
+    fi
+    return ${RC}
+}
+
 function start_opensearch() {
     local opensearch_available count status_check opensearch_timeout pod_name
     local opensearch_start_cmd opensearch_status_cmd common_container_args
@@ -856,6 +925,10 @@ function service_control() {
                 ${action}_cdm_server
                 service_rc=$?
                 ;;
+            "image-sourcing")
+                ${action}_image_sourcing
+                service_rc=$?
+                ;;
             *)
                 echo "ERROR: ${function_name}: unknown service [${service}]"
                 service_rc=1
@@ -1052,6 +1125,9 @@ container_non_service_args+=("--log-driver=none")
 container_log_args=()
 container_log_args+=("--mount=type=bind,source=${USER_STORE},destination=${USER_STORE}")
 container_log_args+=("--mount=type=bind,source=/tmp,destination=/tmp")
+
+container_image_sourcing_args=()
+container_image_sourcing_args+=("-e PYTHONPATH=/opt/crucible/subprojects/core/rickshaw/source-images-service")
 
 container_valkey_args=()
 container_valkey_args+=("--mount=type=bind,source=$CRUCIBLE_HOME/config/valkey.conf,destination=/etc/valkey/valkey.conf")
