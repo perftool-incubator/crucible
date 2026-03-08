@@ -3,6 +3,56 @@
     "description": "This schema defines the Crucible services configuration file",
     "type": "object",
     "properties": {
+        "image-sourcing": {
+            "description": "The image-sourcing object contains configuration settings for the container image sourcing service",
+            "type": "object",
+            "properties": {
+                "location": {
+                    "description": "The location object contains configuration settings locate where the image sourcing service can be accessed",
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "description": "This paramter contains the hostname or IP address that is used to access the image sourcing service",
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "port": {
+                            "descriptiopn": "This parameter contains the network port where the image sourcing service is running",
+                            "type": "integer",
+                            "minimum": 1025,
+                            "maximum": 32768
+                        },
+                        "protocol": {
+                            "description": "This parameter contains the protocol that is used to communicate with the image sourcing service",
+                            "type": "string",
+                            "enum": [
+                                "http"
+                            ]
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "address",
+                        "port",
+                        "protocol"
+                    ]
+                },
+                "start": {
+                    "description": "This parameter controls whether the local image sourcing service should be started",
+                    "type": "boolean"
+                },
+                "use": {
+                    "description": "This paramter controls whether the image sourcing service is used",
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "location",
+                "start",
+                "use"
+            ]
+        },
         "valkey": {
             "description": "The valkey object contains configuration settings for the valkey service",
             "type": "object",
@@ -30,6 +80,7 @@
     },
     "additionalProperties": false,
     "required": [
+        "image-sourcing",
         "valkey"
     ]
 }

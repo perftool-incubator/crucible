@@ -1,4 +1,13 @@
 {
+    "image-sourcing": {
+        "use": true,
+        "start": true,
+        "location": {
+            "address": "localhost",
+            "port": 9090,
+            "protocol": "http"
+        }
+    },
     "valkey": {
         "monitor": {
             "enabled": false

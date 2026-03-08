@@ -59,7 +59,7 @@ case "${repo}" in
         echo
         echo "Shutting down existing controller pods:"
         echo
-        if ! service_control stop opensearch httpd valkey; then
+        if ! service_control stop opensearch httpd valkey image-sourcing; then
             RC=1
         fi
         if [ ${RC} -eq 1 ]; then
