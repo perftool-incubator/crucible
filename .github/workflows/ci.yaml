@@ -1,45 +1,59 @@
-# Basic ci workflow using github actions
 name: CI
 
-# Controls when the action will run.
 on:
-  # Triggers the workflow on pull request events but only for the master branch
-  # ignore pull requests that only change documentation/license files
   pull_request:
     branches: [ master ]
-    paths-ignore:
-      - LICENSE
-      - '**.md'
-      - '.github/rulesets/**'
-      - .github/workflows/run-crucible-tracking.yaml
-      - .github/workflows/crucible-scheduled.yaml
-      - .github/workflows/crucible-weekly-ci.yaml
-      - .github/workflows/crucible-release-ci.yaml
-      - .github/workflows/faux-crucible-release-ci.yaml
-      - .github/workflows/faux-crucible-ci.yaml
-      - .github/workflows/faux-ci.yaml
-      - .github/workflows/crucible-release.yaml
-      - 'docs/**'
-      - 'spec/**'
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.ref }}/ci
   cancel-in-progress: true
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # Job to test installation
-  install:
-    # Job will run on github-hosted runner
-    runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
+  changes:
+    runs-on: [ self-hosted, workflow-overhead ]
+    outputs:
+      only-docs: ${{ steps.filter.outputs.only_changed }}
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
+      - id: filter
+        uses: tj-actions/changed-files@v47
+        with:
+          files: |
+            LICENSE
+            *.md
+            **/*.md
+            .github/rulesets/**
+            .github/workflows/run-crucible-tracking.yaml
+            .github/workflows/crucible-scheduled.yaml
+            .github/workflows/crucible-weekly-ci.yaml
+            .github/workflows/crucible-release-ci.yaml
+            .github/workflows/crucible-release.yaml
+            .github/workflows/crucible-ci.yaml
+            .github/workflows/ci.yaml
+            docs/**
+            spec/**
 
+  install:
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.only-docs != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Run install tests
         run: ./tests/test-installer
+
+  faux-install:
+    needs: changes
+    if: ${{ github.event_name != 'workflow_dispatch' && needs.changes.outputs.only-docs == 'true' }}
+    runs-on: [ self-hosted, workflow-overhead ]
+    steps:
+      - run: 'echo "faux-install complete"'
+
+  ci-complete:
+    needs: [ install, faux-install ]
+    if: always()
+    runs-on: [ self-hosted, workflow-overhead ]
+    steps:
+      - name: complete
+        run: echo "ci complete"
