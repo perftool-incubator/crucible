@@ -203,9 +203,13 @@ elif [ "${1}" == "extract" ]; then
             ;;
         primary-periods)
             shift
-            period_ids=$(extract_primary_periods "${1}")
-            EXIT_VAL=$?
-            echo -e "${period_ids}"
+            if start_opensearch; then
+                period_ids=$(extract_primary_periods "${1}")
+                EXIT_VAL=$?
+                echo -e "${period_ids}"
+            else
+                EXIT_VAL=$?
+            fi
             ;;
         *)
             echo "ERROR: Unknown extract command ${1}"
