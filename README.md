@@ -60,19 +60,26 @@ examples | Examples of different approaches to running Crucible with the various
 **Benchmarks** | |
 cyclictest | Traditional RT latency measurement tool | https://github.com/perftool-incubator/bench-cyclictest
 fio | Traditional block IO testing | https://github.com/perftool-incubator/bench-fio
-hwlatdetect | Baremetal HW latency spike detector | https://github.com/perftool-incubator/bench-hwlatdetect
 flexran | Radio Access Network (RAN) edge framework testing | https://github.com/perftool-incubator/bench-flexran
+hwlatdetect | Baremetal HW latency spike detector | https://github.com/perftool-incubator/bench-hwlatdetect
+hwnoise | Hardware noise detection and quantification | https://github.com/perftool-incubator/bench-hwnoise
 ilab | AI/LLM workload based on InstructLab | https://github.com/perftool-incubator/bench-ilab
-oslat | Latency measurement tool that simulates a continuously polling application (ie. DPDK PMD) | https://github.com/perftool-incubator/bench-oslat
 iperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-iperf
-tracer | Framework for Linux kernel latency tracer/workload tools (ie. osnoise & timerlat) | https://github.com/perftool-incubator/bench-tracer
+oslat | Latency measurement tool that simulates a continuously polling application (ie. DPDK PMD) | https://github.com/perftool-incubator/bench-oslat
+osnoise | Operating system noise measurement | https://github.com/perftool-incubator/bench-osnoise
+pytorch | PyTorch ML benchmark automation | https://github.com/perftool-incubator/bench-pytorch
+sleep | Minimal benchmark for CI and testing | https://github.com/perftool-incubator/bench-sleep
+timerlat | Operating system timer latency measurement | https://github.com/perftool-incubator/bench-timerlat
+tracer | Framework for Linux kernel latency tracer/workload tools | https://github.com/perftool-incubator/bench-tracer
 trafficgen | TRex based high speed packet forwarding throughput and loss analysis using binary search logic | https://github.com/perftool-incubator/bench-trafficgen
 uperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-uperf
 **Tools** | |
 forkstat | A tool to capture fork+exec statistics | https://github.com/perftool-incubator/tool-forkstat
 ftrace | Linux kernel tracing | https://github.com/perftool-incubator/tool-ftrace
 kernel | Various kernel tools (turbostat, perf, sst, tracing) | https://github.com/perftool-incubator/tool-kernel
+nvidia | NVIDIA GPU data collection | https://github.com/perftool-incubator/tool-nvidia
 ovs | Open vSwitch data collection | https://github.com/perftool-incubator/tool-ovs
+power | Power and thermal telemetry collection for Redfish-enabled devices | https://github.com/perftool-incubator/tool-power
 procstat | Custom utilities for capturing various /proc information | https://github.com/perftool-incubator/tool-procstat
 rt-trace-bpf | An eBPF based tool used to identify preemption causers in latency sensitive workloads | https://github.com/perftool-incubator/tool-rt-trace-bpf
 sysstat | Traditional Linux performance tools (sar, mpstat, iostat, etc.) | https://github.com/perftool-incubator/tool-sysstat
