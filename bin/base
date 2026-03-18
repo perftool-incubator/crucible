@@ -289,7 +289,7 @@ function start_image_sourcing() {
     image_sourcing_port=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.port')
     image_sourcing_protocol=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.protocol')
 
-    image_sourcing_start_cmd="python3 -m source_images_service.main"
+    image_sourcing_start_cmd="${CRUCIBLE_HOME}/bin/services/start-image-sourcing.sh ${var_crucible}"
     image_sourcing_status_cmd="curl --silent --show-error --stderr - -X GET  ${image_sourcing_protocol}://${image_sourcing_address}:${image_sourcing_port}/api/v1/health"
     echo -n "Checking for image-sourcing service"
     if ! podman_running crucible-image-sourcing; then
