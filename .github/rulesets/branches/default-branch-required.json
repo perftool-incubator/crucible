@@ -35,7 +35,7 @@
             "integration_id": 15368
           },
           {
-            "context": "call-core-release-crucible-ci / core-release-crucible-ci-complete",
+            "context": "ci-complete",
             "integration_id": 15368
           }
         ]
