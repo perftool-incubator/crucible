@@ -1,8 +1,11 @@
 #!/bin/bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
 MAX_HEAP_SIZE_GB=32
 
 opensearch_dir="$1"
+log_base="$2"
 
 chown -R opensearch:opensearch ${opensearch_dir}
 mkdir -p /var/lib/crucible/logs
@@ -21,4 +24,4 @@ echo "Setting OpenSearch JVM heap size to ${heapsize_mb}MB"
 sed -i -e "s/^\(-Xm.\).*/\1${heapsize_mb}m/" /etc/opensearch/jvm.options
 
 su -c "/usr/share/opensearch/bin/opensearch" opensearch 2>&1 \
-    | tee /var/lib/crucible/logs/opensearch.log
+    | tee ${log_base}/logs/opensearch.log
