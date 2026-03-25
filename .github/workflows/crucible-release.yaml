@@ -56,7 +56,7 @@ concurrency:
 
 jobs:
   release-branch:
-    runs-on: [ self-hosted, workflow-overhead ]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       branch: ${{ steps.gen-release-branch.outputs.release }}
@@ -174,7 +174,7 @@ jobs:
         run: echo "$REPOS"
 
   projects-branch:
-    runs-on: [ self-hosted, workflow-overhead ]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:
       - release-branch
@@ -281,7 +281,7 @@ jobs:
             --verbose
 
   crucible-release-complete:
-    runs-on: [ self-hosted, workflow-overhead ]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:
       - crucible-release-verification
