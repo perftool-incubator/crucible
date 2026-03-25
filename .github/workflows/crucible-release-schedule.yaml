@@ -14,7 +14,7 @@ jobs:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
 
   crucible-release-ci-complete:
-    runs-on: [ self-hosted, workflow-overhead ]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: call-crucible-release-schedule
     steps:
