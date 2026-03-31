@@ -591,6 +591,11 @@ fi
 REGISTRIES_CFG=${INSTALL_PATH}/config/registries.json
 REGISTRIES_CFG_SCHEMA=${INSTALL_PATH}/schema/registries.json
 
+echo
+echo "Pulling Crucible controller container image:"
+podman --log-level error pull ${CRUCIBLE_CONTROLLER_REGISTRY} ||
+    exit_error "Failed to pull controller image ${CRUCIBLE_CONTROLLER_REGISTRY}" ${EC_PULL_FAIL}
+
 if [ -e ${INSTALL_PATH}/bin/_registries.lib ]; then
     source ${INSTALL_PATH}/bin/_registries.lib
 
@@ -650,11 +655,6 @@ if [ ${VERBOSE} == 1 ]; then
         cat ${REGISTRIES_CFG}
     fi
 fi
-
-echo
-echo "Pulling Crucible controller container image:"
-podman --log-level error pull ${CRUCIBLE_CONTROLLER_REGISTRY} ||
-    exit_error "Failed to pull controller image ${CRUCIBLE_CONTROLLER_REGISTRY}" ${EC_PULL_FAIL}
 
 echo
 echo "Installation is complete.  Run \"crucible help\" to see what's possible"
