@@ -34,6 +34,8 @@ jobs:
             .github/workflows/ci.yaml
             docs/**
             spec/**
+      - name: Display changes
+        run: echo '${{ toJSON(steps.filter.outputs) }}' | jq .
 
   call-real-core-release-crucible-ci:
     needs: changes
