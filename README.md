@@ -42,6 +42,10 @@ Crucible is designed to not be a large, monolithic project. All functionality is
 
 Through the use of containers built at runtime for software distribution (which can be shared via a cache), Crucible does not need to pre-build any binary packages that must be installed by the user. The only binary product Crucible produces is the container image for the crucible-controller, and that is already provided by the maintainers of this project. Once installed, updates to Crucible are handled via git, which will be transparent to the user. Since each sub-project is its own git repository, testing fixes for specific sub-projects becomes much easier to do because each sub-project can be individually modified and/or replaced. The crucible-controller image may be rebuilt from time to time to upgrade and/or add additional software dependencies; however, obtaining these image updates will be handled transparently when Crucible is updated. As Crucible builds no binary packages, there is no big "build-a-thon" for a new release. Crucible generates a new release on a quarterly basis (4 times per year) and provides support for the 4 most recent releases plus the current upstream code. These releases are largely static but do receive important bug fixes, most notably for compatibility with the controller image (the same image is used across all releases) and the crucible-ci repository (CI is always based on the upstream crucible-ci code). In addition to formal releases, the latest upstream code is always available when an installation and/or update is performed from the upstream repositories. In order to maintain stability in this development/deployment model, continuous integration testing via Github workflows is used extensively across the many sub-projects and is always being improved upon.
 
+## Documentation
+
+- [Implementing a New Benchmark](docs/implementing-a-new-benchmark.md)
+
 ## Subprojects
 
 Type/Project | Description | URL
