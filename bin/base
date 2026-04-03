@@ -641,10 +641,9 @@ function index_run() {
 
 function get_result_backend() {
     local RC
-    local cdm_query_opt cdm_query_cmd
+    local cdm_query_cmd
 
-    cdm_query_opt=$(run_manage_instances query-opt)
-    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@ $cdm_query_opt"
+    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@"
     ${podman_run} --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
     return ${RC}
