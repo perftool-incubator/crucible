@@ -13,6 +13,14 @@ fi
 
 source "${CRUCIBLE_HOME}/bin/base"
 
+function rollback_config() {
+    local backup_file="${1}"
+    local target_file="${2}"
+
+    echo "Rolling back config changes to ${target_file}"
+    mv ${backup_file} ${target_file}
+}
+
 function help() {
     echo "Usage:"
     echo "  repo <command> [command-specific-options]"
@@ -426,6 +434,10 @@ function config_update_repo() {
 
     local run_subprojects_installer=0
     local do_target_checkout=0
+    local repos_json="${CRUCIBLE_HOME}/config/repos.json"
+    local repos_json_bak="${repos_json}.bak.$$"
+
+    cp ${repos_json} ${repos_json_bak}
 
     if echo "${optional}" | grep -q "primary-branch"; then
         if echo "${optional}" | grep -q "repository"; then
@@ -473,22 +485,30 @@ function config_update_repo() {
     fi
 
     if [ ${run_subprojects_installer} -eq 1 ]; then
-        subprojects_install --name ${name}
+        if ! subprojects_install --name ${name}; then
+            rollback_config ${repos_json_bak} ${repos_json}
+            exit 1
+        fi
     elif [ ${do_target_checkout} -eq 1 ]; then
-        subproject_type=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg repo_name "${name}" '.official[], .unofficial[] | select(.name == $repo_name) | .type')
+        subproject_type=$(jq_query ${repos_json} --arg repo_name "${name}" '.official[], .unofficial[] | select(.name == $repo_name) | .type')
         subproject_type_dir=$(get_project_type_dir "${subproject_type}")
         if pushd ${CRUCIBLE_HOME}/subprojects/${subproject_type_dir}/${name} > /dev/null; then
             if ! git checkout ${checkout_target}; then
                 echo "ERROR: Failed to checkout target '${checkout_target}' for subproject '${name}'"
+                popd > /dev/null
+                rollback_config ${repos_json_bak} ${repos_json}
                 exit 1
             fi
 
             popd > /dev/null
         else
             echo "ERROR: Could not locate subproject directory for repository '${name}'"
+            rollback_config ${repos_json_bak} ${repos_json}
             exit 1
         fi
     fi
+
+    rm -f ${repos_json_bak}
 }
 
 function config_help() {
