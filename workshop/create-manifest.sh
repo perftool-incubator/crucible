@@ -34,6 +34,19 @@ if pushd ${CRUCIBLE_HOME} > /dev/null; then
 	echo ${IMAGE}
     done
 
+    # Verify that we have an image for each supported architecture
+    missing_archs=""
+    for arch in ${controller_architectures}; do
+        if ! echo "${IMAGES}" | grep -q "${arch}"; then
+            echo "ERROR: No image found for architecture '${arch}'"
+            missing_archs="${missing_archs} ${arch}"
+        fi
+    done
+    if [ -n "${missing_archs}" ]; then
+        echo "ERROR: Missing images for architecture(s):${missing_archs}"
+        exit 1
+    fi
+
     local_manifest="localhost/controller-manifest:${MANIFEST_TAG}"
 
     if podman manifest exists ${local_manifest}; then
