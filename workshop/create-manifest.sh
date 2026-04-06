@@ -24,7 +24,7 @@ if pushd ${CRUCIBLE_HOME} > /dev/null; then
 
     source ./workshop/controller.conf
 
-    cmd="podman search --list-tags --no-trunc ${controller_repo}"
+    cmd="podman search --list-tags --no-trunc --limit=250 ${controller_repo}"
 
     echo "Running: ${cmd}"
     IMAGES=$(${cmd} | grep ${THE_COMMIT} | awk '{ print $1":"$2 }')
@@ -33,6 +33,19 @@ if pushd ${CRUCIBLE_HOME} > /dev/null; then
     for IMAGE in ${IMAGES}; do
 	echo ${IMAGE}
     done
+
+    # Verify that we have an image for each supported architecture
+    missing_archs=""
+    for arch in ${controller_architectures}; do
+        if ! echo "${IMAGES}" | grep -q "${arch}"; then
+            echo "ERROR: No image found for architecture '${arch}'"
+            missing_archs="${missing_archs} ${arch}"
+        fi
+    done
+    if [ -n "${missing_archs}" ]; then
+        echo "ERROR: Missing images for architecture(s):${missing_archs}"
+        exit 1
+    fi
 
     local_manifest="localhost/controller-manifest:${MANIFEST_TAG}"
 
