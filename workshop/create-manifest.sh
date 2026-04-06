@@ -24,7 +24,7 @@ if pushd ${CRUCIBLE_HOME} > /dev/null; then
 
     source ./workshop/controller.conf
 
-    cmd="podman search --list-tags --no-trunc ${controller_repo}"
+    cmd="podman search --list-tags --no-trunc --limit=250 ${controller_repo}"
 
     echo "Running: ${cmd}"
     IMAGES=$(${cmd} | grep ${THE_COMMIT} | awk '{ print $1":"$2 }')
