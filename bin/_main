@@ -58,6 +58,15 @@ elif [ "${1}" == "registries" ]; then
         ${CRUCIBLE_HOME}/bin/registries "$@"
         EXIT_VAL=$?
     fi
+elif [ "${1}" == "userenvs" ]; then
+    shift
+    if [ -z "${1}" ]; then
+        ${CRUCIBLE_HOME}/bin/userenvs list
+        EXIT_VAL=$?
+    else
+        ${CRUCIBLE_HOME}/bin/userenvs "$@"
+        EXIT_VAL=$?
+    fi
 elif [ "${1}" == "repo" ]; then
     shift
     if [ -z "${1}" ]; then
