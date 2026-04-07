@@ -13,6 +13,7 @@ function help() {
     echo "log                           |  Manage with the crucible log"
     echo "registries                    |  Get info on or configure the container image registries"
     echo "repo                          |  Get info on or configure the crucible and subproject git repos"
+    echo "userenvs                      |  List available userenvs (official, external, deprecated)"
     echo "update                        |  Update all or part of the crucible software"
     echo "console                       |  Run user supplied programs inside a crucible wrapper for logging purposes"
     echo "wrapper                       |  Run a crucible subproject command directly, within a crucible container"
@@ -66,6 +67,8 @@ function help() {
         ${CRUCIBLE_HOME}/bin/log help
     elif [ "${1}" == "repo" ]; then
         ${CRUCIBLE_HOME}/bin/repo help
+    elif [ "${1}" == "userenvs" ]; then
+        ${CRUCIBLE_HOME}/bin/userenvs help
     elif [ "${1}" == "update" ]; then
         ${CRUCIBLE_HOME}/bin/update help
     elif [ "${1}" == "run" ]; then

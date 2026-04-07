@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+source /etc/sysconfig/crucible
+
+if [ ! -e "${CRUCIBLE_HOME}" ]; then
+    echo "Could not find $CRUCIBLE_HOME, exiting."
+    exit 1
+fi
+
+source "${CRUCIBLE_HOME}/bin/base"
+
+OFFICIAL_USERENVS_DIR="${CRUCIBLE_HOME}/subprojects/core/rickshaw/userenvs"
+EXTERNAL_USERENVS_DIR="${CRUCIBLE_HOME}/subprojects/userenvs"
+CI_EXCLUDES_FILE="${OFFICIAL_USERENVS_DIR}/ci-excludes.txt"
+
+# directories in the official userenvs dir that are not userenvs
+NON_USERENV_DIRS="components requirement-sources"
+
+function help() {
+    echo "Usage:"
+    echo "  userenvs <command> [options]"
+    echo ""
+    echo "The following commands are supported"
+    echo ""
+    echo "list                     |  List available userenvs (default)"
+    echo "  --official             |  Only show official userenvs (from rickshaw)"
+    echo "  --external             |  Only show external userenvs (from userenv repos)"
+    echo "  --deprecated           |  Show only deprecated userenvs (no longer supported)"
+    echo ""
+}
+
+function load_ci_excludes() {
+    local excludes=()
+    if [ -f "${CI_EXCLUDES_FILE}" ]; then
+        while IFS= read -r line; do
+            [ -n "${line}" ] && excludes+=("${line}")
+        done < "${CI_EXCLUDES_FILE}"
+    fi
+    echo "${excludes[@]}"
+}
+
+function is_ci_excluded() {
+    local name="${1}"
+    local exclude
+    for exclude in ${ci_excludes}; do
+        if [ "${name}" == "${exclude}" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+function is_non_userenv_dir() {
+    local name="${1}"
+    local dir
+    for dir in ${NON_USERENV_DIRS}; do
+        if [ "${name}" == "${dir}" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+function list_official() {
+    # collect all entries first to compute column widths
+    local names=()
+    local labels=()
+    local pull_tokens=()
+    local notes_list=()
+    local max_name=4  # "Name"
+    local max_label=5  # "Label"
+    local max_pull=10  # "Pull Token"
+
+    for f in "${OFFICIAL_USERENVS_DIR}"/*.json; do
+        [ -f "${f}" ] || continue
+        local name=$(basename "${f}" .json)
+        local notes=""
+
+        if [ -L "${f}" ]; then
+            local target=$(readlink "${f}" | sed 's/\.json$//')
+            notes="alias -> ${target}"
+        fi
+
+        if is_ci_excluded "${name}"; then
+            notes="${notes}${notes:+, }not CI tested"
+        fi
+
+        local label=$(jq -r '.userenv.label // "—"' "${f}" 2>/dev/null)
+        local pull_token=$(jq -r '.userenv.origin."requires-pull-token" // "false"' "${f}" 2>/dev/null)
+        if [ "${pull_token}" == "true" ]; then
+            pull_token="yes"
+        else
+            pull_token="no"
+        fi
+
+        names+=("${name}")
+        labels+=("${label}")
+        pull_tokens+=("${pull_token}")
+        notes_list+=("${notes}")
+        [ ${#name} -gt ${max_name} ] && max_name=${#name}
+        [ ${#label} -gt ${max_label} ] && max_label=${#label}
+    done
+
+    local fmt="  %-${max_name}s  %-${max_label}s  %-${max_pull}s  %s\n"
+
+    echo "Official userenvs (from rickshaw):"
+    echo ""
+    printf "${fmt}" "Name" "Label" "Pull Token" "Notes"
+    printf "  %s  %s  %s  %s\n" "$(printf '%*s' ${max_name} '' | tr ' ' '-')" "$(printf '%*s' ${max_label} '' | tr ' ' '-')" "$(printf '%*s' ${max_pull} '' | tr ' ' '-')" "-----"
+
+    for i in "${!names[@]}"; do
+        printf "${fmt}" "${names[$i]}" "${labels[$i]}" "${pull_tokens[$i]}" "${notes_list[$i]}"
+    done
+
+    echo ""
+}
+
+function list_deprecated() {
+    local names=()
+    local max_name=4
+
+    for d in "${OFFICIAL_USERENVS_DIR}"/*/; do
+        [ -d "${d}" ] || continue
+        local name=$(basename "${d}")
+        is_non_userenv_dir "${name}" && continue
+        if [ ! -f "${OFFICIAL_USERENVS_DIR}/${name}.json" ]; then
+            names+=("${name}")
+            [ ${#name} -gt ${max_name} ] && max_name=${#name}
+        fi
+    done
+
+    if [ ${#names[@]} -eq 0 ]; then
+        echo "No deprecated userenvs found"
+        echo ""
+        return
+    fi
+
+    local fmt="  %-${max_name}s\n"
+
+    echo "Deprecated userenvs (no longer supported):"
+    echo ""
+    printf "${fmt}" "Name"
+    printf "  %s\n" "$(printf '%*s' ${max_name} '' | tr ' ' '-')"
+
+    for name in "${names[@]}"; do
+        printf "${fmt}" "${name}"
+    done
+
+    echo ""
+}
+
+function list_external() {
+    echo "External userenvs:"
+    echo ""
+
+    if [ ! -d "${EXTERNAL_USERENVS_DIR}" ]; then
+        echo "  No external userenvs directory found"
+        echo ""
+        return
+    fi
+
+    local names=()
+    local labels=()
+    local pull_tokens=()
+    local sources=()
+    local max_name=4
+    local max_label=5
+    local max_pull=10  # "Pull Token"
+
+    for repo_dir in "${EXTERNAL_USERENVS_DIR}"/*/; do
+        [ -d "${repo_dir}" ] || continue
+        local repo_name=$(basename "${repo_dir}")
+        for f in "${repo_dir}"/*.json; do
+            [ -f "${f}" ] || continue
+            local name=$(basename "${f}" .json)
+            local label=$(jq -r '.userenv.label // "—"' "${f}" 2>/dev/null)
+            local pull_token=$(jq -r '.userenv.origin."requires-pull-token" // "false"' "${f}" 2>/dev/null)
+            if [ "${pull_token}" == "true" ]; then
+                pull_token="yes"
+            else
+                pull_token="no"
+            fi
+            names+=("${name}")
+            labels+=("${label}")
+            pull_tokens+=("${pull_token}")
+            sources+=("${repo_name}")
+            [ ${#name} -gt ${max_name} ] && max_name=${#name}
+            [ ${#label} -gt ${max_label} ] && max_label=${#label}
+        done
+    done
+
+    if [ ${#names[@]} -eq 0 ]; then
+        echo "  No external userenvs found"
+        echo ""
+        return
+    fi
+
+    local fmt="  %-${max_name}s  %-${max_label}s  %-${max_pull}s  %s\n"
+    printf "${fmt}" "Name" "Label" "Pull Token" "Source"
+    printf "  %s  %s  %s  %s\n" "$(printf '%*s' ${max_name} '' | tr ' ' '-')" "$(printf '%*s' ${max_label} '' | tr ' ' '-')" "$(printf '%*s' ${max_pull} '' | tr ' ' '-')" "------"
+
+    for i in "${!names[@]}"; do
+        printf "${fmt}" "${names[$i]}" "${labels[$i]}" "${pull_tokens[$i]}" "${sources[$i]}"
+    done
+
+    echo ""
+}
+
+# parse arguments
+cmd="${1:-list}"
+shift 2>/dev/null
+
+show_official=0
+show_external=0
+show_deprecated=0
+
+while [ $# -gt 0 ]; do
+    case "${1}" in
+        --official)
+            show_official=1
+            shift
+            ;;
+        --external)
+            show_external=1
+            shift
+            ;;
+        --deprecated)
+            show_deprecated=1
+            shift
+            ;;
+        --help|-h)
+            help
+            exit 0
+            ;;
+        *)
+            echo "ERROR: Unknown option: ${1}"
+            help
+            exit 1
+            ;;
+    esac
+done
+
+# if neither --official, --external, nor --deprecated specified, show official + external
+if [ ${show_official} -eq 0 ] && [ ${show_external} -eq 0 ] && [ ${show_deprecated} -eq 0 ]; then
+    show_official=1
+    show_external=1
+fi
+
+ci_excludes=$(load_ci_excludes)
+
+case "${cmd}" in
+    list)
+        if [ ${show_official} -eq 1 ]; then
+            list_official
+        fi
+        if [ ${show_external} -eq 1 ]; then
+            list_external
+        fi
+        if [ ${show_deprecated} -eq 1 ]; then
+            list_deprecated
+        fi
+        ;;
+    help)
+        help
+        ;;
+    *)
+        echo "ERROR: Unknown command: ${cmd}"
+        help
+        exit 1
+        ;;
+esac
