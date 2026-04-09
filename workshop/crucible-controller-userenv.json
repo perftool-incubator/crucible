@@ -5,7 +5,7 @@
     }
   },
   "userenv": {
-    "name": "fedora",
+    "name": "crucible-controller",
     "label": "Fedora 43",
     "origin": {
       "image": "registry.fedoraproject.org/fedora",

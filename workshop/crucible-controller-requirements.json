@@ -6,7 +6,7 @@
   },
   "userenvs": [
     {
-      "name": "fedora",
+      "name": "crucible-controller",
       "requirements": [
         "dnf-config-modify",
         "motd",
@@ -15,17 +15,13 @@
         "build-libraries",
         "build-tools",
         "python39",
-        "non-distro-python-deps",
         "valkey",
         "redis-compat",
-        "distro-perl-tools",
-        "distro-perl-modules",
         "container-tools",
-        "container-storage-fuse",
+        "container-tools-config",
         "httpd",
         "opensearch",
-        "nodejs",
-        "non-distro-node-deps",
+        "logging-perl-modules",
         "gh-cli-repo",
         "gh-cli"
       ]
@@ -74,21 +70,7 @@
       "distro_info": {
         "packages": [
           "python39",
-          "python3-pip",
-          "python3-invoke",
-          "python3-fabric",
-          "python3-requests"
-        ]
-      }
-    },
-    {
-      "name": "non-distro-python-deps",
-      "type": "python3",
-      "python3_info": {
-        "packages": [
-          "redis",
-          "hiredis",
-          "jsonschema"
+          "python3-pip"
         ]
       }
     },
@@ -137,24 +119,22 @@
       }
     },
     {
-      "name": "container-storage-fuse",
+      "name": "container-tools",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "podman",
+          "fuse-overlayfs"
+        ]
+      }
+    },
+    {
+      "name": "container-tools-config",
       "type": "manual",
       "manual_info": {
         "commands": [
           "cp /usr/share/containers/storage.conf /etc/containers",
           "sed -i -e 's|#mount_program = \"/usr/bin/fuse-overlayfs\"|mount_program = \"/usr/bin/fuse-overlayfs\"|' /etc/containers/storage.conf"
-        ]
-      }
-    },
-    {
-      "name": "container-tools",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "buildah",
-          "podman",
-          "skopeo",
-          "fuse-overlayfs"
         ]
       }
     },
@@ -186,20 +166,14 @@
       }
     },
     {
-      "name": "nodejs",
+      "name": "logging-perl-modules",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "nodejs"
-        ]
-      }
-    },
-    {
-      "name": "non-distro-node-deps",
-      "type": "node",
-      "node_info": {
-        "packages": [
-          "ansi-regex sax react"
+          "perl-Time-HiRes",
+          "perl-DBI",
+          "perl-DBD-SQLite",
+          "perl-Data-Dumper"
         ]
       }
     },
@@ -209,37 +183,6 @@
       "manual_info": {
         "commands": [
           "printf \"Crucible\\n    There is no escape\\n        (unless you press control-D)\\n\\n\\n\" >/etc/motd"
-        ]
-      }
-    },
-    {
-      "name": "distro-perl-tools",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "perl-App-cpanminus"
-        ]
-      }
-    },
-    {
-      "name": "distro-perl-modules",
-      "type": "distro",
-      "distro_info": {
-        "packages": [
-          "perl-Coro",
-          "perl-JSON",
-          "perl-JSON-XS",
-          "perl-JSON-Validator",
-          "perl-Data-UUID",
-          "perl-Digest-SHA",
-          "perl-Archive-Extract-xz-IO-Uncompress-UnXz.noarch",
-          "perl-Data-Dumper",
-          "perl-Digest-MD5",
-          "perl-Getopt-Long",
-          "perl-REST-Client",
-          "perl-Time-HiRes",
-          "perl-DBI",
-          "perl-DBD-SQLite"
         ]
       }
     },
