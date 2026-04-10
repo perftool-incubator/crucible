@@ -1,0 +1,17 @@
+{
+    "userenv": "crucible-controller-userenv",
+    "repo": "quay.io/crucible/controller",
+    "architectures": [
+        "x86_64",
+        "aarch64"
+    ],
+    "subprojects": [
+        { "name": "crucible",        "path": ".",                                  "requirements": "./workshop/crucible-controller-requirements.json" },
+        { "name": "rickshaw",        "path": "./subprojects/core/rickshaw" },
+        { "name": "workshop",        "path": "./subprojects/core/workshop" },
+        { "name": "toolbox",         "path": "./subprojects/core/toolbox" },
+        { "name": "roadblock",       "path": "./subprojects/core/roadblock" },
+        { "name": "CommonDataModel", "path": "./subprojects/core/CommonDataModel" },
+        { "name": "multiplex",       "path": "./subprojects/core/multiplex" }
+    ]
+}
