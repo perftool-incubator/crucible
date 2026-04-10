@@ -340,11 +340,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # build subcommand
-    build_parser = subparsers.add_parser("build", help="Build the controller image")
-    build_parser.add_argument(
-        "extra_args", nargs="*",
-        help="Additional arguments passed to workshop.py (e.g., --config)"
-    )
+    subparsers.add_parser("build", help="Build the controller image")
 
     # push subcommand
     subparsers.add_parser("push", help="Push the built image to the registry")
@@ -357,7 +353,10 @@ def main():
         "tag", help="Tag for the manifest"
     )
 
-    args = parser.parse_args()
+    # Use parse_known_args so unrecognized args (e.g., --config for
+    # workshop.py) pass through to the build subcommand
+    args, remaining = parser.parse_known_args()
+    args.extra_args = remaining
 
     if args.command == "build":
         cmd_build(args)
