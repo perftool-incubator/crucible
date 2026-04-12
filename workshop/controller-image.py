@@ -116,6 +116,10 @@ def compute_hashes(crucible_home, repos):
     """
     repo_hashes = []
 
+    # Ensure git trusts all subproject directories (needed when running
+    # as root inside a container with repos owned by a different user)
+    run("git config --global --add safe.directory '*'", hide=True, warn=True)
+
     for name, rel_path in repos:
         repo_path = Path(crucible_home) / rel_path
         if not repo_path.is_dir():
@@ -124,7 +128,9 @@ def compute_hashes(crucible_home, repos):
 
         result = run(f"git -C {repo_path} rev-parse HEAD", hide=True, warn=True)
         if result.exited != 0:
-            print(f"ERROR: Could not get commit hash for '{name}'", file=sys.stderr)
+            print(f"ERROR: Could not get commit hash for '{name}' at '{repo_path}'", file=sys.stderr)
+            if result.stderr:
+                print(f"  git error: {result.stderr.strip()}", file=sys.stderr)
             sys.exit(1)
 
         commit_hash = result.stdout.strip()
