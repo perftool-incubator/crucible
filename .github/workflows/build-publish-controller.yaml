@@ -24,10 +24,6 @@ on:
         type: string
         default: ""
 
-concurrency:
-  group: build-publish-controller
-  cancel-in-progress: true
-
 jobs:
   build-push:
     strategy:
@@ -54,7 +50,7 @@ jobs:
         env:
           REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
         run: |
-          sudo -E bash -c 'printenv REGISTRY_AUTH > /root/quay-auth.json'
+          sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
           sudo podman login --authfile /root/quay-auth.json quay.io
 
       - name: Build controller image
@@ -85,7 +81,7 @@ jobs:
         env:
           REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
         run: |
-          sudo -E bash -c 'printenv REGISTRY_AUTH > /root/quay-auth.json'
+          sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
           sudo podman login --authfile /root/quay-auth.json quay.io
 
       - name: Determine manifest tag

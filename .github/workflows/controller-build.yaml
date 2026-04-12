@@ -12,6 +12,10 @@ on:
       - .github/workflows/controller-build.yaml
   workflow_dispatch:
 
+concurrency:
+  group: build-publish-controller
+  cancel-in-progress: true
+
 jobs:
   call-build-publish-controller:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
