@@ -51,9 +51,11 @@ jobs:
           sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --engine-registry quay.io/crucible/client-server --verbose
 
       - name: Login to quay.io
+        env:
+          REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
         run: |
-          echo '${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}' > /tmp/quay-auth.json
-          sudo podman login --authfile /tmp/quay-auth.json quay.io
+          sudo -E bash -c 'printenv REGISTRY_AUTH > /root/quay-auth.json'
+          sudo podman login --authfile /root/quay-auth.json quay.io
 
       - name: Build controller image
         run: sudo crucible wrapper /opt/crucible/workshop/controller-image.py build
@@ -63,7 +65,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/quay-auth.json
+        run: sudo rm -f /root/quay-auth.json
 
   create-manifest:
     needs: build-push
@@ -80,9 +82,11 @@ jobs:
           sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --engine-registry quay.io/crucible/client-server --verbose
 
       - name: Login to quay.io
+        env:
+          REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
         run: |
-          echo '${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}' > /tmp/quay-auth.json
-          sudo podman login --authfile /tmp/quay-auth.json quay.io
+          sudo -E bash -c 'printenv REGISTRY_AUTH > /root/quay-auth.json'
+          sudo podman login --authfile /root/quay-auth.json quay.io
 
       - name: Determine manifest tag
         id: tag
@@ -98,7 +102,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/quay-auth.json
+        run: sudo rm -f /root/quay-auth.json
 
     outputs:
       manifest_tag: ${{ steps.tag.outputs.tag }}
