@@ -31,7 +31,7 @@ concurrency:
 jobs:
   build-push:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
@@ -48,7 +48,7 @@ jobs:
           fi
           curl -L https://raw.githubusercontent.com/perftool-incubator/crucible/master/crucible-install.sh -o crucible-install.sh
           chmod +x crucible-install.sh
-          sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --verbose
+          sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --engine-registry quay.io/crucible/client-server --verbose
 
       - name: Login to quay.io
         run: |
@@ -77,7 +77,7 @@ jobs:
           fi
           curl -L https://raw.githubusercontent.com/perftool-incubator/crucible/master/crucible-install.sh -o crucible-install.sh
           chmod +x crucible-install.sh
-          sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --verbose
+          sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --engine-registry quay.io/crucible/client-server --verbose
 
       - name: Login to quay.io
         run: |
