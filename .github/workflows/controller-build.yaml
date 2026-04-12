@@ -1,0 +1,21 @@
+name: controller-build
+
+on:
+  pull_request_target:
+    types: [ closed ]
+    branches: [ master ]
+    paths:
+      - workshop/crucible-controller-requirements.json
+      - workshop/crucible-controller-userenv.json
+      - workshop/controller-image.py
+      - workshop/controller.json
+      - .github/workflows/controller-build.yaml
+  workflow_dispatch:
+
+jobs:
+  call-build-publish-controller:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    uses: ./.github/workflows/build-publish-controller.yaml
+    with:
+      ci_target: "crucible"
+    secrets: inherit
