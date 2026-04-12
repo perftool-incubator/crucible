@@ -32,10 +32,10 @@ jobs:
             .github/workflows/crucible-release.yaml
             .github/workflows/crucible-ci.yaml
             .github/workflows/ci.yaml
+            .github/workflows/controller-build.yaml
+            .github/workflows/build-publish-controller.yaml
             docs/**
             spec/**
-            workshop/create-manifest.sh
-            workshop/push-controller.sh
       - name: Display changes
         run: echo '${{ toJSON(steps.filter.outputs) }}' | jq .
 
