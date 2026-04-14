@@ -19,7 +19,7 @@ concurrency:
 jobs:
   call-build-publish-controller:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
-    uses: ./.github/workflows/build-publish-controller.yaml
+    uses: ./.github/workflows/build-publish-controller-worker.yaml
     with:
       ci_target: "crucible"
     secrets: inherit
