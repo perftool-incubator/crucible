@@ -107,10 +107,15 @@ jobs:
       QUAY_TOKEN: ${{ secrets.CRUCIBLE_QUAYIO_OAUTH_TOKEN }}
       REPO: crucible/controller
     steps:
+      - name: Prepare auth
+        run: |
+          QUAY_TOKEN_CLEAN=$(echo -n "${QUAY_TOKEN}" | tr -d '[:space:]')
+          echo "QUAY_TOKEN_CLEAN=${QUAY_TOKEN_CLEAN}" >> $GITHUB_ENV
+
       - name: Get current latest digest
         id: current
         run: |
-          digest=$(curl -s -H "Authorization: Bearer ${QUAY_TOKEN}" \
+          digest=$(curl -s -H "Authorization: Bearer ${QUAY_TOKEN_CLEAN}" \
             "https://quay.io/api/v1/repository/${REPO}/tag/?specificTag=latest" \
             | jq -r '.tags[0].manifest_digest // empty')
           echo "digest=${digest}" >> $GITHUB_OUTPUT
@@ -124,7 +129,7 @@ jobs:
         if: steps.current.outputs.digest != ''
         run: |
           response=$(curl -s -X PUT \
-            -H "Authorization: Bearer ${QUAY_TOKEN}" \
+            -H "Authorization: Bearer ${QUAY_TOKEN_CLEAN}" \
             -H "Content-Type: application/json" \
             --data-raw '{"manifest_digest":"${{ steps.current.outputs.digest }}"}' \
             "https://quay.io/api/v1/repository/${REPO}/tag/previous")
@@ -134,7 +139,7 @@ jobs:
       - name: Get new manifest digest
         id: new
         run: |
-          digest=$(curl -s -H "Authorization: Bearer ${QUAY_TOKEN}" \
+          digest=$(curl -s -H "Authorization: Bearer ${QUAY_TOKEN_CLEAN}" \
             "https://quay.io/api/v1/repository/${REPO}/tag/?specificTag=${{ needs.create-manifest.outputs.manifest_tag }}" \
             | jq -r '.tags[0].manifest_digest')
           echo "digest=${digest}" >> $GITHUB_OUTPUT
@@ -143,7 +148,7 @@ jobs:
       - name: Move latest tag to new manifest
         run: |
           response=$(curl -s -X PUT \
-            -H "Authorization: Bearer ${QUAY_TOKEN}" \
+            -H "Authorization: Bearer ${QUAY_TOKEN_CLEAN}" \
             -H "Content-Type: application/json" \
             --data-raw '{"manifest_digest":"${{ steps.new.outputs.digest }}"}' \
             "https://quay.io/api/v1/repository/${REPO}/tag/latest")
