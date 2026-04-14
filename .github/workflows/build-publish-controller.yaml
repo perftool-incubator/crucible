@@ -128,12 +128,17 @@ jobs:
       - name: Move previous tag to current latest
         if: steps.current.outputs.digest != ''
         run: |
-          response=$(curl -s -X PUT \
+          http_code=$(curl -s -o /tmp/quay-response.json -w '%{http_code}' -X PUT \
             -H "Authorization: Bearer ${QUAY_TOKEN_CLEAN}" \
             -H "Content-Type: application/json" \
             --data-raw '{"manifest_digest":"${{ steps.current.outputs.digest }}"}' \
             "https://quay.io/api/v1/repository/${REPO}/tag/previous")
-          echo "API response: ${response}"
+          response=$(cat /tmp/quay-response.json)
+          echo "HTTP ${http_code}: ${response}"
+          if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+            echo "ERROR: Failed to move 'previous' tag (HTTP ${http_code})"
+            exit 1
+          fi
           echo "Moved 'previous' to digest: ${{ steps.current.outputs.digest }}"
 
       - name: Get new manifest digest
@@ -142,17 +147,26 @@ jobs:
           digest=$(curl -s -H "Authorization: Bearer ${QUAY_TOKEN_CLEAN}" \
             "https://quay.io/api/v1/repository/${REPO}/tag/?specificTag=${{ needs.create-manifest.outputs.manifest_tag }}" \
             | jq -r '.tags[0].manifest_digest')
+          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
+            echo "ERROR: Could not find manifest digest for tag '${{ needs.create-manifest.outputs.manifest_tag }}'"
+            exit 1
+          fi
           echo "digest=${digest}" >> $GITHUB_OUTPUT
           echo "New manifest digest: ${digest}"
 
       - name: Move latest tag to new manifest
         run: |
-          response=$(curl -s -X PUT \
+          http_code=$(curl -s -o /tmp/quay-response.json -w '%{http_code}' -X PUT \
             -H "Authorization: Bearer ${QUAY_TOKEN_CLEAN}" \
             -H "Content-Type: application/json" \
             --data-raw '{"manifest_digest":"${{ steps.new.outputs.digest }}"}' \
             "https://quay.io/api/v1/repository/${REPO}/tag/latest")
-          echo "API response: ${response}"
+          response=$(cat /tmp/quay-response.json)
+          echo "HTTP ${http_code}: ${response}"
+          if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+            echo "ERROR: Failed to move 'latest' tag (HTTP ${http_code})"
+            exit 1
+          fi
           echo "Moved 'latest' to digest: ${{ steps.new.outputs.digest }}"
 
       - name: Summary
