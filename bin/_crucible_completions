@@ -40,6 +40,9 @@ _crucible_completions() {
             run)
                 COMPREPLY=($(compgen -f -- "${COMP_WORDS[2]}"))
                 ;;
+            wrapper)
+                COMPREPLY=($(compgen -c -f -- "${COMP_WORDS[2]}"))
+                ;;
             start|stop)
                 COMPREPLY=($(compgen -W "httpd image-sourcing opensearch valkey" -- "${COMP_WORDS[2]}"))
                 ;;
@@ -132,4 +135,4 @@ _crucible_completions() {
     fi
 }
 
-complete -o nosort -F _crucible_completions crucible
+complete -o nosort -o filenames -F _crucible_completions crucible
