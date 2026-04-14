@@ -25,7 +25,7 @@ on:
         default: ""
 
 concurrency:
-  group: build-publish-controller
+  group: build-publish-controller-global
   cancel-in-progress: true
 
 jobs:
