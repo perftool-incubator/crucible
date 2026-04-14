@@ -46,18 +46,16 @@ jobs:
           chmod +x crucible-install.sh
           sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --engine-registry quay.io/crucible/client-server --verbose
 
-      - name: Login to quay.io
+      - name: Write registry auth
         env:
           REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
-        run: |
-          sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
-          sudo podman login --authfile /root/quay-auth.json quay.io
+        run: sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
 
       - name: Build controller image
         run: sudo crucible wrapper /opt/crucible/workshop/controller-image.py build
 
       - name: Push controller image
-        run: sudo crucible wrapper /opt/crucible/workshop/controller-image.py push
+        run: sudo crucible wrapper /opt/crucible/workshop/controller-image.py --authfile /root/quay-auth.json push
 
       - name: Cleanup
         if: always()
@@ -77,12 +75,10 @@ jobs:
           chmod +x crucible-install.sh
           sudo ./crucible-install.sh --name "crucible-ci" --email "crucible-ci@noreply" --engine-registry quay.io/crucible/client-server --verbose
 
-      - name: Login to quay.io
+      - name: Write registry auth
         env:
           REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
-        run: |
-          sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
-          sudo podman login --authfile /root/quay-auth.json quay.io
+        run: sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
 
       - name: Determine manifest tag
         id: tag
@@ -94,7 +90,7 @@ jobs:
           fi
 
       - name: Create and push manifest
-        run: sudo crucible wrapper /opt/crucible/workshop/controller-image.py manifest ${{ steps.tag.outputs.tag }}
+        run: sudo crucible wrapper /opt/crucible/workshop/controller-image.py --authfile /root/quay-auth.json manifest ${{ steps.tag.outputs.tag }}
 
       - name: Cleanup
         if: always()

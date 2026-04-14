@@ -287,7 +287,8 @@ def cmd_push(args):
     source = f"localhost/workshop/{conf['userenv_label']}_crucible-controller"
     destination = f"{controller_repo}:{tag}"
 
-    run(f"buildah push {source} {destination}")
+    authfile_arg = f"--authfile {args.authfile}" if args.authfile else ""
+    run(f"buildah push {authfile_arg} {source} {destination}")
 
 
 def cmd_manifest(args):
@@ -333,15 +334,20 @@ def cmd_manifest(args):
     if result.exited == 0:
         run(f"podman manifest rm {local_manifest}")
 
+    authfile_arg = f"--authfile {args.authfile}" if args.authfile else ""
     run(f"podman manifest create {local_manifest}")
     for image in images:
         run(f"podman manifest add {local_manifest} docker://{image}")
-    run(f"podman manifest push {local_manifest} {controller_repo}:{manifest_tag}")
+    run(f"podman manifest push {authfile_arg} {local_manifest} {controller_repo}:{manifest_tag}")
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Crucible controller image management tool"
+    )
+    parser.add_argument(
+        "--authfile", type=str, default=None,
+        help="Path to registry auth file for push/manifest operations"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
