@@ -1,17 +1,8 @@
 name: build-publish-controller
 
 on:
-  workflow_call:
-    inputs:
-      ci_target:
-        description: "Which subproject triggered the build"
-        required: true
-        type: string
-      manifest_tag:
-        description: "Tag for the multi-arch manifest (default: auto-generated)"
-        required: false
-        type: string
-        default: ""
+  repository_dispatch:
+    types: [controller-build]
   workflow_dispatch:
     inputs:
       ci_target:
@@ -25,13 +16,13 @@ on:
         default: ""
 
 concurrency:
-  group: build-publish-controller-global
+  group: build-publish-controller
   cancel-in-progress: true
 
 jobs:
   call-worker:
     uses: ./.github/workflows/build-publish-controller-worker.yaml
     with:
-      ci_target: ${{ inputs.ci_target }}
-      manifest_tag: ${{ inputs.manifest_tag }}
+      ci_target: ${{ github.event.client_payload.ci_target || inputs.ci_target }}
+      manifest_tag: ${{ github.event.client_payload.manifest_tag || inputs.manifest_tag || '' }}
     secrets: inherit
