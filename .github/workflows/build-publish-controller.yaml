@@ -48,7 +48,7 @@ jobs:
 
       - name: Write registry auth
         env:
-          REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
+          REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_CONTROLLER_REGISTRY_AUTH }}
         run: sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
 
       - name: Build controller image
@@ -77,7 +77,7 @@ jobs:
 
       - name: Write registry auth
         env:
-          REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_ENGINES_REGISTRY_AUTH }}
+          REGISTRY_AUTH: ${{ secrets.CRUCIBLE_PRODUCTION_CONTROLLER_REGISTRY_AUTH }}
         run: sudo bash -c "echo \"$REGISTRY_AUTH\" > /root/quay-auth.json"
 
       - name: Determine manifest tag
