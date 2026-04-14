@@ -34,6 +34,7 @@ jobs:
             .github/workflows/ci.yaml
             .github/workflows/controller-build.yaml
             .github/workflows/build-publish-controller.yaml
+            .github/workflows/build-publish-controller-worker.yaml
             docs/**
             spec/**
       - name: Display changes
