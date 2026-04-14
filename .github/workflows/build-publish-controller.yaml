@@ -123,10 +123,12 @@ jobs:
       - name: Move previous tag to current latest
         if: steps.current.outputs.digest != ''
         run: |
-          curl -s -X PUT \
+          response=$(curl -s -X PUT \
             -H "Authorization: Bearer ${QUAY_TOKEN}" \
-            --json '{"manifest_digest": "${{ steps.current.outputs.digest }}"}' \
-            "https://quay.io/api/v1/repository/${REPO}/tag/previous"
+            -H "Content-Type: application/json" \
+            --data-raw '{"manifest_digest":"${{ steps.current.outputs.digest }}"}' \
+            "https://quay.io/api/v1/repository/${REPO}/tag/previous")
+          echo "API response: ${response}"
           echo "Moved 'previous' to digest: ${{ steps.current.outputs.digest }}"
 
       - name: Get new manifest digest
@@ -140,10 +142,12 @@ jobs:
 
       - name: Move latest tag to new manifest
         run: |
-          curl -s -X PUT \
+          response=$(curl -s -X PUT \
             -H "Authorization: Bearer ${QUAY_TOKEN}" \
-            --json '{"manifest_digest": "${{ steps.new.outputs.digest }}"}' \
-            "https://quay.io/api/v1/repository/${REPO}/tag/latest"
+            -H "Content-Type: application/json" \
+            --data-raw '{"manifest_digest":"${{ steps.new.outputs.digest }}"}' \
+            "https://quay.io/api/v1/repository/${REPO}/tag/latest")
+          echo "API response: ${response}"
           echo "Moved 'latest' to digest: ${{ steps.new.outputs.digest }}"
 
       - name: Summary
