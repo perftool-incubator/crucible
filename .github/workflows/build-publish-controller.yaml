@@ -125,8 +125,7 @@ jobs:
         run: |
           curl -s -X PUT \
             -H "Authorization: Bearer ${QUAY_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d '{"manifest_digest": "${{ steps.current.outputs.digest }}"}' \
+            --json '{"manifest_digest": "${{ steps.current.outputs.digest }}"}' \
             "https://quay.io/api/v1/repository/${REPO}/tag/previous"
           echo "Moved 'previous' to digest: ${{ steps.current.outputs.digest }}"
 
@@ -143,8 +142,7 @@ jobs:
         run: |
           curl -s -X PUT \
             -H "Authorization: Bearer ${QUAY_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d '{"manifest_digest": "${{ steps.new.outputs.digest }}"}' \
+            --json '{"manifest_digest": "${{ steps.new.outputs.digest }}"}' \
             "https://quay.io/api/v1/repository/${REPO}/tag/latest"
           echo "Moved 'latest' to digest: ${{ steps.new.outputs.digest }}"
 
