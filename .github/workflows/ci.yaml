@@ -35,6 +35,7 @@ jobs:
             .github/workflows/controller-build.yaml
             .github/workflows/build-publish-controller.yaml
             .github/workflows/build-publish-controller-worker.yaml
+            .github/workflows/fork-check.yaml
             docs/**
             spec/**
       - name: Display changes
@@ -42,7 +43,7 @@ jobs:
 
   install:
     needs: changes
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.only-docs != 'true' }}
+    if: ${{ github.event.pull_request.head.repo.fork != true && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.only-docs != 'true') }}
     runs-on: [ self-hosted, aws-cloud-1 ]
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +52,7 @@ jobs:
 
   faux-install:
     needs: changes
-    if: ${{ github.event_name != 'workflow_dispatch' && needs.changes.outputs.only-docs == 'true' }}
+    if: ${{ github.event.pull_request.head.repo.fork != true && github.event_name != 'workflow_dispatch' && needs.changes.outputs.only-docs == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "faux-install complete"'
