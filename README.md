@@ -45,6 +45,7 @@ Through the use of containers built at runtime for software distribution (which 
 ## Documentation
 
 - [Implementing a New Benchmark](docs/implementing-a-new-benchmark.md)
+- [Implementing a New Tool](docs/implementing-a-new-tool.md)
 
 ## Subprojects
 
