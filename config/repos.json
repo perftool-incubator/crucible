@@ -91,6 +91,16 @@
             }
         },
         {
+            "name": "crucible-dev-tools",
+            "type": "core",
+            "repository": "https://github.com/perftool-incubator/crucible-dev-tools",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "fio",
             "type": "benchmark",
             "repository": "https://github.com/perftool-incubator/bench-fio",

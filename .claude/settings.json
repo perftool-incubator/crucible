@@ -1,0 +1,13 @@
+{
+    "extraKnownMarketplaces": {
+        "crucible-dev-tools": {
+            "source": {
+                "source": "directory",
+                "path": "subprojects/core/crucible-dev-tools"
+            }
+        }
+    },
+    "enabledPlugins": {
+        "crucible-tools@crucible-dev-tools": true
+    }
+}
