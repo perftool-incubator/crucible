@@ -123,3 +123,13 @@ This means:
 
 ### Recommended workflow
 Run Claude Code from `/opt/crucible` for most work — all subproject code is accessible, and cross-cutting changes have full visibility. Only run from a subproject root (e.g., `subprojects/core/rickshaw/`) for deep isolated work on that specific component.
+
+## Developer Tools
+
+Crucible includes a Claude Code plugin (`crucible-dev-tools`) for development workflows. When opening this project, Claude Code will prompt you to install the crucible-tools plugin. Accept to get access to:
+
+- `/crucible-tools:repo-status` — git status across all crucible repos
+- `/crucible-tools:open-prs` — open PRs in the org (optionally filter by author)
+- `/crucible-tools:dev-activity` — development activity charts (commits, PRs, workflow runs)
+- `/crucible-tools:weekly-summary` — weekly activity report with PR links
+- `ci-analyzer` agent — analyze GitHub Actions CI workflow runs to diagnose failures
