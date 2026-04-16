@@ -35,6 +35,7 @@ jobs:
             .github/workflows/build-publish-controller.yaml
             .github/workflows/build-publish-controller-worker.yaml
             .github/workflows/fork-check.yaml
+            .claude/**
             docs/**
             spec/**
       - name: Display changes

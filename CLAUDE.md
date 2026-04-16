@@ -126,8 +126,17 @@ Run Claude Code from `/opt/crucible` for most work — all subproject code is ac
 
 ## Developer Tools
 
-Crucible includes a Claude Code plugin (`crucible-dev-tools`) for development workflows. When opening this project, Claude Code will prompt you to install the crucible-tools plugin. Accept to get access to:
+Crucible includes a Claude Code plugin (`crucible-dev-tools`) for development
+workflows. New installations have the plugin repo already cloned. For existing
+installs, run `crucible update` first. Then register the plugin marketplace:
 
+```
+claude plugin marketplace add ${CRUCIBLE_HOME}/subprojects/core/crucible-dev-tools
+```
+
+Claude Code will prompt you to install the crucible-tools plugin — accept it.
+
+Available skills:
 - `/crucible-tools:repo-status` — git status across all crucible repos
 - `/crucible-tools:open-prs` — open PRs in the org (optionally filter by author)
 - `/crucible-tools:dev-activity` — development activity charts (commits, PRs, workflow runs)
