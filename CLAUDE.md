@@ -133,3 +133,24 @@ Crucible includes a Claude Code plugin (`crucible-dev-tools`) for development wo
 - `/crucible-tools:dev-activity` — development activity charts (commits, PRs, workflow runs)
 - `/crucible-tools:weekly-summary` — weekly activity report with PR links
 - `ci-analyzer` agent — analyze GitHub Actions CI workflow runs to diagnose failures
+
+## Common Terminology
+
+| Abbreviation | Full Name |
+|---|---|
+| CDM | CommonDataModel — the data model and query engine subproject |
+| SIS | source-images-service — the engine image build service in rickshaw |
+
+## Testing and Validation
+
+- **Container-side scripts**: Scripts that run inside the controller container (e.g., `workshop/controller-image.py`, workshop scripts) must be tested using `crucible wrapper <command>`. Running them directly on the host will fail due to missing dependencies (Python packages like `invoke`, Perl modules, etc.) that are only installed inside the container image.
+- **Service restart**: When modifying source-images-service code, stop all services with `crucible stop valkey opensearch image-sourcing httpd` before testing so the service picks up the new code.
+- **Engine image builds**: Test with `crucible run <run-file.json>` — run from the directory containing any referenced files (e.g., job files).
+
+## Pull Requests and Contributions
+
+- **Branch strategy**: Always submit PRs from branches on the upstream repository, not from forks. Fork PRs cannot access org secrets and variables needed for CI workflows. All repos have a `fork-check` workflow that automatically closes fork PRs.
+- **Review requests**: When opening PRs, request review from the **Developers** team and self-assign the PR.
+- **Commit messages**: Use conventional commits format (`feat:`, `fix:`, `docs:`, etc.). Be precise and descriptive — prefer nuanced descriptions over broad generalizations.
+- **CLAUDE.md updates**: When making structural changes to a subproject, update that subproject's CLAUDE.md in the same PR. Claude should author CLAUDE.md content, not humans — the human role is review and approval.
+- **Branch rulesets**: `.github/rulesets/` files are backups of configured rulesets, not authoritative. Do not read or modify them to determine required status checks.
