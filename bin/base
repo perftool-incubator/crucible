@@ -910,6 +910,12 @@ function service_control() {
         service="${1}"
         shift
 
+        if [ "${service}" == "all" ]; then
+            local all_services="httpd opensearch valkey cdm-server image-sourcing"
+            service_control ${action} ${all_services}
+            return $?
+        fi
+
         if [ "${service}" == "redis" ]; then
             echo "INFO: ${function_name}: Converting service 'redis' to 'valkey'"
             service="valkey"
