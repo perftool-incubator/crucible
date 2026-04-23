@@ -71,9 +71,9 @@ function check_id {
 
 function crucible_log() {
     if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-        ${podman_run} --name crucible-log-${SESSION_ID} ${container_log_args[@]} ${container_common_args[@]} ${container_non_service_args[@]} ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/log $@
+        ${podman_run} --name crucible-log-${SESSION_ID} ${container_log_args[@]} ${container_common_args[@]} ${container_non_service_args[@]} ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/_log.py $@
     else
-        $CRUCIBLE_HOME/bin/log $@
+        $CRUCIBLE_HOME/bin/_log.py $@
     fi
 }
 

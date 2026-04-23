@@ -87,7 +87,12 @@ if [ "$1" == "log" ]; then
         if [ "$2" == "view" -o -z "$2" ]; then
             shift
             shift
-            crucible_log view ${LOG_DB} "$@" | less -S -F
+            crucible_log view ${LOG_DB} "$@" | less -R -S -F
+            exit $?
+        elif [ "$2" == "info" ]; then
+            shift
+            shift
+            crucible_log info ${LOG_DB} "$@"
             exit $?
         elif [ "$2" == "clear" ]; then
             crucible_log clear ${LOG_DB}
@@ -164,7 +169,7 @@ if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
 
     COMMAND="$(basename $0) $@"
     COMMAND="`echo $COMMAND | sed -e 's/ /___/g'`"
-    logger_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${SESSION_ID}\" \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
+    logger_cmd="${CRUCIBLE_HOME}/bin/_logger.py console \"${SESSION_ID}\" \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
 
     logger_container_name="crucible-logger-${SESSION_ID}"
 
