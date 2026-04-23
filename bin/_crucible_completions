@@ -44,7 +44,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -c -f -- "${COMP_WORDS[2]}"))
                 ;;
             start|stop)
-                COMPREPLY=($(compgen -W "httpd image-sourcing opensearch valkey" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "all cdm-server httpd image-sourcing opensearch valkey" -- "${COMP_WORDS[2]}"))
                 ;;
             rm)
                 COMPREPLY=($(compgen -W "--run" -- "${COMP_WORDS[2]}"))
@@ -62,6 +62,9 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "--action" -- "${COMP_WORDS[2]}"))
                 ;;
             postprocess)
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                ;;
+            index)
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
             archive)
