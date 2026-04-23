@@ -16,7 +16,18 @@ from _logger_lib.viewer import (
 
 
 def parse_datetime(s):
+    import re
+    import time
     from datetime import datetime
+
+    # Relative durations: 30s, 5m, 2h, 1d, 2w
+    m = re.match(r'^(\d+)([smhdw])$', s)
+    if m:
+        value = int(m.group(1))
+        unit = m.group(2)
+        multipliers = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
+        return time.time() - (value * multipliers[unit])
+
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt).timestamp()
