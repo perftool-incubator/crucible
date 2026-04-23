@@ -64,7 +64,7 @@ function help() {
     . $CRUCIBLE_HOME/bin/base
 
     if [ "${1}" == "log" ]; then
-        ${CRUCIBLE_HOME}/bin/log help
+        ${CRUCIBLE_HOME}/bin/_log.py help
     elif [ "${1}" == "repo" ]; then
         ${CRUCIBLE_HOME}/bin/repo help
     elif [ "${1}" == "userenvs" ]; then

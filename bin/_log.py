@@ -176,6 +176,31 @@ def main():
         conn.close()
         return
 
+    if mode == "help":
+        print("Usage: crucible log <command> [options]")
+        print()
+        print("Commands:")
+        print("  view [first|last|sessionid <id>]  View log entries")
+        print("    --stream stdout|stderr           Filter by stream")
+        print("    --grep <pattern>                 Search log lines")
+        print("    --since <time>                   Filter by start time (abs or relative: 1h, 30m, 2d)")
+        print("    --until <time>                   Filter by end time")
+        print("    --tail <N>                       Show last N lines per session")
+        print("    --format plain|json              Output format")
+        print("    --color                          Colorize output")
+        print("    --count                          Count matching lines only")
+        print("  sessions                           List all sessions")
+        print("    --grep <pattern>                 Filter by command")
+        print("    --sort timestamp|command          Sort field")
+        print("    --order asc|desc                 Sort direction")
+        print("    --format plain|json              Output format")
+        print("    --color                          Colorize output")
+        print("  info [--json]                      Show log database summary")
+        print("  clear                              Delete all log entries")
+        print("  tidy                               Reclaim disk space (VACUUM)")
+        print("  init                               Initialize log database")
+        return
+
     print(f"ERROR: Unknown mode: {mode}", file=sys.stderr)
     sys.exit(1)
 
