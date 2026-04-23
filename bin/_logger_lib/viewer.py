@@ -200,12 +200,29 @@ def _strip_quotes(s):
     return s
 
 
+def _format_duration(seconds):
+    if seconds is None:
+        return "n/a"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    elif seconds < 3600:
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        return f"{m}m{s:02d}s"
+    else:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        return f"{h}h{m:02d}m"
+
+
 def list_sessions(conn, grep_pattern=None, output_format="plain",
                   use_color=False, sort_by="timestamp", sort_order="asc"):
     order_col = "commands.command" if sort_by == "command" else "sessions.timestamp"
     direction = "DESC" if sort_order == "desc" else "ASC"
     query = (
-        "SELECT sessions.timestamp, sessions.session_id, commands.command "
+        "SELECT sessions.timestamp, sessions.session_id, commands.command, "
+        "  (SELECT MAX(lines.timestamp) - MIN(lines.timestamp) "
+        "   FROM lines WHERE lines.session = sessions.id) AS duration "
         "FROM sessions "
         "JOIN commands ON commands.id = sessions.command "
         f"ORDER BY {order_col} {direction}"
@@ -214,7 +231,7 @@ def list_sessions(conn, grep_pattern=None, output_format="plain",
     rows = conn.execute(query).fetchall()
 
     if output_format == "json":
-        for ts, session_id, command in rows:
+        for ts, session_id, command, duration in rows:
             session_id = _strip_quotes(session_id)
             command = _strip_quotes(command)
             if grep_pattern and not re.search(grep_pattern, command):
@@ -223,27 +240,29 @@ def list_sessions(conn, grep_pattern=None, output_format="plain",
                 "timestamp": format_ts(ts),
                 "session_id": session_id,
                 "command": command,
+                "duration": round(duration, 3) if duration else None,
             }))
         return
 
     max_id_len = max((len(_strip_quotes(r[1])) for r in rows), default=10)
-    fmt = f"%-23s  %-{max_id_len}s  %s"
+    fmt = f"%-23s  %-{max_id_len}s  %-10s  %s"
 
     if use_color:
-        print(f"\033[1m{fmt % ('Timestamp', 'Session ID', 'Command')}\033[0m")
+        print(f"\033[1m{fmt % ('Timestamp', 'Session ID', 'Duration', 'Command')}\033[0m")
     else:
-        print(fmt % ("Timestamp", "Session ID", "Command"))
+        print(fmt % ("Timestamp", "Session ID", "Duration", "Command"))
 
-    for ts, session_id, command in rows:
+    for ts, session_id, command, duration in rows:
         session_id = _strip_quotes(session_id)
         command = _strip_quotes(command)
         if grep_pattern and not re.search(grep_pattern, command):
             continue
         ts_fmt = format_ts(ts)
+        dur_fmt = _format_duration(duration)
         if use_color:
-            print(f"\033[2m{ts_fmt}\033[0m  {session_id}  {command}")
+            print(f"\033[2m{ts_fmt}\033[0m  {session_id}  {dur_fmt:<10}  {command}")
         else:
-            print(fmt % (ts_fmt, session_id, command))
+            print(fmt % (ts_fmt, session_id, dur_fmt, command))
 
 
 def get_session_ids(conn):
