@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _logger_lib.db import init_db, verify_db, _run_migrations
 from _logger_lib.viewer import (
     view_sessions, show_info, clear_db, tidy_db, get_session_ids,
+    list_sessions,
 )
 
 
@@ -47,6 +48,38 @@ def main():
             print(f"ERROR: {e}", file=sys.stderr)
             sys.exit(1)
         get_session_ids(conn)
+        conn.close()
+        return
+
+    if mode == "sessions":
+        try:
+            conn = verify_db(log_db)
+        except RuntimeError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        parser = argparse.ArgumentParser(prog="_log.py sessions")
+        parser.add_argument("--grep", default=None)
+        parser.add_argument("--format", default="plain",
+                            choices=["plain", "json"])
+        parser.add_argument("--color", action="store_true", default=False)
+        parser.add_argument("--no-color", action="store_true", default=False)
+        parser.add_argument("--sort", default="timestamp",
+                            choices=["timestamp", "command"])
+        parser.add_argument("--order", default="asc",
+                            choices=["asc", "desc"])
+
+        args = parser.parse_args(sys.argv[3:])
+        use_color = args.color and not args.no_color
+
+        list_sessions(
+            conn,
+            grep_pattern=args.grep,
+            output_format=args.format,
+            use_color=use_color,
+            sort_by=args.sort,
+            sort_order=args.order,
+        )
         conn.close()
         return
 

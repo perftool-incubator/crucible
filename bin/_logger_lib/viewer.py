@@ -194,6 +194,58 @@ def tidy_db(conn):
     conn.execute("VACUUM")
 
 
+def _strip_quotes(s):
+    if s and len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s[1:-1]
+    return s
+
+
+def list_sessions(conn, grep_pattern=None, output_format="plain",
+                  use_color=False, sort_by="timestamp", sort_order="asc"):
+    order_col = "commands.command" if sort_by == "command" else "sessions.timestamp"
+    direction = "DESC" if sort_order == "desc" else "ASC"
+    query = (
+        "SELECT sessions.timestamp, sessions.session_id, commands.command "
+        "FROM sessions "
+        "JOIN commands ON commands.id = sessions.command "
+        f"ORDER BY {order_col} {direction}"
+    )
+
+    rows = conn.execute(query).fetchall()
+
+    if output_format == "json":
+        for ts, session_id, command in rows:
+            session_id = _strip_quotes(session_id)
+            command = _strip_quotes(command)
+            if grep_pattern and not re.search(grep_pattern, command):
+                continue
+            print(json.dumps({
+                "timestamp": format_ts(ts),
+                "session_id": session_id,
+                "command": command,
+            }))
+        return
+
+    max_id_len = max((len(_strip_quotes(r[1])) for r in rows), default=10)
+    fmt = f"%-23s  %-{max_id_len}s  %s"
+
+    if use_color:
+        print(f"\033[1m{fmt % ('Timestamp', 'Session ID', 'Command')}\033[0m")
+    else:
+        print(fmt % ("Timestamp", "Session ID", "Command"))
+
+    for ts, session_id, command in rows:
+        session_id = _strip_quotes(session_id)
+        command = _strip_quotes(command)
+        if grep_pattern and not re.search(grep_pattern, command):
+            continue
+        ts_fmt = format_ts(ts)
+        if use_color:
+            print(f"\033[2m{ts_fmt}\033[0m  {session_id}  {command}")
+        else:
+            print(fmt % (ts_fmt, session_id, command))
+
+
 def get_session_ids(conn):
     rows = conn.execute(
         "SELECT session_id FROM sessions ORDER BY timestamp"

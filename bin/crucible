@@ -89,6 +89,11 @@ if [ "$1" == "log" ]; then
             shift
             crucible_log view ${LOG_DB} "$@" | less -R -S -F
             exit $?
+        elif [ "$2" == "sessions" ]; then
+            shift
+            shift
+            crucible_log sessions ${LOG_DB} "$@" | less -R -S -F
+            exit $?
         elif [ "$2" == "info" ]; then
             shift
             shift

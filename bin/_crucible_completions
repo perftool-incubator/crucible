@@ -23,7 +23,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "log repo userenvs update run" -- "${COMP_WORDS[2]}"))
                 ;;
             log)
-                COMPREPLY=($(compgen -W "clear info init tidy view" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "clear info init sessions tidy view" -- "${COMP_WORDS[2]}"))
                 ;;
             get)
                 COMPREPLY=($(compgen -W "result metric" -- "${COMP_WORDS[2]}"))
@@ -121,6 +121,8 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type run-id)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
+    elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "sessions" ]; then
+        COMPREPLY=($(compgen -W "--grep --format --color --no-color --sort --order" -- "${COMP_WORDS[$num_index]}"))
     elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "view" ]; then
         local log_view_flags="--stream --grep --since --until --format --color --no-color --count"
         if [ $num_words -eq 4 ]; then
