@@ -101,17 +101,20 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
         else:
             return f"[{line_ts_fmt}][{line_stream}] {line}"
 
-    def _print_session_header(session_ts_fmt, line_stream, session_id, session_cmd, session_src, dur_str):
+    def _print_session_header(session_ts_fmt, session_id, session_cmd, session_src, dur_str):
+        session_id = _strip_quotes(session_id)
+        session_cmd = _strip_quotes(session_cmd)
         if use_color:
             print(f"\033[1;36m{sep}\033[0m")
-            print(f"[{session_ts_fmt}][{line_stream}] \033[1msession id: {session_id}\033[0m")
+            print(f"\033[1msession id:  {session_id}\033[0m")
         else:
             print(sep)
-            print(f"[{session_ts_fmt}][{line_stream}] session id: {session_id}")
-        print(f"[{session_ts_fmt}][{line_stream}] command:    {session_cmd}")
-        print(f"[{session_ts_fmt}][{line_stream}] duration:   {dur_str}")
-        print(f"[{session_ts_fmt}][{line_stream}] source:     {session_src}")
-        print(f"[{session_ts_fmt}][{line_stream}]")
+            print(f"session id:  {session_id}")
+        print(f"command:     {session_cmd}")
+        print(f"timestamp:   {session_ts_fmt}")
+        print(f"duration:    {dur_str}")
+        print(f"source:      {session_src}")
+        print()
 
     pending_header = None
     pending_lines = []
@@ -155,7 +158,7 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
             _flush_pending()
             dur = session_durations.get(session_id)
             dur_str = _format_duration(dur) if dur is not None else "n/a"
-            pending_header = (session_ts_fmt, line_stream, session_id, session_cmd, session_src, dur_str)
+            pending_header = (session_ts_fmt, session_id, session_cmd, session_src, dur_str)
             last_session_ts = session_ts
 
         formatted = _format_line(line_ts_fmt, line_stream, line)
