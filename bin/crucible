@@ -74,10 +74,6 @@ fi
 ${CRUCIBLE_HOME}/bin/_ssh-key-cleaner &
 disown $!
 
-# special case some log operations so they don't happen under log
-# redirection
-log_cmd="${CRUCIBLE_HOME}/bin/_logger console \"${COMMAND}\" ${LOG_DB} ${STDOUT_PIPE} ${STDERR_PIPE}"
-
 if [ ! -e ${LOG_DB} -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
     crucible_log init ${LOG_DB}
 fi
