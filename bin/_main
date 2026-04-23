@@ -13,7 +13,7 @@ if [ -z "${CRUCIBLE_HOME}" -o ! -e "${CRUCIBLE_HOME}" ]; then
     exit 1
 fi
 
-if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" -a "$CRUCIBLE_USE_LOGGER" == "1" ]; then
+if [ -z "${LOG_DB}" -o ! -e "${LOG_DB}" ]; then
     echo "ERROR: Could not find \${LOG_DB} [${LOG_DB}], exiting."
     exit 2
 fi
@@ -408,19 +408,17 @@ elif [ "${1}" == "run" ]; then
         EXIT_VAL=${RC}
     fi
 
-    if [ "$CRUCIBLE_USE_LOGGER" == "1" ]; then
-        sleep 1
-        logfile="${base_run_dir}/crucible.log.xz"
-        echo "Archiving crucible log to ${logfile}"
-        crucible_log view ${LOG_DB} sessionid ${SESSION_ID} | xz -9 -T0 > ${logfile}
-        PIPES_RCS=$(echo ${PIPESTATUS[@]})
-        RC=0
-        for PIPE_RC in ${PIPES_RC}; do
-            RC=$(( ${RC} + ${PIPE_RC} ))
-        done
-        if [ ${EXIT_VAL} == 0 ]; then
-            EXIT_VAL=${RC}
-        fi
+    sleep 1
+    logfile="${base_run_dir}/crucible.log.xz"
+    echo "Archiving crucible log to ${logfile}"
+    crucible_log view ${LOG_DB} sessionid ${SESSION_ID} | xz -9 -T0 > ${logfile}
+    PIPES_RCS=$(echo ${PIPESTATUS[@]})
+    RC=0
+    for PIPE_RC in ${PIPES_RC}; do
+        RC=$(( ${RC} + ${PIPE_RC} ))
+    done
+    if [ ${EXIT_VAL} == 0 ]; then
+        EXIT_VAL=${RC}
     fi
 elif [ "${1}" == "archive" ]; then
     shift
