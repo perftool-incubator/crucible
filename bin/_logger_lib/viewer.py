@@ -81,6 +81,15 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
         print(count)
         return
 
+    # Pre-fetch session durations
+    session_durations = {}
+    for sid, dur in conn.execute(
+        "SELECT sessions.session_id, MAX(lines.timestamp) - MIN(lines.timestamp) "
+        "FROM sessions JOIN lines ON sessions.id = lines.session "
+        "GROUP BY sessions.id"
+    ).fetchall():
+        session_durations[sid] = dur
+
     last_session_ts = -1
     sep = "=" * 94
 
@@ -109,6 +118,8 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
         line_ts_fmt = format_ts(line_ts)
 
         if session_ts != last_session_ts:
+            dur = session_durations.get(session_id)
+            dur_str = _format_duration(dur) if dur is not None else "n/a"
             if use_color:
                 print(f"\033[1;36m{sep}\033[0m")
                 print(f"[{session_ts_fmt}][{line_stream}] \033[1msession id: {session_id}\033[0m")
@@ -116,6 +127,7 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
                 print(sep)
                 print(f"[{session_ts_fmt}][{line_stream}] session id: {session_id}")
             print(f"[{session_ts_fmt}][{line_stream}] command:    {session_cmd}")
+            print(f"[{session_ts_fmt}][{line_stream}] duration:   {dur_str}")
             print(f"[{session_ts_fmt}][{line_stream}] source:     {session_src}")
             print(f"[{session_ts_fmt}][{line_stream}]")
             last_session_ts = session_ts
