@@ -17,7 +17,7 @@ def format_ts(epoch):
 def view_sessions(conn, filter_cmd=None, filter_arg=None,
                   stream_filter=None, grep_pattern=None,
                   since=None, until=None, output_format="plain",
-                  use_color=False, count_only=False):
+                  use_color=False, count_only=False, tail=None):
     conditions = []
     params = []
 
@@ -93,6 +93,40 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
     last_session_ts = -1
     sep = "=" * 94
 
+    def _format_line(line_ts_fmt, line_stream, line):
+        if use_color and line_stream == "STDERR":
+            return f"\033[2m[{line_ts_fmt}]\033[0m[\033[31m{line_stream}\033[0m] \033[31m{line}\033[0m"
+        elif use_color:
+            return f"\033[2m[{line_ts_fmt}]\033[0m[{line_stream}] {line}"
+        else:
+            return f"[{line_ts_fmt}][{line_stream}] {line}"
+
+    def _print_session_header(session_ts_fmt, line_stream, session_id, session_cmd, session_src, dur_str):
+        if use_color:
+            print(f"\033[1;36m{sep}\033[0m")
+            print(f"[{session_ts_fmt}][{line_stream}] \033[1msession id: {session_id}\033[0m")
+        else:
+            print(sep)
+            print(f"[{session_ts_fmt}][{line_stream}] session id: {session_id}")
+        print(f"[{session_ts_fmt}][{line_stream}] command:    {session_cmd}")
+        print(f"[{session_ts_fmt}][{line_stream}] duration:   {dur_str}")
+        print(f"[{session_ts_fmt}][{line_stream}] source:     {session_src}")
+        print(f"[{session_ts_fmt}][{line_stream}]")
+
+    pending_header = None
+    pending_lines = []
+
+    def _flush_pending():
+        nonlocal pending_header, pending_lines
+        if pending_header is None:
+            return
+        _print_session_header(*pending_header)
+        lines_to_print = pending_lines[-tail:] if tail else pending_lines
+        for l in lines_to_print:
+            print(l)
+        pending_header = None
+        pending_lines = []
+
     for row in cursor:
         session_id = row[0]
         session_ts = row[1]
@@ -118,26 +152,22 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
         line_ts_fmt = format_ts(line_ts)
 
         if session_ts != last_session_ts:
+            _flush_pending()
             dur = session_durations.get(session_id)
             dur_str = _format_duration(dur) if dur is not None else "n/a"
-            if use_color:
-                print(f"\033[1;36m{sep}\033[0m")
-                print(f"[{session_ts_fmt}][{line_stream}] \033[1msession id: {session_id}\033[0m")
-            else:
-                print(sep)
-                print(f"[{session_ts_fmt}][{line_stream}] session id: {session_id}")
-            print(f"[{session_ts_fmt}][{line_stream}] command:    {session_cmd}")
-            print(f"[{session_ts_fmt}][{line_stream}] duration:   {dur_str}")
-            print(f"[{session_ts_fmt}][{line_stream}] source:     {session_src}")
-            print(f"[{session_ts_fmt}][{line_stream}]")
+            pending_header = (session_ts_fmt, line_stream, session_id, session_cmd, session_src, dur_str)
             last_session_ts = session_ts
 
-        if use_color and line_stream == "STDERR":
-            print(f"\033[2m[{line_ts_fmt}]\033[0m[\033[31m{line_stream}\033[0m] \033[31m{line}\033[0m")
-        elif use_color:
-            print(f"\033[2m[{line_ts_fmt}]\033[0m[{line_stream}] {line}")
+        formatted = _format_line(line_ts_fmt, line_stream, line)
+        if tail:
+            pending_lines.append(formatted)
         else:
-            print(f"[{line_ts_fmt}][{line_stream}] {line}")
+            if pending_header:
+                _print_session_header(*pending_header)
+                pending_header = None
+            print(formatted)
+
+    _flush_pending()
 
 
 def show_info(conn, db_path=None, output_format="plain"):

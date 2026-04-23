@@ -124,7 +124,7 @@ _crucible_completions() {
     elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "sessions" ]; then
         COMPREPLY=($(compgen -W "--grep --format --color --no-color --sort --order" -- "${COMP_WORDS[$num_index]}"))
     elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "view" ]; then
-        local log_view_flags="--stream --grep --since --until --format --color --no-color --count"
+        local log_view_flags="--stream --grep --since --until --format --color --no-color --count --tail"
         if [ $num_words -eq 4 ]; then
             COMPREPLY=($(compgen -W "first last sessionid ${log_view_flags}" -- "${COMP_WORDS[3]}"))
         elif [ $num_words -eq 5 -a "${COMP_WORDS[3]}" == "sessionid" ]; then

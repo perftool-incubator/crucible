@@ -116,6 +116,8 @@ def main():
         parser.add_argument("--color", action="store_true", default=False)
         parser.add_argument("--no-color", action="store_true", default=False)
         parser.add_argument("--count", action="store_true", default=False)
+        parser.add_argument("--tail", type=int, default=None,
+                            help="Show only the last N lines per session")
 
         args = parser.parse_args(sys.argv[3:])
 
@@ -135,6 +137,7 @@ def main():
             output_format=args.format,
             use_color=use_color,
             count_only=args.count,
+            tail=args.tail,
         )
         conn.close()
         return
