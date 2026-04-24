@@ -17,7 +17,8 @@ def format_ts(epoch):
 def view_sessions(conn, filter_cmd=None, filter_arg=None,
                   stream_filter=None, grep_pattern=None,
                   since=None, until=None, output_format="plain",
-                  use_color=False, count_only=False, tail=None):
+                  use_color=False, count_only=False, tail=None,
+                  follow=False):
     conditions = []
     params = []
 
@@ -130,6 +131,8 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
         pending_header = None
         pending_lines = []
 
+    last_line_id = 0
+
     for row in cursor:
         session_id = row[0]
         session_ts = row[1]
@@ -171,6 +174,85 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
             print(formatted)
 
     _flush_pending()
+
+    if not follow:
+        return
+
+    import sys
+    # Flush stdout after every print in follow mode since the container
+    # may not have a TTY and Python defaults to full buffering
+    sys.stdout.reconfigure(line_buffering=True)
+
+    # Enable WAL mode for concurrent read/write access and switch to
+    # autocommit so each poll sees the latest committed data
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.isolation_level = None
+
+    # Get the highest line ID for the follow query starting point
+    row = conn.execute("SELECT MAX(id) FROM lines").fetchone()
+    last_line_id = row[0] if row[0] else 0
+
+    # Build the follow query with the same filters
+    follow_conditions = list(conditions)
+    follow_conditions.append("lines.id > ?")
+    follow_where = "WHERE " + " AND ".join(follow_conditions)
+
+    follow_query = (
+        "SELECT "
+        "sessions.session_id, sessions.timestamp, commands.command, "
+        "sources.source, lines.timestamp, lines.line, streams.stream, lines.id "
+        "FROM sessions "
+        "JOIN lines ON sessions.id = lines.session "
+        "JOIN streams ON streams.id = lines.stream "
+        "JOIN sources ON sources.id = sessions.source "
+        "JOIN commands ON commands.id = sessions.command "
+        f"{follow_where} "
+        "ORDER BY lines.id"
+    )
+
+    last_follow_session_id = None
+
+    try:
+        while True:
+            follow_params = list(params) + [last_line_id]
+            new_rows = conn.execute(follow_query, follow_params).fetchall()
+
+            for row in new_rows:
+                session_id = row[0]
+                session_ts = row[1]
+                session_cmd = row[2]
+                session_src = row[3]
+                line_ts = row[4]
+                line = row[5] or ""
+                line_stream = row[6]
+                line_id = row[7]
+
+                last_line_id = line_id
+
+                if grep_pattern and not re.search(grep_pattern, line):
+                    continue
+
+                if output_format == "json":
+                    print(json.dumps({
+                        "session_id": session_id,
+                        "timestamp": line_ts,
+                        "stream": line_stream,
+                        "line": line,
+                    }))
+                else:
+                    session_ts_fmt = format_ts(session_ts)
+                    line_ts_fmt = format_ts(line_ts)
+
+                    if session_id != last_follow_session_id:
+                        dur_str = "active"
+                        _print_session_header(session_ts_fmt, session_id, session_cmd, session_src, dur_str)
+                        last_follow_session_id = session_id
+
+                    print(_format_line(line_ts_fmt, line_stream, line))
+
+            time.sleep(0.25)
+    except KeyboardInterrupt:
+        print()
 
 
 def show_info(conn, db_path=None, output_format="plain"):

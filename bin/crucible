@@ -82,7 +82,11 @@ if [ "$1" == "log" ]; then
     if [ "$2" == "view" -o -z "$2" ]; then
         shift
         shift
-        crucible_log view ${LOG_DB} "$@" | less -R -S -F
+        if echo "$@" | grep -q "\-\-follow"; then
+            crucible_log view ${LOG_DB} "$@"
+        else
+            crucible_log view ${LOG_DB} "$@" | less -R -S -F
+        fi
         exit $?
     elif [ "$2" == "sessions" ]; then
         shift
