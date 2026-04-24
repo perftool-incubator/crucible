@@ -3,3 +3,4 @@ subprojects/
 config/instances.json
 config/registries.json
 config/valkey_pass
+bin/_logger_lib/__pycache__/

@@ -23,7 +23,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "log repo userenvs update run" -- "${COMP_WORDS[2]}"))
                 ;;
             log)
-                COMPREPLY=($(compgen -W "clear info init tidy view" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "clear info init sessions tidy view" -- "${COMP_WORDS[2]}"))
                 ;;
             get)
                 COMPREPLY=($(compgen -W "result metric" -- "${COMP_WORDS[2]}"))
@@ -121,18 +121,23 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type run-id)" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
-    elif [ "$(expr $num_words % 2)" -eq 1 -a ${COMP_WORDS[1]} == "log" -a ${COMP_WORDS[2]} == "view" ]; then
-        case "${COMP_WORDS[3]}" in
-            sessionid)
-                . ${CRUCIBLE_HOME}/bin/base
-                session_ids=$(crucible_log getsessionids ${LOG_DB})
-                COMPREPLY=($(compgen -W "${session_ids}" -- "${COMP_WORDS[4]}"))
-                ;;
-        esac
+    elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "sessions" ]; then
+        COMPREPLY=($(compgen -W "--grep --format --color --no-color --sort --order" -- "${COMP_WORDS[$num_index]}"))
+    elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "view" ]; then
+        local log_view_flags="--stream --grep --since --until --format --color --no-color --count --tail"
+        if [ $num_words -eq 4 ]; then
+            COMPREPLY=($(compgen -W "first last sessionid ${log_view_flags}" -- "${COMP_WORDS[3]}"))
+        elif [ $num_words -eq 5 -a "${COMP_WORDS[3]}" == "sessionid" ]; then
+            . ${CRUCIBLE_HOME}/bin/base
+            session_ids=$(crucible_log getsessionids ${LOG_DB})
+            COMPREPLY=($(compgen -W "${session_ids}" -- "${COMP_WORDS[4]}"))
+        else
+            COMPREPLY=($(compgen -W "${log_view_flags}" -- "${COMP_WORDS[$num_index]}"))
+        fi
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "log" ]; then
         case "${COMP_WORDS[2]}" in
-            view)
-                COMPREPLY=($(compgen -W "first last sessionid" -- "${COMP_WORDS[3]}"))
+            info)
+                COMPREPLY=($(compgen -W "--json" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     fi
