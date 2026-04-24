@@ -118,6 +118,8 @@ def main():
         parser.add_argument("--count", action="store_true", default=False)
         parser.add_argument("--tail", type=int, default=None,
                             help="Show only the last N lines per session")
+        parser.add_argument("--follow", action="store_true", default=False,
+                            help="Follow new lines as they arrive (like tail -f)")
 
         args = parser.parse_args(sys.argv[3:])
 
@@ -138,6 +140,7 @@ def main():
             use_color=use_color,
             count_only=args.count,
             tail=args.tail,
+            follow=args.follow,
         )
         conn.close()
         return
@@ -186,6 +189,7 @@ def main():
         print("    --since <time>                   Filter by start time (abs or relative: 1h, 30m, 2d)")
         print("    --until <time>                   Filter by end time")
         print("    --tail <N>                       Show last N lines per session")
+        print("    --follow                         Follow new lines as they arrive (like tail -f)")
         print("    --format plain|json              Output format")
         print("    --color                          Colorize output")
         print("    --count                          Count matching lines only")
