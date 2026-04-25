@@ -82,7 +82,7 @@ if [ "$1" == "log" ]; then
     if [ "$2" == "view" -o -z "$2" ]; then
         shift
         shift
-        if echo "$@" | grep -q "\-\-follow"; then
+        if echo "$@" | grep -qF -- "--follow"; then
             crucible_log view ${LOG_DB} "$@"
         else
             crucible_log view ${LOG_DB} "$@" | less -R -S -F
