@@ -83,6 +83,7 @@ crucible help [command]
 - **Podman usage**: Use `podman_wrapper()` and related functions from `bin/base`; never call podman directly
 - **JSON processing**: Use `jq_query()` helper from `bin/base`; validate configs against schemas in `schema/`
 - **Variable naming**: Lowercase with underscores for locals; uppercase for exported/environment variables (e.g., `CRUCIBLE_HOME`, `CRUCIBLE_CONTROLLER_IMAGE`)
+- **CLI parameters**: When adding a new CLI parameter, option, or subcommand, update all three locations: `bin/_help` (main help output), `bin/_crucible_completions` (bash tab completions), and the relevant command's own help text
 
 ## Language Strategy
 - **New code**: Write new functionality in Python 3 by default
