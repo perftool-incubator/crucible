@@ -11,7 +11,7 @@ function help() {
     echo "help                          |  Show this help message"
     echo "run <file>                    |  Run a benchmark"
     echo "log                           |  Manage the crucible log"
-    echo "  view [first|last|sessionid] |    - View log entries (supports --stream, --grep, --since, --until, --tail, --follow, --color)"
+    echo "  view [first|last|sessionid] |    - View log entries (supports --stream, --grep, --since, --until, --tail, --follow, --raw, --color)"
     echo "  sessions                    |    - List all sessions (supports --grep, --sort, --order, --color)"
     echo "  info [--json]               |    - Show log database summary"
     echo "  clear                       |    - Delete all log entries"

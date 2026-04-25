@@ -18,7 +18,7 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
                   stream_filter=None, grep_pattern=None,
                   since=None, until=None, output_format="plain",
                   use_color=False, count_only=False, tail=None,
-                  follow=False):
+                  follow=False, raw=False):
     conditions = []
     params = []
 
@@ -95,6 +95,8 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
     sep = "=" * 94
 
     def _format_line(line_ts_fmt, line_stream, line):
+        if raw:
+            return line
         if use_color and line_stream == "STDERR":
             return f"\033[2m[{line_ts_fmt}]\033[0m[\033[31m{line_stream}\033[0m] \033[31m{line}\033[0m"
         elif use_color:

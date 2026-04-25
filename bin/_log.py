@@ -120,6 +120,8 @@ def main():
                             help="Show only the last N lines per session")
         parser.add_argument("--follow", action="store_true", default=False,
                             help="Follow new lines as they arrive (like tail -f)")
+        parser.add_argument("--raw", action="store_true", default=False,
+                            help="Show raw output without timestamps, stream labels, or session headers")
 
         args = parser.parse_args(sys.argv[3:])
 
@@ -141,6 +143,7 @@ def main():
             count_only=args.count,
             tail=args.tail,
             follow=args.follow,
+            raw=args.raw,
         )
         conn.close()
         return
@@ -190,6 +193,7 @@ def main():
         print("    --until <time>                   Filter by end time")
         print("    --tail <N>                       Show last N lines per session")
         print("    --follow                         Follow new lines as they arrive (like tail -f)")
+        print("    --raw                            Show raw output without timestamps or headers")
         print("    --format plain|json              Output format")
         print("    --color                          Colorize output")
         print("    --count                          Count matching lines only")
