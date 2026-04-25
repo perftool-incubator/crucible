@@ -18,7 +18,7 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
                   stream_filter=None, grep_pattern=None,
                   since=None, until=None, output_format="plain",
                   use_color=False, count_only=False, tail=None,
-                  follow=False):
+                  head=None, follow=False, raw=False):
     conditions = []
     params = []
 
@@ -95,6 +95,8 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
     sep = "=" * 94
 
     def _format_line(line_ts_fmt, line_stream, line):
+        if raw:
+            return line
         if use_color and line_stream == "STDERR":
             return f"\033[2m[{line_ts_fmt}]\033[0m[\033[31m{line_stream}\033[0m] \033[31m{line}\033[0m"
         elif use_color:
@@ -132,6 +134,7 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
         pending_lines = []
 
     last_line_id = 0
+    session_line_count = 0
 
     for row in cursor:
         session_id = row[0]
@@ -159,10 +162,15 @@ def view_sessions(conn, filter_cmd=None, filter_arg=None,
 
         if session_ts != last_session_ts:
             _flush_pending()
+            session_line_count = 0
             dur = session_durations.get(session_id)
             dur_str = _format_duration(dur) if dur is not None else "n/a"
             pending_header = (session_ts_fmt, session_id, session_cmd, session_src, dur_str)
             last_session_ts = session_ts
+
+        session_line_count += 1
+        if head and session_line_count > head:
+            continue
 
         formatted = _format_line(line_ts_fmt, line_stream, line)
         if tail:

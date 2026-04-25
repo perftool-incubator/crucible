@@ -118,8 +118,12 @@ def main():
         parser.add_argument("--count", action="store_true", default=False)
         parser.add_argument("--tail", type=int, default=None,
                             help="Show only the last N lines per session")
+        parser.add_argument("--head", type=int, default=None,
+                            help="Show only the first N lines per session")
         parser.add_argument("--follow", action="store_true", default=False,
                             help="Follow new lines as they arrive (like tail -f)")
+        parser.add_argument("--raw", action="store_true", default=False,
+                            help="Show raw output without timestamps, stream labels, or session headers")
 
         args = parser.parse_args(sys.argv[3:])
 
@@ -140,7 +144,9 @@ def main():
             use_color=use_color,
             count_only=args.count,
             tail=args.tail,
+            head=args.head,
             follow=args.follow,
+            raw=args.raw,
         )
         conn.close()
         return
@@ -188,8 +194,10 @@ def main():
         print("    --grep <pattern>                 Search log lines")
         print("    --since <time>                   Filter by start time (abs or relative: 1h, 30m, 2d)")
         print("    --until <time>                   Filter by end time")
+        print("    --head <N>                       Show first N lines per session")
         print("    --tail <N>                       Show last N lines per session")
         print("    --follow                         Follow new lines as they arrive (like tail -f)")
+        print("    --raw                            Show raw output without timestamps or headers")
         print("    --format plain|json              Output format")
         print("    --color                          Colorize output")
         print("    --count                          Count matching lines only")
