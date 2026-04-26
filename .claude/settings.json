@@ -1,5 +1,26 @@
 {
     "enabledPlugins": {
         "crucible-tools@crucible-dev-tools": true
+    },
+    "permissions": {
+        "allow": [
+            "Bash(xzcat *)",
+            "Bash(crucible log *)",
+            "Bash(crucible stop *)",
+            "Bash(crucible start *)",
+            "Bash(crucible update *)",
+            "Bash(wc *)",
+            "Bash(tail *)",
+            "Bash(python3 bin/open-prs.py*)",
+            "Bash(python3 bin/repo-status.py*)",
+            "Bash(python3 bin/workflow-status.py*)",
+            "Bash(python3 bin/dev-activity.py*)",
+            "Bash(cd * && git diff*)",
+            "Bash(cd * && git status*)",
+            "Bash(cd * && git log*)",
+            "Bash(cd * && git show*)",
+            "Bash(cd * && git fetch*)",
+            "Bash(cd * && grep *)"
+        ]
     }
 }
