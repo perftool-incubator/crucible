@@ -436,7 +436,9 @@ function stop_opensearch() {
 }
 
 function start_cdm_server() {
-    local RC cdm_server_cmd cdm_query_opt
+    local RC cdm_server_cmd cdm_query_opt cdm_server_port
+
+    cdm_server_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
 
     echo -n "Checking for CDM server"
     if ! podman_running crucible-cdm-server; then
@@ -444,24 +446,26 @@ function start_cdm_server() {
         cdm_query_opt=$(run_manage_instances query-opt)
         cdm_server_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/start-server.sh ${cdm_query_opt}"
 
-        open_firewall_port 3000 tcp
-        ${podman_run} --name crucible-cdm-server "${container_common_args[@]}" "${container_cdm_server_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_server_cmd} > /dev/null
+        open_firewall_port ${cdm_server_port} tcp
+        ${podman_run} --name crucible-cdm-server --env "PORT=${cdm_server_port}" "${container_common_args[@]}" "${container_cdm_server_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_server_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start CDM server"
         else
-            echo "Successfully started CDM server"
+            echo "Successfully started CDM server on port ${cdm_server_port}"
         fi
     fi
     return ${RC}
 }
 
 function stop_cdm_server() {
-    local RC=0
+    local RC=0 cdm_server_port
+
+    cdm_server_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
 
     echo -n "Checking for CDM server"
     if podman_running crucible-cdm-server; then
-        close_firewall_port 3000 tcp
+        close_firewall_port ${cdm_server_port} tcp
         ${podman_stop} crucible-cdm-server > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
@@ -637,9 +641,10 @@ function index_run() {
 
 function get_result_backend() {
     local RC
-    local cdm_query_cmd
+    local cdm_query_cmd cdm_server_port
 
-    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@"
+    cdm_server_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
+    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh --server-url http://localhost:${cdm_server_port} $@"
     ${podman_run} --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
     return ${RC}
