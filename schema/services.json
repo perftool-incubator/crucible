@@ -53,6 +53,22 @@
                 "use"
             ]
         },
+        "cdm-server": {
+            "description": "The cdm-server object contains configuration settings for the CDM query server",
+            "type": "object",
+            "properties": {
+                "port": {
+                    "description": "This parameter contains the network port where the CDM query server listens",
+                    "type": "integer",
+                    "minimum": 1025,
+                    "maximum": 32768
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "port"
+            ]
+        },
         "valkey": {
             "description": "The valkey object contains configuration settings for the valkey service",
             "type": "object",
@@ -80,6 +96,7 @@
     },
     "additionalProperties": false,
     "required": [
+        "cdm-server",
         "image-sourcing",
         "valkey"
     ]
