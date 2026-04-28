@@ -641,9 +641,10 @@ function index_run() {
 
 function get_result_backend() {
     local RC
-    local cdm_query_cmd
+    local cdm_query_cmd cdm_server_port
 
-    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh $@"
+    cdm_server_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
+    cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-result-summary.sh --server-url http://localhost:${cdm_server_port} $@"
     ${podman_run} --name crucible-get-result-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
     return ${RC}
