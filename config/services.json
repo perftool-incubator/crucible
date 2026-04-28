@@ -1,4 +1,7 @@
 {
+    "cdm-server": {
+        "port": 3000
+    },
     "image-sourcing": {
         "use": true,
         "start": true,
