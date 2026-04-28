@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions (timestamp);
 
 
 def init_db(db_path):
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.executescript(INIT_SQL)
     conn.execute("INSERT OR REPLACE INTO db_state (timestamp) VALUES (?)", (time.time(),))
     conn.commit()
@@ -81,7 +81,7 @@ def _run_migrations(conn):
 
 
 def verify_db(db_path):
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn = sqlite3.connect(str(db_path), timeout=30, check_same_thread=False)
     try:
         conn.execute("SELECT timestamp FROM db_state")
     except sqlite3.OperationalError:
@@ -143,10 +143,18 @@ class LogInserter:
             (self.session_id, timestamp, message, stream_name),
         )
 
-    def commit(self):
+    def commit(self, max_retries=5, retry_delay=0.5):
         if self.in_transaction:
-            self.conn.commit()
-            self.in_transaction = False
+            for attempt in range(max_retries):
+                try:
+                    self.conn.commit()
+                    self.in_transaction = False
+                    return
+                except sqlite3.OperationalError:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))
+                    else:
+                        raise
 
     def rollback(self):
         if self.in_transaction:
