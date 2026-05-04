@@ -4,6 +4,9 @@
 
 EC_FAIL_USER=2
 
+# To revert rickshaw scripts to Perl, change ".py" to ""
+rickshaw_python_ext=".py"
+
 function exit_error() {
     echo "ERROR: ${1}"
     shift
@@ -547,10 +550,10 @@ function post_process_run() {
     echo "Benchmark result is in ${RUN_DIR}"
     shift
 
-    rs_pp_b_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-bench\
-      --base-run-dir=${RUN_DIR}"
-    rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools\
-      --base-run-dir=${RUN_DIR}"
+    rs_pp_b_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-bench${rickshaw_python_ext}"
+    rs_pp_b_cmd+=" --base-run-dir=${RUN_DIR}"
+    rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools${rickshaw_python_ext}"
+    rs_pp_t_cmd+=" --base-run-dir=${RUN_DIR}"
 
     post_process_fail=0
     echo "Post-processing benchmark data with $rs_pp_b_cmd"
@@ -604,14 +607,16 @@ function index_run() {
     fi
 
     # Generate the CDM documents
+    gen_docs_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs${rickshaw_python_ext}"
+    gen_docs_cmd+=" --base-run-dir=${RUN_DIR} ${cdmver_opt}"
+    echo "Generating CDM documents with ${gen_docs_cmd}"
     ${podman_run}\
         --name crucible-rickshaw-gen-docs-${SESSION_ID}\
         "${container_common_args[@]}"\
         "${container_rs_args[@]}"\
         "${container_non_service_args[@]}"\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
-        ${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs\
-        --base-run-dir=${RUN_DIR} ${cdmver_opt}
+        ${gen_docs_cmd}
     RC=$?
     if [ ${RC} == 0 ]; then
         echo "Opensearch documents have been created"
@@ -621,13 +626,16 @@ function index_run() {
     fi
 
     # Index the documents
+    index_docs_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/add-run.sh"
+    index_docs_cmd+=" --dir ${RUN_DIR}/run/opensearch"
+    index_docs_cmd+=" ${access_opt}"
+    echo "Indexing CDM documents with ${index_docs_cmd}"
     ${podman_run}\
         --name crucible-cdm-index-${SESSION_ID}\
         "${container_common_args[@]}"\
         "${container_non_service_args[@]}"\
         ${CRUCIBLE_CONTROLLER_IMAGE}\
-        ${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/add-run.sh\
-        --dir ${RUN_DIR}/run/opensearch $access_opt
+        ${index_docs_cmd}
     RC=$?
     if [ ${RC} == 0 ]; then
         echo "Benchmark result now in OpenSearch, using ${access_opt} $cdmver_opt" | sed -e 's/--userpass\s\S*\s//'

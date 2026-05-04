@@ -104,7 +104,6 @@ elif [ "${1}" == "get" ]; then
             EXIT_VAL=$?
         elif [ "${1}" == "metric" ]; then
             shift
-            local cdm_server_port
             cdm_server_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
             cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-metric-data.sh --server-url http://localhost:${cdm_server_port}/api/v1/metric-data $@"
             ${podman_run} --name crucible-get-metric-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
@@ -339,22 +338,22 @@ elif [ "${1}" == "run" ]; then
            image_sourcing_url="--source-images-service-url=${image_sourcing_url}"
     fi
 
-    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
-      ${params_args}\
-      --id ${SESSION_ID}\
-      --bench-dir $benchmark_subproj_dir\
-      --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine\
-      --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock\
-      --roadblock-password=$roadblock_password\
-      --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop\
-      --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat\
-      --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
-      --registries-json=${REGISTRIES_CFG}\
-      --base-run-dir=$base_run_dir\
-      --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs\
-      --workshop-script=workshop.py\
-      ${image_sourcing_url}\
-      ${rickshaw_run_args[@]}"
+    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run${rickshaw_python_ext}"
+    rs_run_cmd+=" ${params_args}"
+    rs_run_cmd+=" --id ${SESSION_ID}"
+    rs_run_cmd+=" --bench-dir $benchmark_subproj_dir"
+    rs_run_cmd+=" --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine"
+    rs_run_cmd+=" --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock"
+    rs_run_cmd+=" --roadblock-password=$roadblock_password"
+    rs_run_cmd+=" --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop"
+    rs_run_cmd+=" --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat"
+    rs_run_cmd+=" --tools-dir=${CRUCIBLE_HOME}/subprojects/tools"
+    rs_run_cmd+=" --registries-json=${REGISTRIES_CFG}"
+    rs_run_cmd+=" --base-run-dir=$base_run_dir"
+    rs_run_cmd+=" --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs"
+    rs_run_cmd+=" --workshop-script=workshop.py"
+    rs_run_cmd+=" ${image_sourcing_url}"
+    rs_run_cmd+=" ${rickshaw_run_args[@]}"
 
     echo "rickshaw-run command: $rs_run_cmd"
 

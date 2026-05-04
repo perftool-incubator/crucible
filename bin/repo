@@ -99,7 +99,7 @@ function repo_info() {
         echo "ERROR: Failed to pushd to ${dir}"
     fi
 
-    printf "${fmt_line}\n" "${name}" "${type}" "${git_local_branch}" "${git_remote_url}" "${git_remote_branch}" "${git_remote_name}" "${local_changes}" "${current_commit}" "${updates_available}"
+    repo_info_rows+="${name}"$'\x1f'"${type}"$'\x1f'"${git_local_branch}"$'\x1f'"${git_remote_url}"$'\x1f'"${git_remote_branch}"$'\x1f'"${git_remote_name}"$'\x1f'"${local_changes}"$'\x1f'"${current_commit}"$'\x1f'"${updates_available}"$'\n'
 }
 
 function repo_details() {
@@ -211,8 +211,7 @@ function handle_scope() {
 }
 
 function config_show() {
-    fmt_line="%-20s  %-15s  %-13s  %-60s  %-20s  %-20s  %-20s"
-    printf "${fmt_line}\n" "Project Family" "Project Name" "Project Type" "Git Remote URL" "Primary Branch" "Checkout Mode" "Checkout Target"
+    local config_rows="Project Family"$'\x1f'"Project Name"$'\x1f'"Project Type"$'\x1f'"Git Remote URL"$'\x1f'"Primary Branch"$'\x1f'"Checkout Mode"$'\x1f'"Checkout Target"$'\n'
 
     for family in official unofficial; do
         projects=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} '.[$family][] | .name')
@@ -223,9 +222,11 @@ function config_show() {
             project_checkout_mode=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} --arg project_name ${project} '.[$family][] | select(.name == $project_name) | .checkout.mode')
             project_checkout_target=$(jq_query ${CRUCIBLE_HOME}/config/repos.json --arg family ${family} --arg project_name ${project} '.[$family][] | select(.name == $project_name) | .checkout.target')
 
-            printf "${fmt_line}\n" "${family}" "${project}" "${project_type}" "${project_repository}" "${project_primary_branch}" "${project_checkout_mode}" "${project_checkout_target}"
+            config_rows+="${family}"$'\x1f'"${project}"$'\x1f'"${project_type}"$'\x1f'"${project_repository}"$'\x1f'"${project_primary_branch}"$'\x1f'"${project_checkout_mode}"$'\x1f'"${project_checkout_target}"$'\n'
         done
     done
+
+    printf "%s" "${config_rows}" | column -t -s$'\x1f'
 }
 
 function subprojects_install() {
@@ -535,10 +536,11 @@ case "${command}" in
 
         case "${command}" in
             info)
-                fmt_line="%-15s  %-13s  %-16s  %-60s  %-17s  %-15s  %-13s  %-14s  %-13s"
-                printf "${fmt_line}\n" "Project Name" "Project Type" "Git Local Branch" "Git Remote URL" "Git Remote Branch" "Git Remote Name" "Local Changes" "Current Commit" "Updates"
+                repo_info_rows="Project Name"$'\x1f'"Project Type"$'\x1f'"Git Local Branch"$'\x1f'"Git Remote URL"$'\x1f'"Git Remote Branch"$'\x1f'"Git Remote Name"$'\x1f'"Local Changes"$'\x1f'"Current Commit"$'\x1f'"Updates"$'\n'
 
                 handle_scope info ${scope}
+
+                printf "%s" "${repo_info_rows}" | column -t -s$'\x1f'
                 ;;
             details)
                 handle_scope details ${scope}
