@@ -339,22 +339,22 @@ elif [ "${1}" == "run" ]; then
            image_sourcing_url="--source-images-service-url=${image_sourcing_url}"
     fi
 
-    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run\
-      ${params_args}\
-      --id ${SESSION_ID}\
-      --bench-dir $benchmark_subproj_dir\
-      --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine\
-      --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock\
-      --roadblock-password=$roadblock_password\
-      --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop\
-      --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat\
-      --tools-dir=${CRUCIBLE_HOME}/subprojects/tools\
-      --registries-json=${REGISTRIES_CFG}\
-      --base-run-dir=$base_run_dir\
-      --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs\
-      --workshop-script=workshop.py\
-      ${image_sourcing_url}\
-      ${rickshaw_run_args[@]}"
+    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run"
+    rs_run_cmd+=" ${params_args}"
+    rs_run_cmd+=" --id ${SESSION_ID}"
+    rs_run_cmd+=" --bench-dir $benchmark_subproj_dir"
+    rs_run_cmd+=" --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine"
+    rs_run_cmd+=" --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock"
+    rs_run_cmd+=" --roadblock-password=$roadblock_password"
+    rs_run_cmd+=" --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop"
+    rs_run_cmd+=" --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat"
+    rs_run_cmd+=" --tools-dir=${CRUCIBLE_HOME}/subprojects/tools"
+    rs_run_cmd+=" --registries-json=${REGISTRIES_CFG}"
+    rs_run_cmd+=" --base-run-dir=$base_run_dir"
+    rs_run_cmd+=" --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs"
+    rs_run_cmd+=" --workshop-script=workshop.py"
+    rs_run_cmd+=" ${image_sourcing_url}"
+    rs_run_cmd+=" ${rickshaw_run_args[@]}"
 
     echo "rickshaw-run command: $rs_run_cmd"
 
