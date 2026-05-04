@@ -69,6 +69,22 @@
                 "port"
             ]
         },
+        "httpd": {
+            "description": "The httpd object contains configuration settings for the Apache HTTP server",
+            "type": "object",
+            "properties": {
+                "port": {
+                    "description": "This parameter contains the network port where the HTTP server listens",
+                    "type": "integer",
+                    "minimum": 1025,
+                    "maximum": 32768
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "port"
+            ]
+        },
         "valkey": {
             "description": "The valkey object contains configuration settings for the valkey service",
             "type": "object",
@@ -97,6 +113,7 @@
     "additionalProperties": false,
     "required": [
         "cdm-server",
+        "httpd",
         "image-sourcing",
         "valkey"
     ]

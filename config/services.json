@@ -2,6 +2,9 @@
     "cdm-server": {
         "port": 3000
     },
+    "httpd": {
+        "port": 8080
+    },
     "image-sourcing": {
         "use": true,
         "start": true,

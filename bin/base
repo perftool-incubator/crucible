@@ -171,27 +171,33 @@ function generate_rand_pass() {
 }
 
 function start_httpd() {
-    local RC httpd_cmd
+    local RC httpd_cmd httpd_port
+
+    httpd_port=$(jq_query ${SERVICES_CFG} '.httpd.port')
+
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
     echo -n "Checking for httpd"
     if ! podman_running crucible-httpd; then
-        open_firewall_port 8080 tcp
-        ${podman_run} --name crucible-httpd "${container_common_args[@]}" "${container_httpd_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${httpd_cmd} > /dev/null
+        open_firewall_port ${httpd_port} tcp
+        ${podman_run} --name crucible-httpd --env "HTTPD_PORT=${httpd_port}" "${container_common_args[@]}" "${container_httpd_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${httpd_cmd} > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start httpd"
         else
-            echo "Successfully started httpd"
+            echo "Successfully started httpd on port ${httpd_port}"
         fi
     fi
     return ${RC}
 }
 
 function stop_httpd() {
-    local RC=0
+    local RC=0 httpd_port
+
+    httpd_port=$(jq_query ${SERVICES_CFG} '.httpd.port')
+
     echo -n "Checking for httpd"
     if podman_running crucible-httpd; then
-        close_firewall_port 8080 tcp
+        close_firewall_port ${httpd_port} tcp
         ${podman_stop} crucible-httpd > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
@@ -316,7 +322,7 @@ function start_image_sourcing() {
                 echo "ERROR: image-sourcing service failed to launch properly"
                 RC=1
             else
-                echo "Successfully started image-sourcing service"
+                echo "Successfully started image-sourcing service on port ${image_sourcing_port}"
                 RC=0
             fi
         fi
