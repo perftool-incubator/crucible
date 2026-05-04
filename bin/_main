@@ -339,7 +339,7 @@ elif [ "${1}" == "run" ]; then
            image_sourcing_url="--source-images-service-url=${image_sourcing_url}"
     fi
 
-    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run"
+    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run${rickshaw_python_ext}"
     rs_run_cmd+=" ${params_args}"
     rs_run_cmd+=" --id ${SESSION_ID}"
     rs_run_cmd+=" --bench-dir $benchmark_subproj_dir"

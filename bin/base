@@ -4,6 +4,9 @@
 
 EC_FAIL_USER=2
 
+# To revert rickshaw scripts to Perl, change ".py" to ""
+rickshaw_python_ext=".py"
+
 function exit_error() {
     echo "ERROR: ${1}"
     shift
@@ -547,9 +550,9 @@ function post_process_run() {
     echo "Benchmark result is in ${RUN_DIR}"
     shift
 
-    rs_pp_b_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-bench"
+    rs_pp_b_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-bench${rickshaw_python_ext}"
     rs_pp_b_cmd+=" --base-run-dir=${RUN_DIR}"
-    rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools"
+    rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools${rickshaw_python_ext}"
     rs_pp_t_cmd+=" --base-run-dir=${RUN_DIR}"
 
     post_process_fail=0
@@ -604,7 +607,7 @@ function index_run() {
     fi
 
     # Generate the CDM documents
-    gen_docs_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs"
+    gen_docs_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs${rickshaw_python_ext}"
     gen_docs_cmd+=" --base-run-dir=${RUN_DIR} ${cdmver_opt}"
     echo "Generating CDM documents with ${gen_docs_cmd}"
     ${podman_run}\
