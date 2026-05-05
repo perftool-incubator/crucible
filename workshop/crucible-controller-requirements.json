@@ -14,7 +14,7 @@
         "core-utils",
         "build-libraries",
         "build-tools",
-        "python39",
+        "python3-pip",
         "valkey",
         "redis-compat",
         "container-tools",
@@ -65,11 +65,10 @@
       }
     },
     {
-      "name": "python39",
+      "name": "python3-pip",
       "type": "distro",
       "distro_info": {
         "packages": [
-          "python39",
           "python3-pip"
         ]
       }
@@ -152,8 +151,8 @@
       "type": "manual",
       "manual_info": {
         "commands": [
-          "if [ \"$(uname -m)\" == 'x86_64' ]; then echo 'Processing x86_64'; curl --output /usr/share/opensearch.tar.gz https://artifacts.opensearch.org/releases/core/opensearch/3.4.0/opensearch-min-3.4.0-linux-x64.tar.gz; else echo 'Not x86_64'; fi",
-          "if [ \"$(uname -m)\" == 'aarch64' ]; then echo 'Processing aarch64'; curl --output /usr/share/opensearch.tar.gz https://artifacts.opensearch.org/releases/core/opensearch/3.4.0/opensearch-min-3.4.0-linux-arm64.tar.gz; else echo 'Not aarch64'; fi",
+          "if [ \"$(uname -m)\" == 'x86_64' ]; then echo 'Processing x86_64'; curl --output /usr/share/opensearch.tar.gz https://artifacts.opensearch.org/releases/core/opensearch/3.6.0/opensearch-min-3.6.0-linux-x64.tar.gz; else echo 'Not x86_64'; fi",
+          "if [ \"$(uname -m)\" == 'aarch64' ]; then echo 'Processing aarch64'; curl --output /usr/share/opensearch.tar.gz https://artifacts.opensearch.org/releases/core/opensearch/3.6.0/opensearch-min-3.6.0-linux-arm64.tar.gz; else echo 'Not aarch64'; fi",
           "tar --directory /usr/share --extract --gunzip --file /usr/share/opensearch.tar.gz",
           "rm --verbose /usr/share/opensearch.tar.gz",
           "ln --symbolic --verbose /usr/share/opensearch-* /usr/share/opensearch",
