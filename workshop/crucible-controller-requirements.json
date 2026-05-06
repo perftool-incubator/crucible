@@ -14,7 +14,7 @@
         "core-utils",
         "build-libraries",
         "build-tools",
-        "python3-pip",
+        "python39",
         "valkey",
         "redis-compat",
         "container-tools",
@@ -65,10 +65,11 @@
       }
     },
     {
-      "name": "python3-pip",
+      "name": "python39",
       "type": "distro",
       "distro_info": {
         "packages": [
+          "python39",
           "python3-pip"
         ]
       }

@@ -6,10 +6,10 @@
   },
   "userenv": {
     "name": "crucible-controller",
-    "label": "Fedora 44",
+    "label": "Fedora 43",
     "origin": {
       "image": "registry.fedoraproject.org/fedora",
-      "tag": "44"
+      "tag": "43"
     },
     "properties": {
       "platform": [
