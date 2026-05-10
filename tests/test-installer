@@ -12,8 +12,8 @@ CRUCIBLE_DIR=$(pwd)
 GITHUB_RUNNER=1
 
 function start_test() {
-    local msg
-    msg="Test Number: $(( test_number += 1 ))"
+    local desc="${1}"
+    local msg="Test $(( test_number += 1 )): ${desc}"
     if [ ${GITHUB_RUNNER} -eq 1 ]; then
         echo "::group::${msg}"
     else
@@ -35,14 +35,12 @@ function stop_test() {
     fi
 }
 
-start_test
-# usage
+start_test "--help shows usage"
 stdout=$(./crucible-install.sh --help)
 [[ "$stdout" = *"Usage"* ]] || exit 1
 stop_test
 
-start_test
-# non-root
+start_test "non-root user rejected"
 ec=$(grep EC_FAIL_USER= crucible-install.sh | cut -d '=' -f2)
 ./crucible-install.sh \
   --git-repo ${CRUCIBLE_DIR} \
@@ -50,8 +48,7 @@ ec=$(grep EC_FAIL_USER= crucible-install.sh | cut -d '=' -f2)
 test "$?" = "$ec" || exit 1
 stop_test
 
-start_test
-# no args
+start_test "no engine registry specified"
 ec=$(grep EC_FAIL_REGISTRY_UNSET= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
   --git-repo ${CRUCIBLE_DIR} \
@@ -60,9 +57,8 @@ test "$?" = "$ec" || exit 1
 stop_test
 
 for arg_mode in client-server engine; do
-    start_test
-    echo "testing arg_mode=${arg_mode}"
-    # auth file not found
+    start_test "auth file not found (${arg_mode})"
+    rm -f /tmp/auth-file.json
     ec=$(grep EC_AUTH_FILE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
     sudo ./crucible-install.sh \
       --git-repo ${CRUCIBLE_DIR} \
@@ -73,8 +69,8 @@ for arg_mode in client-server engine; do
     stop_test
 done
 
-start_test
-# oauth file not found
+start_test "oauth file not found"
+rm -f /tmp/oauth-file.json
 ec=$(grep EC_OAUTH_FILE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
      --git-repo ${CRUCIBLE_DIR} \
@@ -87,9 +83,7 @@ test "$?" = "$ec" || exit 1
 stop_test
 
 for arg_mode in client-server engine; do
-    start_test
-    echo "testing arg_mode=${arg_mode}"
-    # invalid tls verify value
+    start_test "invalid tls verify value (${arg_mode})"
     ec=$(grep EC_TLS_VERIFY_ERROR= crucible-install.sh | cut -d '=' -f2)
     sudo ./crucible-install.sh \
       --git-repo ${CRUCIBLE_DIR} \
@@ -100,8 +94,7 @@ for arg_mode in client-server engine; do
     stop_test
 done
 
-start_test
-# invalid quay expiration length
+start_test "invalid quay expiration length"
 touch /tmp/auth-file.json
 ec=$(grep EC_INVALID_QUAY_EXPIRATION_LENGTH= crucible-install.sh | cut -d '=' -f2)
 # TODO(rfolco): temporary workaround until we make it distro generic
@@ -115,9 +108,7 @@ test "$?" = "${ec}" || exit 1
 stop_test
 
 for arg_mode in client-server engine; do
-    start_test
-    echo "testing arg_mode=${arg_mode}"
-    # default args
+    start_test "install with default args (${arg_mode})"
     touch /tmp/auth-file.json
     cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
     regfile="/opt/crucible/config/registries.json"
@@ -136,12 +127,8 @@ for arg_mode in client-server engine; do
 done
 
 for arg_mode in client-server engine; do
-    start_test
-    echo "testing arg_mode=${arg_mode}"
-    # identity
+    start_test "install with identity (${arg_mode})"
     touch /tmp/auth-file.json
-    # Remove all previous installs
-    rm -rf /opt/crucible*
     cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
     idfile=$(grep IDENTITY= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
     # TODO(rfolco): temporary workaround until we make it distro generic
@@ -159,9 +146,7 @@ for arg_mode in client-server engine; do
 done
 
 for arg_mode in client-server engine; do
-    start_test
-    echo "testing arg_mode=${arg_mode}"
-    # override existing installation
+    start_test "override existing installation (${arg_mode})"
     touch /tmp/auth-file.json
     cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
     # TODO(rfolco): temporary workaround until we make it distro generic
@@ -176,8 +161,7 @@ for arg_mode in client-server engine; do
     stop_test
 done
 
-start_test
-# override existing installation
+start_test "override existing installation with quay expiration"
 touch /tmp/auth-file.json
 touch /tmp/oauth-file.json
 cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
@@ -195,9 +179,7 @@ ls -ld /opt/crucible-moved* || exit 1
 stop_test
 
 for arg_mode in client-server engine; do
-    start_test
-    echo "testing arg_mode=${arg_mode}"
-    # override existing installation, no auth-file arg
+    start_test "override existing installation, no auth-file (${arg_mode})"
     cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
     # TODO(rfolco): temporary workaround until we make it distro generic
     sudo mkdir -p $(dirname $cfgfile)
@@ -210,9 +192,7 @@ for arg_mode in client-server engine; do
     stop_test
 done
 
-start_test
-# RELEASE: --release and --list-releases
-## prep step: check branches in remote repo
+start_test "release: query available releases"
 releases=$(git ls-remote --heads \
                --sort='version:refname' \
                https://github.com/perftool-incubator/crucible.git \
@@ -221,8 +201,7 @@ releases=$(git ls-remote --heads \
                | tail -n 4)
 stop_test
 
-start_test
-## show releases, test rc and stdout
+start_test "release: --list-releases output matches"
 stdout=$(sudo ./crucible-install.sh \
     --git-repo ${CRUCIBLE_DIR} \
     --list-releases)
@@ -232,9 +211,7 @@ stop_test
 
 for arg_mode in client-server engine; do
     for release in $releases; do
-        start_test
-        echo "testing arg_mode=${arg_mode} release=${release}"
-        # install existing release with current installer
+        start_test "release: install ${release} (${arg_mode})"
         touch /tmp/auth-file.json
         cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
         # TODO(rfolco): temporary workaround until we make it distro generic
@@ -251,8 +228,7 @@ for arg_mode in client-server engine; do
     done
 done
 
-start_test
-## negative test: --release and --git-repo
+start_test "release: --release conflicts with --git-repo"
 ec=$(grep EC_RELEASE_DEFAULT_REPO_ONLY= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
     --release DoesNotMatter --git-repo DoesNotMatter \
@@ -260,8 +236,7 @@ sudo ./crucible-install.sh \
 test "$?" = "$ec" || exit 1
 stop_test
 
-start_test
-## negative test: --release and --git-branch
+start_test "release: --release conflicts with --git-branch"
 ec=$(grep EC_RELEASE_CONFLICTS_WITH_BRANCH= crucible-install.sh | cut -d '=' -f2)
 sudo ./crucible-install.sh \
     --release DoesNotMatter --git-branch DoesNotMatter \
@@ -269,8 +244,7 @@ sudo ./crucible-install.sh \
 test "$?" = "$ec" || exit 1
 stop_test
 
-start_test
-## negative test: non-existent release
+start_test "release: non-existent release rejected"
 # for this test we cannot use --git-repo (because it's not allowed in
 # conjunction with --release) so we have to "hack" DEFAULT_GIT_REPO to
 # point where we need it to
@@ -282,4 +256,146 @@ sudo ./crucible-install.sh \
     --client-server-registry myregistry.io/crucible \
     --verbose
 test "$?" = "$ec" || exit 1
+stop_test
+
+#
+# SET-RELEASE tests
+#
+
+# query available releases for use in tests
+all_releases=$(git ls-remote --heads \
+                   --sort='version:refname' \
+                   https://github.com/perftool-incubator/crucible.git \
+                   | awk -F/ '{print$NF}' \
+                   | grep -E '20[0-9]{2}\.[1234]')
+supported_releases=$(echo "${all_releases}" | tail -n 4)
+latest_supported=$(echo "${supported_releases}" | tail -n 1)
+unsupported_releases=$(echo "${all_releases}" | head -n -4)
+newest_unsupported=$(echo "${unsupported_releases}" | tail -n 1)
+
+start_test "set-release: no value shows usage"
+stdout=$(./crucible-install.sh --set-release 2>&1)
+test "$?" = "1" || exit 1
+[[ "$stdout" = *"Usage"* ]] || exit 1
+stop_test
+
+start_test "set-release: --help shows usage"
+stdout=$(./crucible-install.sh --set-release --help 2>&1)
+test "$?" = "0" || exit 1
+[[ "$stdout" = *"Usage"* ]] || exit 1
+stop_test
+
+start_test "set-release: invalid format rejected"
+ec=$(grep EC_SET_RELEASE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
+./crucible-install.sh --set-release NotARelease 2>&1
+test "$?" = "$ec" || exit 1
+stop_test
+
+start_test "set-release: conflicts with --git-repo"
+ec=$(grep EC_INVALID_OPTION= crucible-install.sh | cut -d '=' -f2)
+./crucible-install.sh --set-release ${latest_supported} --git-repo foo 2>&1
+test "$?" = "$ec" || exit 1
+stop_test
+
+start_test "set-release: conflicts with --git-branch"
+ec=$(grep EC_INVALID_OPTION= crucible-install.sh | cut -d '=' -f2)
+./crucible-install.sh --set-release ${latest_supported} --git-branch foo 2>&1
+test "$?" = "$ec" || exit 1
+stop_test
+
+start_test "set-release: conflicts with --release"
+ec=$(grep EC_INVALID_OPTION= crucible-install.sh | cut -d '=' -f2)
+./crucible-install.sh --set-release ${latest_supported} --release foo 2>&1
+test "$?" = "$ec" || exit 1
+stop_test
+
+start_test "set-release: no existing installation"
+ec=$(grep EC_SET_RELEASE_NO_INSTALL= crucible-install.sh | cut -d '=' -f2)
+cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+sudo mv ${cfgfile} ${cfgfile}.test-bak 2>/dev/null || true
+./crucible-install.sh --set-release ${latest_supported} 2>&1
+test "$?" = "$ec" || exit 1
+sudo mv ${cfgfile}.test-bak ${cfgfile} 2>/dev/null || true
+stop_test
+
+# For positive tests (and tests that need a valid installation), install crucible
+start_test "set-release: install crucible for set-release tests"
+touch /tmp/auth-file.json
+cfgfile=$(grep SYSCONFIG= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+sudo mkdir -p $(dirname $cfgfile)
+sudo ./crucible-install.sh \
+    --git-repo "https://github.com/perftool-incubator/crucible" \
+    --engine-registry myregistry.io/crucible \
+    --engine-auth-file /tmp/auth-file.json \
+    --verbose
+test "$?" = "0" || exit 1
+stop_test
+
+install_path=$(grep INSTALL_PATH= crucible-install.sh | cut -d '=' -f2 | sed 's/"//g')
+
+start_test "set-release: non-existent release rejected"
+ec=$(grep EC_SET_RELEASE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
+sudo ./crucible-install.sh --set-release 2099.1 2>&1
+test "$?" = "$ec" || exit 1
+stop_test
+
+start_test "set-release: unsupported release rejected without --force"
+ec=$(grep EC_SET_RELEASE_NOT_FOUND= crucible-install.sh | cut -d '=' -f2)
+sudo ./crucible-install.sh --set-release ${newest_unsupported} 2>&1
+test "$?" = "$ec" || exit 1
+stop_test
+
+start_test "set-release: switch to supported release ${latest_supported}"
+sudo ./crucible-install.sh --set-release ${latest_supported} 2>&1
+test "$?" = "0" || exit 1
+mode=$(jq -r '.official[0].checkout.mode' ${install_path}/config/repos.json)
+target=$(jq -r '.official[0].checkout.target' ${install_path}/config/repos.json)
+test "${mode}" = "locked" || exit 1
+test "${target}" = "${latest_supported}" || exit 1
+branch=$(sudo git -C ${install_path} rev-parse --abbrev-ref HEAD)
+test "${branch}" = "${latest_supported}" || exit 1
+stop_test
+
+start_test "set-release: switch back to upstream"
+sudo ./crucible-install.sh --set-release upstream 2>&1
+test "$?" = "0" || exit 1
+mode=$(jq -r '.official[0].checkout.mode' ${install_path}/config/repos.json)
+test "${mode}" = "follow" || exit 1
+branch=$(sudo git -C ${install_path} rev-parse --abbrev-ref HEAD)
+[[ "${branch}" != 20* ]] || exit 1
+stop_test
+
+start_test "set-release: --force with unsupported release ${newest_unsupported}"
+sudo ./crucible-install.sh --set-release-force --set-release ${newest_unsupported} 2>&1
+test "$?" = "0" || exit 1
+target=$(jq -r '.official[0].checkout.target' ${install_path}/config/repos.json)
+test "${target}" = "${newest_unsupported}" || exit 1
+stop_test
+
+start_test "set-release: switch back to upstream for preservation tests"
+sudo ./crucible-install.sh --set-release upstream 2>&1
+test "$?" = "0" || exit 1
+stop_test
+
+start_test "set-release: unofficial repos preserved across release switch"
+jq --indent 4 '.unofficial = [{"name":"test-repo","type":"userenvs","repository":"https://github.com/perftool-incubator/crucible-ci-userenvs","primary-branch":"main","checkout":{"mode":"follow","target":"main"}}]' \
+    ${install_path}/config/repos.json > /tmp/repos.json.tmp \
+    && sudo mv /tmp/repos.json.tmp ${install_path}/config/repos.json
+sudo ./crucible-install.sh --set-release ${latest_supported} 2>&1
+test "$?" = "0" || exit 1
+unofficial_name=$(jq -r '.unofficial[0].name' ${install_path}/config/repos.json)
+test "${unofficial_name}" = "test-repo" || exit 1
+stop_test
+
+start_test "set-release: custom URLs preserved across release switch"
+sudo ./crucible-install.sh --set-release upstream 2>&1
+test "$?" = "0" || exit 1
+custom_test_url="https://github.com/perftool-incubator/rickshaw.git"
+jq --indent 4 --arg url "${custom_test_url}" '(.official[] | select(.name == "rickshaw") | .repository) |= $url' \
+    ${install_path}/config/repos.json > /tmp/repos.json.tmp \
+    && sudo mv /tmp/repos.json.tmp ${install_path}/config/repos.json
+sudo ./crucible-install.sh --set-release ${latest_supported} 2>&1
+test "$?" = "0" || exit 1
+custom_url=$(jq -r '.official[] | select(.name == "rickshaw") | .repository' ${install_path}/config/repos.json)
+test "${custom_url}" = "${custom_test_url}" || exit 1
 stop_test
