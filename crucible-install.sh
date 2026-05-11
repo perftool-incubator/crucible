@@ -16,6 +16,8 @@ DEFAULT_QUAY_EXPIRATION_LENGTH="13w"
 GIT_REPO=""
 GIT_BRANCH=""
 GIT_TAG=""
+SET_RELEASE=""
+SET_RELEASE_FORCE=0
 VERBOSE=0
 
 # User Exit Codes
@@ -38,6 +40,9 @@ EC_RELEASE_DEFAULT_REPO_ONLY=18
 EC_RELEASE_CONFLICTS_WITH_BRANCH=19
 EC_INVALID_QUAY_EXPIRATION_LENGTH=20
 EC_OAUTH_FILE_NOT_FOUND=21
+EC_SET_RELEASE_NO_INSTALL=22
+EC_SET_RELEASE_NOT_FOUND=23
+EC_SET_RELEASE_CHECKOUT_FAIL=24
 
 # remove a previous installation log
 if [ -e ${GIT_INSTALL_LOG} ]; then
@@ -150,11 +155,12 @@ function usage {
     Crucible installer script.
 
     Usage: $0 --engine-registry <value> [ opt ]
+           $0 --set-release <release|upstream|select> [--set-release-force]
+
+    Install mode (new installation):
 
         --engine-registry <full registry url>
-        Engine registry.
-
-    optional:
+        Engine registry (required for install).
 
         --quay-engine-expiration-refresh-token <authentication file>>
         Quay OAuth authentication token file for refreshing engine image expiration timestamps.
@@ -167,7 +173,7 @@ function usage {
 
         --engine-auth-file <authentication file>
         Authentication file for pushing images to the remote registry.
-  
+
         --engine-tls-verify true|false
         Use TLS verification.
 
@@ -190,8 +196,20 @@ function usage {
 	--verbose
         Verbose mode that provides more debugging info.
 
+    Release management (existing installation):
+
+        --set-release <release|upstream|select>
+        Switch an existing installation to a specific quarterly release or
+        back to upstream. Use 'select' for interactive release selection.
+
+        --set-release-force
+        Allow switching to unsupported (older) releases.
+        Use with --set-release.
+
+    General:
+
 	--list-releases
-        Show all available releases from the remote repository.
+        Show available releases from the remote repository.
 
     --help
     Displays this usage output.
@@ -202,13 +220,16 @@ _USAGE_
 # list available "supported" branches from the remote repository
 # the "supported" releases are the 4 most recent ones
 function list_releases {
-    # only default repo is supported for the release mechanism
+    local repo_url="${1:-https://github.com/perftool-incubator/crucible.git}"
     git ls-remote --heads \
         --sort='version:refname' \
-        https://github.com/perftool-incubator/crucible.git \
+        "${repo_url}" \
         | awk -F/ '{print$NF}' \
-        | grep -E '20[0-9]{2}\.[1234]' \
-        | tail -n 4
+        | grep -E '20[0-9]{2}\.[1234]'
+}
+
+function list_supported_releases {
+    list_releases "$@" | tail -n 4
 }
 
 # cleanup previous installation
@@ -286,7 +307,7 @@ function select_release {
     if [ "$release" == "select" ]; then
 	echo
         echo "Releases:"
-        releases=( $(list_releases) )
+        releases=( $(list_supported_releases) )
 
         numopt=${#releases[@]}
         if [ $numopt -eq 0 ]; then
@@ -306,6 +327,309 @@ function select_release {
         fi
     fi
     GIT_TAG="$release"
+}
+
+function set_release {
+    local release="${1}"
+    local force=${2}
+
+    if [ "${release}" == "--help" -o "${release}" == "help" ]; then
+        echo "Usage: crucible-install.sh --set-release [<release>|upstream|select]"
+        echo ""
+        echo "Switch an existing installation to a specific release or back to upstream."
+        echo ""
+        echo "  <release>   A quarterly release identifier (e.g., 2026.1)"
+        echo "  upstream    Switch back to following primary branches (rolling/dev mode)"
+        echo "  select      Interactive release selection"
+        echo "  --set-release-force  Allow unsupported (older) releases"
+        exit 0
+    fi
+
+    if [ "${release}" != "upstream" -a "${release}" != "select" ]; then
+        if ! echo "${release}" | grep -qE '^20[0-9]{2}\.[1234]$'; then
+            exit_error "'${release}' is not a valid release identifier (expected format: YYYY.Q, e.g., 2025.3)" ${EC_SET_RELEASE_NOT_FOUND}
+        fi
+    fi
+
+    if [ ! -e "${SYSCONFIG}" ]; then
+        exit_error "No existing crucible installation found (${SYSCONFIG} does not exist). Use a regular install instead." ${EC_SET_RELEASE_NO_INSTALL}
+    fi
+
+    source "${SYSCONFIG}"
+
+    if [ -z "${CRUCIBLE_HOME}" -o ! -d "${CRUCIBLE_HOME}" ]; then
+        exit_error "CRUCIBLE_HOME is not set or does not exist. Use a regular install instead." ${EC_SET_RELEASE_NO_INSTALL}
+    fi
+
+    local repos_json="${CRUCIBLE_HOME}/config/repos.json"
+
+    if [ ! -e "${repos_json}" ]; then
+        exit_error "repos.json not found at ${repos_json}. Installation may be corrupt." ${EC_SET_RELEASE_NO_INSTALL}
+    fi
+
+    source "${CRUCIBLE_HOME}/bin/jqlib"
+
+    local crucible_repo_url
+    crucible_repo_url=$(jq_query ${repos_json} '.official[] | select(.name == "crucible") | .repository')
+
+    if [ "${release}" == "upstream" ]; then
+        set_release_upstream "${repos_json}" "${crucible_repo_url}"
+        return $?
+    fi
+
+    if [ "${release}" == "select" ]; then
+        echo
+        echo "Releases:"
+        local releases
+        releases=( $(list_supported_releases "${crucible_repo_url}") )
+
+        local numopt=${#releases[@]}
+        if [ ${numopt} -eq 0 ]; then
+            exit_error "No available releases found." ${EC_SET_RELEASE_NOT_FOUND}
+        fi
+
+        PS3="Select release option # [1-${numopt}]: "
+        select release in ${releases[@]}; do
+            echo ${releases[@]} | grep -w -q "$release"
+            if [ $? -eq 0 ]; then
+                echo "Release '$REPLY) $release' has been selected."
+            else
+                echo "Invalid option '$REPLY'!"
+                exit 1
+            fi
+            break
+        done
+    fi
+
+    set_release_quarterly "${repos_json}" "${crucible_repo_url}" "${release}" ${force}
+}
+
+function stop_crucible_services {
+    if podman ps --format "{{.Names}}" 2>/dev/null | grep -q "crucible-logger"; then
+        exit_error "A crucible command is currently running (logger pod detected). Please wait for it to finish before switching releases." ${EC_SET_RELEASE_CHECKOUT_FAIL}
+    fi
+
+    local crucible_pods
+    crucible_pods=$(podman ps --format "{{.Names}}" 2>/dev/null | grep "crucible-" || true)
+    if [ -n "${crucible_pods}" ]; then
+        echo "Stopping crucible services..."
+        echo "${crucible_pods}" | while read pod; do
+            echo "  Stopping ${pod}..."
+            podman stop "${pod}" 2>/dev/null || true
+        done
+    fi
+}
+
+function set_release_quarterly {
+    local repos_json="${1}"
+    local crucible_repo_url="${2}"
+    local release="${3}"
+    local force=${4}
+
+    echo "Querying available releases from ${crucible_repo_url}..."
+    local all_releases
+    all_releases=$(list_releases "${crucible_repo_url}")
+
+    if [ -z "${all_releases}" ]; then
+        exit_error "No releases found on remote ${crucible_repo_url}" ${EC_SET_RELEASE_NOT_FOUND}
+    fi
+
+    local supported_releases
+    supported_releases=$(echo "${all_releases}" | tail -n 4)
+    local unsupported_releases
+    unsupported_releases=$(echo "${all_releases}" | head -n -4)
+
+    if ! echo "${all_releases}" | grep -qw "${release}"; then
+        echo "ERROR: Release '${release}' does not exist on the crucible remote"
+        echo "       Supported releases:   $(echo ${supported_releases} | tr '\n' ' ')"
+        if [ -n "${unsupported_releases}" ]; then
+            echo "       Unsupported releases: $(echo ${unsupported_releases} | tr '\n' ' ')"
+        fi
+        exit ${EC_SET_RELEASE_NOT_FOUND}
+    fi
+
+    if [ ${force} -eq 0 ]; then
+        if ! echo "${supported_releases}" | grep -qw "${release}"; then
+            echo "ERROR: Release '${release}' is not a supported release"
+            echo "       Supported releases:   $(echo ${supported_releases} | tr '\n' ' ')"
+            if [ -n "${unsupported_releases}" ]; then
+                echo "       Unsupported releases: $(echo ${unsupported_releases} | tr '\n' ' ')"
+            fi
+            echo "       Use --set-release-force to override this check"
+            exit ${EC_SET_RELEASE_NOT_FOUND}
+        fi
+    fi
+
+    stop_crucible_services
+
+    echo "Saving local repo configuration..."
+    local unofficial_repos
+    unofficial_repos=$(jq '.unofficial' ${repos_json})
+    local repo_urls
+    repo_urls=$(jq '[.official[] | {(.name): .repository}] | add' ${repos_json})
+
+    local original_ref
+    original_ref=$(git -C ${CRUCIBLE_HOME} rev-parse HEAD)
+    local repos_json_bak="${repos_json}.set-release-bak.$$"
+    cp ${repos_json} ${repos_json_bak}
+
+    echo "Switching crucible to release ${release}..."
+    local did_stash=0
+    if pushd ${CRUCIBLE_HOME} > /dev/null; then
+        if git diff --quiet HEAD 2>/dev/null && git diff --cached --quiet HEAD 2>/dev/null; then
+            :
+        else
+            git reset HEAD -- . 2>/dev/null || true
+        fi
+
+        if git stash --include-untracked 2>&1 | grep -q "Saved working directory"; then
+            did_stash=1
+        fi
+
+        git fetch origin
+
+        if ! git -c advice.detachedHead=false checkout ${release}; then
+            echo "ERROR: Failed to checkout release '${release}' for crucible"
+            if [ ${did_stash} -eq 1 ]; then
+                git stash pop 2>&1 || true
+            fi
+            mv ${repos_json_bak} ${repos_json}
+            popd > /dev/null
+            exit ${EC_SET_RELEASE_CHECKOUT_FAIL}
+        fi
+
+        local release_repos_json="${repos_json}.release.$$"
+        cp ${repos_json} ${release_repos_json}
+
+        if [ ${did_stash} -eq 1 ]; then
+            git stash pop 2>&1 || true
+            cp ${release_repos_json} ${repos_json}
+        fi
+        rm -f ${release_repos_json}
+
+        popd > /dev/null
+    fi
+
+    echo "Restoring local repo configuration..."
+    jq --indent 4 --argjson unofficial "${unofficial_repos}" --argjson urls "${repo_urls}" \
+        '.unofficial = $unofficial |
+         .official = [.official[] | if $urls[.name] then .repository = $urls[.name] else . end]' \
+        ${repos_json} > ${repos_json}.tmp \
+        && mv ${repos_json}.tmp ${repos_json}
+
+    echo "Updating checkout configuration for all official repos..."
+    jq --indent 4 --arg release "${release}" \
+        '(.official[] | .checkout.target) |= $release |
+         (.official[] | .checkout.mode) |= "locked"' \
+        ${repos_json} > ${repos_json}.tmp \
+        && mv ${repos_json}.tmp ${repos_json}
+
+    echo "Updating subprojects..."
+    if ! ${CRUCIBLE_HOME}/bin/subprojects-install; then
+        echo "ERROR: subprojects-install failed, rolling back..."
+        if pushd ${CRUCIBLE_HOME} > /dev/null; then
+            git -c advice.detachedHead=false checkout ${original_ref} 2>&1 || true
+            popd > /dev/null
+        fi
+        mv ${repos_json_bak} ${repos_json}
+        exit ${EC_SET_RELEASE_CHECKOUT_FAIL}
+    fi
+
+    rm -f ${repos_json_bak}
+
+    echo ""
+    echo "Successfully switched crucible installation to release ${release}"
+}
+
+function set_release_upstream {
+    local repos_json="${1}"
+    local crucible_repo_url="${2}"
+
+    local crucible_primary_branch
+    crucible_primary_branch=$(jq_query ${repos_json} '.official[] | select(.name == "crucible") | ."primary-branch"')
+
+    stop_crucible_services
+
+    echo "Saving local repo configuration..."
+    local unofficial_repos
+    unofficial_repos=$(jq '.unofficial' ${repos_json})
+    local repo_urls
+    repo_urls=$(jq '[.official[] | {(.name): .repository}] | add' ${repos_json})
+
+    local original_ref
+    original_ref=$(git -C ${CRUCIBLE_HOME} rev-parse HEAD)
+    local repos_json_bak="${repos_json}.set-release-bak.$$"
+    cp ${repos_json} ${repos_json_bak}
+
+    echo "Switching crucible to ${crucible_primary_branch} (upstream)..."
+    local did_stash=0
+    if pushd ${CRUCIBLE_HOME} > /dev/null; then
+        if git diff --quiet HEAD 2>/dev/null && git diff --cached --quiet HEAD 2>/dev/null; then
+            :
+        else
+            git reset HEAD -- . 2>/dev/null || true
+        fi
+
+        if git stash --include-untracked 2>&1 | grep -q "Saved working directory"; then
+            did_stash=1
+        fi
+
+        git fetch origin
+
+        if ! git checkout ${crucible_primary_branch}; then
+            echo "ERROR: Failed to checkout '${crucible_primary_branch}' for crucible"
+            if [ ${did_stash} -eq 1 ]; then
+                git stash pop 2>&1 || true
+            fi
+            mv ${repos_json_bak} ${repos_json}
+            popd > /dev/null
+            exit ${EC_SET_RELEASE_CHECKOUT_FAIL}
+        fi
+
+        if ! git pull --ff-only; then
+            echo "WARNING: Failed to fast-forward ${crucible_primary_branch}, continuing with current state"
+        fi
+
+        local release_repos_json="${repos_json}.release.$$"
+        cp ${repos_json} ${release_repos_json}
+
+        if [ ${did_stash} -eq 1 ]; then
+            git stash pop 2>&1 || true
+            cp ${release_repos_json} ${repos_json}
+        fi
+        rm -f ${release_repos_json}
+
+        popd > /dev/null
+    fi
+
+    echo "Restoring local repo configuration..."
+    jq --indent 4 --argjson unofficial "${unofficial_repos}" --argjson urls "${repo_urls}" \
+        '.unofficial = $unofficial |
+         .official = [.official[] | if $urls[.name] then .repository = $urls[.name] else . end]' \
+        ${repos_json} > ${repos_json}.tmp \
+        && mv ${repos_json}.tmp ${repos_json}
+
+    echo "Resetting checkout configuration to follow mode..."
+    jq --indent 4 \
+        '.official = [.official[] | .checkout.target = ."primary-branch" | .checkout.mode = "follow"]' \
+        ${repos_json} > ${repos_json}.tmp \
+        && mv ${repos_json}.tmp ${repos_json}
+
+    echo "Updating subprojects..."
+    if ! ${CRUCIBLE_HOME}/bin/subprojects-install; then
+        echo "ERROR: subprojects-install failed, rolling back..."
+        if pushd ${CRUCIBLE_HOME} > /dev/null; then
+            git -c advice.detachedHead=false checkout ${original_ref} 2>&1 || true
+            popd > /dev/null
+        fi
+        mv ${repos_json_bak} ${repos_json}
+        exit ${EC_SET_RELEASE_CHECKOUT_FAIL}
+    fi
+
+    rm -f ${repos_json_bak}
+
+    echo ""
+    echo "Successfully switched crucible installation to upstream (${crucible_primary_branch})"
 }
 
 function update_repos_config() {
@@ -375,11 +699,23 @@ longopts="name:,email:,help,list-releases,verbose"
 longopts+=",client-server-registry:,client-server-auth-file:,client-server-tls-verify:"
 longopts+=",engine-registry:,engine-auth-file:,engine-tls-verify:,quay-engine-expiration-length:"
 longopts+=",quay-engine-expiration-refresh-token:,quay-engine-expiration-refresh-api-url:"
-longopts+=",controller-registry:,git-repo:,git-branch:,release:"
+longopts+=",controller-registry:,git-repo:,git-branch:,release:,set-release:,set-release-force"
 opts=$(getopt -q -o "" --longoptions "$longopts" -n "$0" -- "$@");
 if [ $? -ne 0 ]; then
-    opts=$(echo "$@")
-    exit_error "Unrecognized option specified: ${opts}" ${EC_INVALID_OPTION}
+    if echo "$@" | grep -qw -- "--set-release"; then
+        echo "Usage: crucible-install.sh --set-release [<release>|upstream|select]"
+        echo ""
+        echo "Switch an existing installation to a specific release or back to upstream."
+        echo ""
+        echo "  <release>   A quarterly release identifier (e.g., 2026.1)"
+        echo "  upstream    Switch back to following primary branches (rolling/dev mode)"
+        echo "  select      Interactive release selection"
+        echo "  --set-release-force  Allow unsupported (older) releases"
+        exit 1
+    else
+        opts=$(echo "$@")
+        exit_error "Unrecognized option specified: ${opts}" ${EC_INVALID_OPTION}
+    fi
 fi
 eval set -- "$opts";
 while true; do
@@ -450,7 +786,7 @@ while true; do
             ;;
         --list-releases)
 	    shift;
-	    list_releases
+	    list_supported_releases
 	    exit
 	    ;;
 	--release)
@@ -458,6 +794,15 @@ while true; do
 	    select_release "$1"
 	    shift;
 	    ;;
+        --set-release)
+            shift;
+            SET_RELEASE="$1"
+            shift;
+            ;;
+        --set-release-force)
+            shift;
+            SET_RELEASE_FORCE=1
+            ;;
         --)
             shift;
             break;
@@ -478,6 +823,16 @@ if [ -n "${GIT_TAG}" ]; then
     if [ -n "${GIT_BRANCH}" ]; then
         exit_error "Cannot install from release and specify '--git-branch'." $EC_RELEASE_CONFLICTS_WITH_BRANCH
     fi
+fi
+
+# --set-release conflicts with install options
+if [ -n "${SET_RELEASE}" ]; then
+    if [ -n "${GIT_REPO}" -o -n "${GIT_BRANCH}" -o -n "${GIT_TAG}" ]; then
+        exit_error "Cannot use --set-release with --git-repo, --git-branch, or --release." $EC_INVALID_OPTION
+    fi
+
+    set_release "${SET_RELEASE}" ${SET_RELEASE_FORCE}
+    exit $?
 fi
 
 determine_git_install_source
