@@ -38,7 +38,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
                 ;;
             run)
-                COMPREPLY=($(compgen -f -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--log-level --help" -f -- "${COMP_WORDS[2]}"))
                 ;;
             wrapper)
                 COMPREPLY=($(compgen -c -f -- "${COMP_WORDS[2]}"))

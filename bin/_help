@@ -76,7 +76,7 @@ function help() {
     elif [ "${1}" == "update" ]; then
         ${CRUCIBLE_HOME}/bin/update help
     elif [ "${1}" == "run" ]; then
-        echo "please see https://github.com/perftool-incubator/crucible/tree/master/doc"
+        run_help
     else
         help
     fi

@@ -1,5 +1,17 @@
 # Crucible - Container-Based Performance Testing Framework
 
+## Git Workflow
+
+NEVER commit code unless explicitly asked to commit. Stage changes and show a summary, but wait for user approval before running `git commit`.
+
+## Tool Usage
+
+Before using any CLI flag or API, verify it actually exists by checking `--help` output or documentation. Never assume a flag exists based on what seems logical.
+
+## Debugging
+
+When fixing a bug, first identify and confirm which component is actually responsible before making changes. Read the error trace carefully and validate your diagnosis before editing code.
+
 ## Project Overview
 
 Crucible is a container-based performance testing framework built primarily in Bash. It orchestrates benchmark execution, data collection, post-processing, and result indexing using Podman containers. The project is part of the `perftool-incubator` GitHub organization.
@@ -69,6 +81,10 @@ crucible run-ci
 # Full help
 crucible help [command]
 ```
+
+## Code Style
+
+Follow existing code style conventions exactly — check surrounding code for patterns before writing new code. When in doubt, match the existing style rather than introducing new conventions.
 
 ## Code Conventions
 
@@ -159,7 +175,7 @@ Available skills:
 
 ## Pull Requests and Contributions
 
-- **Branch strategy**: Always submit PRs from branches on the upstream repository, not from forks. Fork PRs cannot access org secrets and variables needed for CI workflows. All repos have a `fork-check` workflow that automatically closes fork PRs.
+- **Branch strategy**: Always create a feature branch first (`git checkout -b <descriptive-branch-name>`). Never push directly to main. Submit PRs from branches on the upstream repository, not from forks. Fork PRs cannot access org secrets and variables needed for CI workflows. All repos have a `fork-check` workflow that automatically closes fork PRs.
 - **Review requests**: When opening PRs, request review from the **Developers** team and self-assign the PR.
 - **Commit messages**: Use conventional commits format (`feat:`, `fix:`, `docs:`, etc.). Be precise and descriptive — prefer nuanced descriptions over broad generalizations.
 - **CLAUDE.md updates**: When making structural changes to a subproject, update that subproject's CLAUDE.md in the same PR. Claude should author CLAUDE.md content, not humans — the human role is review and approval.

@@ -242,23 +242,51 @@ elif [ "${1}" == "postprocess" ]; then
 elif [ "${1}" == "run" ]; then
     shift
 
-    if [ "${1}" == "--from-file" ]; then
-        # discard the optional '--from-file' parameter; it is still
-        # allowed for backwards compatability
-        shift
-    fi
+    run_file=""
+    run_log_level="normal"
 
-    run_file=${1}
-    if [ -n "${run_file}" ]; then
-        if [ ! -f $run_file ]; then
-            exit_error "File not found: ${run_file}"
-        fi
-    else
+    while [ $# -gt 0 ]; do
+        case "${1}" in
+            --from-file)
+                shift
+                ;;
+            --log-level)
+                shift
+                if [ $# -eq 0 ]; then
+                    exit_error "--log-level requires a value (normal, verbose, debug)"
+                fi
+                case "${1}" in
+                    normal|verbose|debug)
+                        run_log_level="${1}"
+                        ;;
+                    *)
+                        exit_error "Invalid --log-level value '${1}'. Must be one of: normal, verbose, debug"
+                        ;;
+                esac
+                shift
+                ;;
+            --help)
+                run_help
+                exit 0
+                ;;
+            --*)
+                exit_error "Unknown option '${1}'. See 'crucible help run' for usage."
+                ;;
+            *)
+                if [ -n "${run_file}" ]; then
+                    exit_error "Only one run-file can be specified."
+                fi
+                run_file="${1}"
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "${run_file}" ]; then
         exit_error "You must specify a JSON run-file."
     fi
-
-    if [ $# -gt 1 ]; then
-        exit_error "No other options can be specified with besides the JSON run-file."
+    if [ ! -f "${run_file}" ]; then
+        exit_error "File not found: ${run_file}"
     fi
 
     # extract the list of benchmarks from the run file
@@ -353,6 +381,7 @@ elif [ "${1}" == "run" ]; then
     rs_run_cmd+=" --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs"
     rs_run_cmd+=" --workshop-script=workshop.py"
     rs_run_cmd+=" ${image_sourcing_url}"
+    rs_run_cmd+=" --log-level=${run_log_level}"
     rs_run_cmd+=" ${rickshaw_run_args[@]}"
 
     echo "rickshaw-run command: $rs_run_cmd"

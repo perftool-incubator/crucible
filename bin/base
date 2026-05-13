@@ -1053,6 +1053,19 @@ function run_manage_instances() {
         "$@"
 }
 
+function run_help() {
+    echo "Usage: crucible run [OPTIONS] <run-file>"
+    echo ""
+    echo "Execute a benchmark run defined by a JSON run-file."
+    echo ""
+    echo "Options:"
+    echo "  --log-level <level>  Set logging verbosity (default: normal)"
+    echo "                       normal  - curated output for readability"
+    echo "                       verbose - includes detailed subsystem output"
+    echo "                       debug   - full diagnostic output"
+    echo "  --help               Show this help and exit"
+}
+
 # Helper function to get instance metadata (instance, cdmver_opt, access_opt)
 # Usage: get_instance_metadata [instance_name]
 # If instance_name is not provided, uses the default index instance
