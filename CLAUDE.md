@@ -104,8 +104,7 @@ Follow existing code style conventions exactly — check surrounding code for pa
 ## Language Strategy
 - **New code**: Write new functionality in Python 3 by default
 - **Host-side exception**: Code in the crucible repo that runs outside the controller container (e.g., `bin/` scripts) should be Bash to minimize host OS dependencies
-- **Existing Perl**: Core subprojects like rickshaw and workshop are written in Perl. These are being incrementally ported to Python as time and need allow — do not rewrite Perl to Python unless specifically asked
-- **Existing languages**: When extending an existing file, use that file's language. When adding new functionality to a subproject, prefer Python even if the subproject has Perl code
+- **Existing languages**: When extending an existing file, use that file's language. When adding new functionality to a subproject, prefer Python
 
 ## Configuration
 
@@ -169,7 +168,7 @@ Available skills:
 
 ## Testing and Validation
 
-- **Container-side scripts**: Scripts that run inside the controller container (e.g., `workshop/controller-image.py`, workshop scripts) must be tested using `crucible wrapper <command>`. Running them directly on the host will fail due to missing dependencies (Python packages like `invoke`, Perl modules, etc.) that are only installed inside the container image.
+- **Container-side scripts**: Scripts that run inside the controller container (e.g., `workshop/controller-image.py`, workshop scripts) must be tested using `crucible wrapper <command>`. Running them directly on the host will fail due to missing dependencies (Python packages like `invoke`, etc.) that are only installed inside the container image.
 - **Service restart**: When modifying source-images-service code, stop all services with `crucible stop valkey opensearch image-sourcing httpd` before testing so the service picks up the new code.
 - **Engine image builds**: Test with `crucible run <run-file.json>` — run from the directory containing any referenced files (e.g., job files).
 
