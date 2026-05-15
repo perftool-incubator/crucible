@@ -44,7 +44,7 @@ Crucible is a container-based performance testing framework built primarily in B
 Defined in `config/repos.json` with categories:
 - **core**: `rickshaw` (run orchestration), `multiplex`, `roadblock`, `workshop`, `CommonDataModel`, `toolbox`, `packrat`, `crucible-ci`
 - **benchmarks**: `cyclictest`, `fio`, `flexran`, `hwlatdetect`, `hwnoise`, `ilab`, `iperf`, `oslat`, `osnoise`, `pytorch`, `sleep`, `timerlat`, `tracer`, `trafficgen`, `uperf` (in `subprojects/benchmarks/`)
-- **tools**: `sysstat`, `procstat`, `ftrace`, `kernel`, `ovs`, `nvidia`, `power`, `forkstat`, `rt-trace-bpf` (in `subprojects/tools/`)
+- **tools**: `sysstat`, `procstat`, `ftrace`, `kernel`, `ovs`, `nvidia`, `power`, `forkstat`, `rt-trace-bpf`, `mlxreg` (in `subprojects/tools/`)
 - **docs**: `examples`, `testing` (in `subprojects/docs/`)
 
 Each entry in `repos.json` has: `name`, `type`, `repository`, `primary-branch`, and `checkout` config.
