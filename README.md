@@ -82,6 +82,7 @@ uperf | Traditional network communication testing | https://github.com/perftool-
 forkstat | A tool to capture fork+exec statistics | https://github.com/perftool-incubator/tool-forkstat
 ftrace | Linux kernel tracing | https://github.com/perftool-incubator/tool-ftrace
 kernel | Various kernel tools (turbostat, perf, sst, tracing) | https://github.com/perftool-incubator/tool-kernel
+mlxreg | Mellanox register tool for collecting NIC register data | https://github.com/perftool-incubator/tool-mlxreg
 nvidia | NVIDIA GPU data collection | https://github.com/perftool-incubator/tool-nvidia
 ovs | Open vSwitch data collection | https://github.com/perftool-incubator/tool-ovs
 power | Power and thermal telemetry collection for Redfish-enabled devices | https://github.com/perftool-incubator/tool-power
