@@ -157,7 +157,7 @@ case "${repo}" in
                 exit 1
             fi
         else
-            echo "ERROR: Invalid project directory '${repo_dir}'!"
+            echo "ERROR: Invalid project directory '${repo_dir}'!  Try running 'crucible update' first to clone the repository."
             exit 1
         fi
         ;;
@@ -169,11 +169,12 @@ if [ "${repo}" == "____all" ]; then
         PROJECT_TYPE=$(jq_query ${REPO_FILE} --arg project ${project} '.official[], .unofficial[] | select(.name == $project) | .type')
 
         repo_dir=${CRUCIBLE_HOME}/subprojects/$(get_project_type_dir ${PROJECT_TYPE})/${PROJECT_NAME}
-        if [ -n "${repo_dir}" -a -L "${repo_dir}" ]; then
-            echo
-            echo "Updating ${PROJECT_NAME}:"
-            echo
 
+        echo
+        echo "Updating ${PROJECT_NAME}:"
+        echo
+
+        if [ -n "${repo_dir}" -a -L "${repo_dir}" ]; then
             if pushd ${repo_dir} > /dev/null; then
                 if ! $CRUCIBLE_HOME/bin/_update-git ${PROJECT_NAME}; then
                     RC=1
@@ -184,8 +185,7 @@ if [ "${repo}" == "____all" ]; then
                 RC=1
             fi
         else
-            echo "ERROR: Invalid project directory '${repo_dir}'!"
-            RC=1
+            echo "Skipping -- not yet installed, will be cloned by subprojects-install"
         fi
     done
 fi
