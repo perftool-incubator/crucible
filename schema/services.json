@@ -4,53 +4,71 @@
     "type": "object",
     "properties": {
         "image-sourcing": {
-            "description": "The image-sourcing object contains configuration settings for the container image sourcing service",
+            "description": "The image-sourcing object contains configuration settings for the container image sourcing service(s). Multiple services can be configured, one per CPU architecture, to support multi-architecture image builds.",
             "type": "object",
             "properties": {
-                "location": {
-                    "description": "The location object contains configuration settings locate where the image sourcing service can be accessed",
+                "use": {
+                    "description": "This parameter controls whether the image sourcing service is used",
+                    "type": "boolean"
+                },
+                "services": {
+                    "description": "A map of CPU architecture to image sourcing service configuration. Each key is an architecture name (e.g., 'x86_64', 'aarch64') or the special value 'default' which is resolved to the host's native architecture during install/update. Services with 'start' set to true are started locally; non-native architectures are started under QEMU emulation.",
                     "type": "object",
-                    "properties": {
-                        "address": {
-                            "description": "This paramter contains the hostname or IP address that is used to access the image sourcing service",
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "port": {
-                            "descriptiopn": "This parameter contains the network port where the image sourcing service is running",
-                            "type": "integer",
-                            "minimum": 1025,
-                            "maximum": 32768
-                        },
-                        "protocol": {
-                            "description": "This parameter contains the protocol that is used to communicate with the image sourcing service",
-                            "type": "string",
-                            "enum": [
-                                "http"
+                    "minProperties": 1,
+                    "patternProperties": {
+                        "^(default|x86_64|aarch64|ppc64le|s390x)$": {
+                            "description": "Configuration for an image sourcing service that builds images for this architecture",
+                            "type": "object",
+                            "properties": {
+                                "start": {
+                                    "description": "This parameter controls whether this image sourcing service should be started locally. Only services matching the host's native architecture can be started locally; non-native architectures must use a remote service with start set to false.",
+                                    "type": "boolean"
+                                },
+                                "location": {
+                                    "description": "The location object contains configuration settings to locate where the image sourcing service can be accessed",
+                                    "type": "object",
+                                    "properties": {
+                                        "address": {
+                                            "description": "This parameter contains the hostname or IP address that is used to access the image sourcing service",
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "port": {
+                                            "description": "This parameter contains the network port where the image sourcing service is running",
+                                            "type": "integer",
+                                            "minimum": 1025,
+                                            "maximum": 32768
+                                        },
+                                        "protocol": {
+                                            "description": "This parameter contains the protocol that is used to communicate with the image sourcing service",
+                                            "type": "string",
+                                            "enum": [
+                                                "http"
+                                            ]
+                                        }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "address",
+                                        "port",
+                                        "protocol"
+                                    ]
+                                }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                                "start",
+                                "location"
                             ]
                         }
                     },
-                    "additionalProperties": false,
-                    "required": [
-                        "address",
-                        "port",
-                        "protocol"
-                    ]
-                },
-                "start": {
-                    "description": "This parameter controls whether the local image sourcing service should be started",
-                    "type": "boolean"
-                },
-                "use": {
-                    "description": "This paramter controls whether the image sourcing service is used",
-                    "type": "boolean"
+                    "additionalProperties": false
                 }
             },
             "additionalProperties": false,
             "required": [
-                "location",
-                "start",
-                "use"
+                "use",
+                "services"
             ]
         },
         "cdm-server": {

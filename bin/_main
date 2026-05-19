@@ -351,19 +351,45 @@ elif [ "${1}" == "run" ]; then
     image_sourcing_url=""
     image_sourcing_use=$(jq_query ${SERVICES_CFG} '."image-sourcing".use')
     if [ "${image_sourcing_use}" == "true" ]; then
-           image_sourcing_start=$(jq_query ${SERVICES_CFG} '."image-sourcing".start')
-           if [ "${image_sourcing_start}" == "true" ]; then
-               start_image_sourcing
-           fi
+        if ! start_image_sourcing; then
+            exit_error "Failed to start image-sourcing service(s)"
+        fi
 
-           image_sourcing_address=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.address')
-           image_sourcing_port=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.port')
-           image_sourcing_protocol=$(jq_query ${SERVICES_CFG} '."image-sourcing".location.protocol')
+        # Build per-architecture URL mapping and write to run config
+        local native_arch urls_json first_url arch arch_address arch_port arch_protocol arch_url
+        native_arch=$(uname -m)
+        urls_json="{"
+        first_url=""
 
-           image_sourcing_url="${image_sourcing_protocol}://${image_sourcing_address}:${image_sourcing_port}"
-           echo "Using image-sourcing service @ ${image_sourcing_url}"
+        for arch in $(jq_query ${SERVICES_CFG} '."image-sourcing".services | keys[]'); do
+            arch_address=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.address")
+            arch_port=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.port")
+            arch_protocol=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.protocol")
+            arch_url="${arch_protocol}://${arch_address}:${arch_port}"
 
-           image_sourcing_url="--source-images-service-url=${image_sourcing_url}"
+            echo "Using ${arch} image-sourcing service @ ${arch_url}"
+
+            if [ "${urls_json}" != "{" ]; then
+                urls_json+=","
+            fi
+            urls_json+="\"${arch}\":\"${arch_url}\""
+
+            # Track the native arch URL for legacy --source-images-service-url
+            if [ "${arch}" == "${native_arch}" ]; then
+                first_url="${arch_url}"
+            elif [ -z "${first_url}" ]; then
+                first_url="${arch_url}"
+            fi
+        done
+
+        urls_json+="}"
+        echo "${urls_json}" | jq '.' > ${base_run_dir}/config/image-sourcing-urls.json
+        echo "Wrote per-architecture image sourcing URL mapping to ${base_run_dir}/config/image-sourcing-urls.json"
+
+        # Legacy --source-images-service-url for backward compatibility with old rickshaw
+        if [ -n "${first_url}" ]; then
+            image_sourcing_url="--source-images-service-url=${first_url}"
+        fi
     fi
 
     rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run.py"

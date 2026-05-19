@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# Migrate config/services.json to the per-architecture image-sourcing format.
+# This script is idempotent and safe to run multiple times.
+#
+# It handles two cases:
+#   1. Old flat format (location/start/use directly under image-sourcing)
+#      → converted to per-arch services map with native arch as the key
+#   2. New format with "default" placeholder key
+#      → "default" replaced with the host's native architecture
+
+. /etc/sysconfig/crucible
+
+if [ -z "${CRUCIBLE_HOME}" ]; then
+    echo "CRUCIBLE_HOME not defined, exiting."
+    exit 1
+fi
+
+source ${CRUCIBLE_HOME}/bin/jqlib
+
+SERVICES_CFG=${CRUCIBLE_HOME}/config/services.json
+
+if [ ! -f "${SERVICES_CFG}" ]; then
+    echo "No services.json found, skipping migration"
+    exit 0
+fi
+
+native_arch=$(uname -m)
+
+# Check if this is the old flat format (has image-sourcing.location at top level)
+has_old_format=$(jq -r '."image-sourcing" | has("location")' ${SERVICES_CFG})
+
+if [ "${has_old_format}" == "true" ]; then
+    echo "Migrating services.json from flat image-sourcing format to per-architecture format..."
+
+    # Extract old values
+    old_start=$(jq -r '."image-sourcing".start' ${SERVICES_CFG})
+    old_address=$(jq -r '."image-sourcing".location.address' ${SERVICES_CFG})
+    old_port=$(jq -r '."image-sourcing".location.port' ${SERVICES_CFG})
+    old_protocol=$(jq -r '."image-sourcing".location.protocol' ${SERVICES_CFG})
+    old_use=$(jq -r '."image-sourcing".use' ${SERVICES_CFG})
+
+    # Rewrite the image-sourcing section in place
+    jq --indent 4 --arg arch "${native_arch}" \
+       --argjson start "${old_start}" \
+       --arg address "${old_address}" \
+       --argjson port "${old_port}" \
+       --arg protocol "${old_protocol}" \
+       --argjson use "${old_use}" \
+       '."image-sourcing" = {
+           "use": $use,
+           "services": {
+               ($arch): {
+                   "start": $start,
+                   "location": {
+                       "address": $address,
+                       "port": $port,
+                       "protocol": $protocol
+                   }
+               }
+           }
+       }' ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
+
+    echo "Migrated image-sourcing config to per-architecture format with key '${native_arch}'"
+    exit 0
+fi
+
+# Check if the new format has a "default" key that needs to be resolved
+has_default=$(jq -r '."image-sourcing".services | has("default")' ${SERVICES_CFG} 2>/dev/null)
+
+if [ "${has_default}" == "true" ]; then
+    echo "Resolving 'default' image-sourcing service key to '${native_arch}'..."
+
+    jq --indent 4 --arg arch "${native_arch}" \
+       '."image-sourcing".services[$arch] = ."image-sourcing".services["default"] |
+        del(."image-sourcing".services["default"])' \
+       ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
+
+    echo "Resolved 'default' to '${native_arch}'"
+    exit 0
+fi
+
+# Already migrated — silent exit

@@ -7,11 +7,15 @@
     },
     "image-sourcing": {
         "use": true,
-        "start": true,
-        "location": {
-            "address": "localhost",
-            "port": 8888,
-            "protocol": "http"
+        "services": {
+            "default": {
+                "start": true,
+                "location": {
+                    "address": "localhost",
+                    "port": 8888,
+                    "protocol": "http"
+                }
+            }
         }
     },
     "valkey": {

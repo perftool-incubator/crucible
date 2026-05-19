@@ -113,6 +113,9 @@ esac
 case "${repo}" in
     "____all"|"____crucible")
         # any crucible specific post update logic goes here
+
+        # migrate services.json to per-arch image-sourcing format
+        ${CRUCIBLE_HOME}/bin/_migrate-services-config
         ;;
 esac
 
