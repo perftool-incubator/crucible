@@ -112,6 +112,26 @@ Follow existing code style conventions exactly — check surrounding code for pa
 - `~/.crucible/identity`: User identity (CRUCIBLE_NAME, CRUCIBLE_EMAIL)
 - Run data stored in `/var/lib/crucible/run/`
 
+## Multi-Architecture Image Sourcing
+
+Engine container images are built by the image sourcing service (SIS). `config/services.json` maps each CPU architecture to its own SIS instance under `image-sourcing.services`:
+
+```json
+{
+    "image-sourcing": {
+        "use": true,
+        "services": {
+            "x86_64": { "start": true, "location": { "address": "localhost", "port": 8888, "protocol": "http" } },
+            "aarch64": { "start": false, "location": { "address": "arm-builder.example.com", "port": 8888, "protocol": "http" } }
+        }
+    }
+}
+```
+
+- The repo ships with a `"default"` placeholder key; `bin/_migrate-services-config` resolves it to the host's native architecture (via `uname -m`) on install, update, and every command invocation
+- Only the native architecture can use `"start": true` (local service). Non-native architectures must use `"start": false` with a remote address pointing to a native builder — local cross-arch builds are not supported due to buildah/QEMU incompatibilities
+- `bin/_main` writes `image-sourcing-urls.json` to the run config directory mapping each architecture to its service URL; rickshaw reads this file to route image sourcing requests
+
 ## Dependencies
 
 Runtime: `podman`, `git`, `jq`
