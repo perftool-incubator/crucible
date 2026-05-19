@@ -919,6 +919,11 @@ fi
 ${INSTALL_PATH}/bin/subprojects-install ${git_tag_arg} >> "${GIT_INSTALL_LOG}" 2>&1 ||
     exit_error "Failed to execute crucible subproject install, check ${GIT_INSTALL_LOG} for details" ${EC_FAIL_INSTALL}
 
+# Migrate services.json to per-architecture image-sourcing format
+if [ -x ${INSTALL_PATH}/bin/_migrate-services-config ]; then
+    ${INSTALL_PATH}/bin/_migrate-services-config
+fi
+
 SYSCONFIG_CRUCIBLE_ENGINE_REGISTRY="${CRUCIBLE_ENGINE_REGISTRY}"
 SYSCONFIG_CRUCIBLE_ENGINE_AUTH=""
 SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY=""
