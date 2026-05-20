@@ -85,6 +85,23 @@ elif [ "${1}" == "update" ]; then
         ${CRUCIBLE_HOME}/bin/update ${1}
         EXIT_VAL=$?
     fi
+elif [ "${1}" == "ps" ]; then
+    shift
+    podman ps --filter name=crucible "$@"
+    EXIT_VAL=0
+elif [ "${1}" == "images" ]; then
+    shift
+    controller_url=$(jq_query ${REGISTRIES_CFG} '.controller.url')
+    public_engine_url=$(jq_query ${REGISTRIES_CFG} '.engines.public.url // empty')
+    private_engine_url=$(jq_query ${REGISTRIES_CFG} '.engines.private.url // empty')
+    filter_pattern="${controller_url}"
+    for url in ${public_engine_url} ${private_engine_url}; do
+        if [ -n "${url}" ] && ! echo "${filter_pattern}" | grep -q "${url}"; then
+            filter_pattern="${filter_pattern}\|${url}"
+        fi
+    done
+    podman images "$@" | head -1; podman images "$@" | grep "${filter_pattern}"
+    EXIT_VAL=0
 elif [ "${1}" == "start" -o "${1}" == "stop" ]; then
     service_control "$@"
     EXIT_VAL=$?
