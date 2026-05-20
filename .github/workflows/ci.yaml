@@ -13,7 +13,7 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      only-docs: ${{ steps.filter.outputs.only_changed }}
+      only-docs: ${{ steps.filter.outputs.only_modified }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
