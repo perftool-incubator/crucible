@@ -46,6 +46,8 @@ function help() {
     echo "tags                          |  Manage the tags associated with run results"
     echo "archive <dir>                 |  Create an archive of the run result pointed to by <dir> and remove it from the run directory"
     echo "unarchive <archive>           |  Unpack an archive named <archive> and put it back in the run directory"
+    echo "ps                            |  Show running crucible containers"
+    echo "images                        |  Show crucible container images"
     echo "start <service list>          |  Start the specified service(s) manually.  Not required, Crucible will start the services it needs when it needs them."
     echo "                              |  A service list is a space separated list of one or more of: all, cdm-server, httpd, image-sourcing, opensearch, & valkey"
     echo "stop <service list>           |  Stop the specified service(s) manually.  See the start command for more details."

@@ -16,7 +16,7 @@ _crucible_completions() {
     num_words=${#COMP_WORDS[@]} # Total number of words on the command
     let num_index=$num_words-1
     if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo userenvs update run wrapper console start stop get rm index postprocess opensearch extract ls tags archive unarchive reset instances" -- "${COMP_WORDS[1]}"))
+        COMPREPLY=($(compgen -W "help log repo userenvs update run wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset instances" -- "${COMP_WORDS[1]}"))
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
