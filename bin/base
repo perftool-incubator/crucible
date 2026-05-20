@@ -946,6 +946,20 @@ function service_control() {
             ;;
     esac
 
+    if [ "${action}" == "stop" ]; then
+        local run_containers
+        run_containers=$(${podman_ps} --filter "name=crucible-rickshaw-run" --filter "status=running" --format "{{.Names}}")
+        if [ -n "${run_containers}" ]; then
+            echo "ERROR: Cannot stop services while a crucible run is active"
+            echo "ERROR: Active run container(s):"
+            echo "${run_containers}" | while read container; do
+                echo "ERROR:   ${container}"
+            done
+            echo "ERROR: Wait for the run(s) to complete or stop them manually before stopping services"
+            return 1
+        fi
+    fi
+
     action_rc=0
 
     while [ $# -gt 0 ]; do
