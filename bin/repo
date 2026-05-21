@@ -492,8 +492,13 @@ function config_update_repo() {
         fi
     elif [ ${do_target_checkout} -eq 1 ]; then
         subproject_type=$(jq_query ${repos_json} --arg repo_name "${name}" '.official[], .unofficial[] | select(.name == $repo_name) | .type')
-        subproject_type_dir=$(get_project_type_dir "${subproject_type}")
-        if pushd ${CRUCIBLE_HOME}/subprojects/${subproject_type_dir}/${name} > /dev/null; then
+        if [ "${subproject_type}" == "primary" ]; then
+            checkout_dir=${CRUCIBLE_HOME}
+        else
+            subproject_type_dir=$(get_project_type_dir "${subproject_type}")
+            checkout_dir=${CRUCIBLE_HOME}/subprojects/${subproject_type_dir}/${name}
+        fi
+        if pushd ${checkout_dir} > /dev/null; then
             if ! git checkout ${checkout_target}; then
                 echo "ERROR: Failed to checkout target '${checkout_target}' for subproject '${name}'"
                 popd > /dev/null
