@@ -167,14 +167,49 @@ function generate_rand_pass() {
     head -c 4096 /dev/urandom | sha256sum | awk '{print $1}' > $output_file
 }
 
+function find_available_port() {
+    local service_name=$1
+    local desired_port=$2
+    local max_attempts=${3:-100}
+
+    local port=${desired_port}
+    local attempt=0
+
+    while [ ${attempt} -lt ${max_attempts} ]; do
+        if ! ss -tln "( sport = :${port} )" | grep -q LISTEN; then
+            if [ ${port} -ne ${desired_port} ]; then
+                echo "WARNING: ${service_name} configured port ${desired_port} is in use, using port ${port} instead" >&2
+            fi
+            echo ${port}
+            return 0
+        fi
+        (( port++ ))
+        (( attempt++ ))
+    done
+
+    echo "ERROR: Could not find an available port for ${service_name} (tried ${desired_port}-$((desired_port + max_attempts - 1)))" >&2
+    return 1
+}
+
 function start_httpd() {
-    local RC httpd_cmd httpd_port
+    local RC httpd_cmd httpd_port actual_port
 
     httpd_port=$(jq_query ${SERVICES_CFG} '.httpd.port')
 
     httpd_cmd="/usr/sbin/httpd -DFOREGROUND"
     echo -n "Checking for httpd"
     if ! podman_running crucible-httpd; then
+        actual_port=$(find_available_port "httpd" ${httpd_port})
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        if [ ${actual_port} -ne ${httpd_port} ]; then
+            jq_update_validated ${SERVICES_CFG} \
+                                ${SERVICES_CFG_SCHEMA} \
+                                "services:httpd-port-search" \
+                                ".httpd.port = ${actual_port}"
+            httpd_port=${actual_port}
+        fi
         open_firewall_port ${httpd_port} tcp
         ${podman_run} --name crucible-httpd --env "HTTPD_PORT=${httpd_port}" "${container_common_args[@]}" "${container_httpd_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${httpd_cmd} > /dev/null
         RC=$?
@@ -303,10 +338,24 @@ function start_image_sourcing() {
         arch_protocol=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.protocol")
 
         container_name="crucible-image-sourcing-${arch}"
-        image_sourcing_status_cmd="curl --silent --show-error --stderr - -X GET ${arch_protocol}://${arch_address}:${arch_port}/api/v1/health"
 
         echo -n "Checking for ${arch} image-sourcing service"
         if ! podman_running ${container_name}; then
+            local actual_port
+            actual_port=$(find_available_port "image-sourcing-${arch}" ${arch_port})
+            if [ $? -ne 0 ]; then
+                return 1
+            fi
+            if [ ${actual_port} -ne ${arch_port} ]; then
+                jq_update_validated ${SERVICES_CFG} \
+                                    ${SERVICES_CFG_SCHEMA} \
+                                    "services:image-sourcing-${arch}-port-search" \
+                                    --arg arch "${arch}" \
+                                    ".\"image-sourcing\".services[\$arch].location.port = ${actual_port}"
+                arch_port=${actual_port}
+            fi
+
+            image_sourcing_status_cmd="curl --silent --show-error --stderr - -X GET ${arch_protocol}://${arch_address}:${arch_port}/api/v1/health"
             ${podman_run} --name ${container_name} --env "SIS_PORT=${arch_port}" "${container_common_args[@]}" "${container_image_sourcing_args[@]}" "${container_build_args[@]}" "${container_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${image_sourcing_start_cmd} > /dev/null
             RC=$?
             if [ ${RC} != 0 ]; then
@@ -472,12 +521,24 @@ function stop_opensearch() {
 }
 
 function start_cdm_server() {
-    local RC cdm_server_cmd cdm_query_opt cdm_server_port
+    local RC cdm_server_cmd cdm_query_opt cdm_server_port actual_port
 
     cdm_server_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
 
     echo -n "Checking for CDM server"
     if ! podman_running crucible-cdm-server; then
+        actual_port=$(find_available_port "cdm-server" ${cdm_server_port})
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        if [ ${actual_port} -ne ${cdm_server_port} ]; then
+            jq_update_validated ${SERVICES_CFG} \
+                                ${SERVICES_CFG_SCHEMA} \
+                                "services:cdm-server-port-search" \
+                                ".\"cdm-server\".port = ${actual_port}"
+            cdm_server_port=${actual_port}
+        fi
+
         # Get the OpenSearch connection options (--host, --userpass, --ver)
         cdm_query_opt=$(run_manage_instances query-opt)
         cdm_server_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/start-server.sh ${cdm_query_opt}"
