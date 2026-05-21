@@ -54,6 +54,17 @@ if [ -e "${UPDATE_STATUS_FILE}" ]; then
     rm "${UPDATE_STATUS_FILE}" "${UPDATE_STATUS_FILE}.log"
 fi
 
+run_containers=$(${podman_ps} --filter "name=crucible-rickshaw-run" --filter "status=running" --format "{{.Names}}")
+if [ -n "${run_containers}" ]; then
+    echo "ERROR: Cannot update while a crucible run is active"
+    echo "ERROR: Active run container(s):"
+    echo "${run_containers}" | while read container; do
+        echo "ERROR:   ${container}"
+    done
+    echo "ERROR: Wait for the run(s) to complete or stop them manually before updating"
+    exit 1
+fi
+
 case "${repo}" in
     "all"|"crucible"|"controller-image")
         echo
