@@ -372,7 +372,6 @@ elif [ "${1}" == "run" ]; then
         fi
 
         # Build per-architecture URL mapping and write to run config
-        local urls_json arch arch_address arch_port arch_protocol arch_url
         urls_json="{"
 
         for arch in $(jq_query ${SERVICES_CFG} '."image-sourcing".services | keys[]'); do
