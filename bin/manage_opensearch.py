@@ -5,44 +5,26 @@ import argparse
 import sys
 import os
 
-# Default structure for a new or empty JSON file,
-# used if the specified --cfg file is empty or not found (and then created).
-DEFAULT_DATA = {
-  "instances": [
-    {
-      "name": "local-v8",
-      "host": "localhost:9200",
-      "cdmver": "v8dev"
-    },
-    {
-      "name": "local-v9",
-      "host": "localhost:9200",
-      "cdmver": "v9dev"
-    }
-  ],
-  "index-to": "local-v9",
-  "query-from": [
-    "local-v9", "local-v8"
-  ]
-}
-
 write_required = False
 
 def load_json_data(filepath):
     """
-    Loads JSON data from the specified file.
-    If the file doesn't exist, initializes with default data (and will be created on save).
-    If the file is empty, initializes with default data.
-    If the file is corrupt, prints an error and exits.
+    Loads the opensearch section from services.json.
+    Returns the opensearch data dict on success, exits on error.
     """
-    global write_required
     try:
         with open(filepath, 'r') as f:
             if os.fstat(f.fileno()).st_size == 0:
-                print(f"Info: File '{filepath}' is empty. Initializing with default structure.")
-                return DEFAULT_DATA.copy()
-            data = json.load(f)
-            # Ensure essential keys exist
+                print(f"Error: File '{filepath}' is empty.")
+                sys.exit(1)
+            full_config = json.load(f)
+
+            if "opensearch" not in full_config or not isinstance(full_config.get("opensearch"), dict):
+                print(f"Error: 'opensearch' key not found or not an object in {filepath}.")
+                sys.exit(1)
+
+            data = full_config["opensearch"]
+
             if "instances" not in data or not isinstance(data.get("instances"), list):
                 print(f"Warning: 'instances' key not found or not a list in {filepath}. Initializing 'instances'.")
                 data["instances"] = []
@@ -53,29 +35,31 @@ def load_json_data(filepath):
                 data["query-from"] = []
             return data
     except FileNotFoundError:
-        print(f"Info: File '{filepath}' not found. Will be created with default structure.")
-        write_required = True
-        return DEFAULT_DATA.copy()
+        print(f"Error: File '{filepath}' not found.")
+        sys.exit(1)
     except json.JSONDecodeError:
         print(f"Error: Could not decode JSON from '{filepath}'. The file might be corrupted.")
         sys.exit(1)
 
 def save_json_data(filepath, data):
-    """Saves JSON data to the specified file with pretty printing."""
+    """Saves opensearch data back into the opensearch section of services.json."""
     try:
+        with open(filepath, 'r') as f:
+            full_config = json.load(f)
+
+        full_config["opensearch"] = data
+
         with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2)
+            json.dump(full_config, f, indent=4)
         print(f"Data successfully saved to '{filepath}'.")
     except IOError:
         print(f"Error: Could not write to file '{filepath}'.")
         sys.exit(1)
+    except json.JSONDecodeError:
+        print(f"Error: Could not read '{filepath}' for update.")
+        sys.exit(1)
 
 def add_instance(data, name, host, cdmver, userpass=None, set_query_from=False, set_index_to=False):
-    """
-    Adds a new instance to the data's 'instances' list.
-    Optionally updates 'query-from' and 'index-to' based on flags.
-    Returns True if adding to 'instances' list was successful, False otherwise.
-    """
     if not isinstance(data.get("instances"), list):
         print("Critical Error: 'instances' key is missing or not a list. Cannot add instance.")
         return False
@@ -110,11 +94,6 @@ def add_instance(data, name, host, cdmver, userpass=None, set_query_from=False, 
     return True
 
 def remove_instance(data, name):
-    """
-    Removes an instance by its name from the data's 'instances' list.
-    Also updates 'query-from' and 'index-to' if the removed instance was referenced.
-    Returns True if successful, False otherwise.
-    """
     if not isinstance(data.get("instances"), list):
         print("Critical Error: 'instances' key is missing or not a list. Cannot remove instance.")
         return False
@@ -137,11 +116,7 @@ def remove_instance(data, name):
         print(f"Error: Instance with name '{name}' not found in 'instances' list. No changes made.")
         return False
 
-def update_instance(data, name, new_host=None, new_cdmver=None, new_userpass=None, set_index_to=False, add_to_query_from=False, remove_query_from=False,remove_userpass_flag=False):
-    """
-    Updates an existing instance.
-    Returns True if successful, False otherwise.
-    """
+def update_instance(data, name, new_host=None, new_cdmver=None, new_userpass=None, set_index_to=False, add_to_query_from=False, remove_query_from=False, remove_userpass_flag=False):
     instance_to_update = None
     for inst in data.get("instances", []):
         if inst.get("name") == name:
@@ -216,21 +191,10 @@ def update_instance(data, name, new_host=None, new_cdmver=None, new_userpass=Non
 
 
 def display_info(filepath, data):
-    """Displays the current configuration in a human-readable format."""
-    print(f"Current configuration from '{filepath}':")
+    print(f"Current opensearch configuration from '{filepath}':")
     print(json.dumps(data, indent=2))
 
 def find_instance(instances, target_name):
-    """
-    Finds the first instance in an array of instances where the 'name' field matches the target string.
-
-    Args:
-        instances: A list of instances.
-        target_name: The string to match against the 'name' field.
-
-    Returns:
-        The matching instance if found, otherwise None.
-    """
     for instance in instances:
         if "name" in instance:
             if instance["name"] == target_name:
@@ -243,28 +207,25 @@ def list_instance_names(data):
             print(instance["name"])
 
 def instance_host_access_opt(data, name):
-    """Displays host access info for a specific instance."""
     instance_obj = find_instance(data["instances"], name)
-    cmdline = "";
+    cmdline = ""
     if instance_obj != None:
         cmdline = cmdline + " --host " + instance_obj["host"]
         if "userpass" in instance_obj:
             cmdline = cmdline + " --userpass " + instance_obj["userpass"]
-    print(cmdline);
+    print(cmdline)
 
 def query_opt(data):
-    """Displays host, cdmver and optional userpass info for a specific instance."""
     for instance_name in data["query-from"]:
         instance_obj = find_instance(data["instances"], instance_name)
-        cmdline = "";
+        cmdline = ""
         if instance_obj != None:
             cmdline = cmdline + " --host " + instance_obj["host"] + " --ver " + instance_obj["cdmver"]
             if "userpass" in instance_obj:
                 cmdline = cmdline + " --userpass " + instance_obj["userpass"]
-            print(cmdline);
+            print(cmdline)
 
 def index_instance(data):
-    """Displays the default instance to index to."""
     instance_name = None
     if "index-to" in data:
         instance_name = data["index-to"]
@@ -272,75 +233,64 @@ def index_instance(data):
         print(instance_name)
 
 def instance_cdmver_opt(data, name):
-    """Displays common-data-model version for a specific instance."""
     instance_obj = find_instance(data["instances"], name)
     if instance_obj != None:
         print("--ver " + instance_obj["cdmver"])
 
-
 def gendocs_opt(data):
-    """Displays cmdline options to be passed to document generation (in project rickshaw)."""
-    cmdline = ""
-    instance_name = None
     if "index-to" in data:
         instance_cdmver_opt(data, data["index-to"])
 
 def main():
-    """Main function to parse arguments and dispatch actions."""
     global write_required
     parser = argparse.ArgumentParser(
-        description="Manage instances in a JSON configuration file.",
-        prog="manage_instances.py"
+        description="Manage OpenSearch instances in the Crucible services configuration file.",
+        prog="manage_opensearch.py"
     )
     parser.add_argument(
         '--cfg',
         type=str,
         required=True,
-        help='Path to the JSON configuration file (required).'
+        help='Path to the services.json configuration file (required).'
     )
 
-    # Create subparsers for actions
     subparsers = parser.add_subparsers(dest='action', required=True, title='actions',
                                        description='Valid actions:', help='Action to perform')
 
-    # --- Add action ---
-    parser_add = subparsers.add_parser('add', help='Add a new instance to the configuration.')
+    parser_add = subparsers.add_parser('add', help='Add a new OpenSearch instance.')
     parser_add.add_argument('--name', type=str, required=True, help='Name of the instance.')
     parser_add.add_argument('--host', type=str, required=True, help='Host of the instance.')
     parser_add.add_argument('--cdmver', type=str, required=True, help='CDM version of the instance.')
-    parser_add.add_argument('--userpass', type=str, nargs='?', const="", default=None, help='Optional user/password file path.')
+    parser_add.add_argument('--userpass', type=str, nargs='?', const="", default=None, help='Optional user/password credentials.')
     parser_add.add_argument('--query', action='store_true', help='Also adds the instance name to "query-from".')
     parser_add.add_argument('--index', action='store_true', help='Also sets "index-to" to this instance name.')
 
-    # --- Remove action ---
-    parser_remove = subparsers.add_parser('remove', help='Remove an instance from the configuration by name.')
+    parser_remove = subparsers.add_parser('remove', help='Remove an OpenSearch instance by name.')
     parser_remove.add_argument('--name', type=str, required=True, help='Name of the instance to remove.')
 
-    # --- Update action ---
-    parser_update = subparsers.add_parser('update', help='Update an existing instance.')
+    parser_update = subparsers.add_parser('update', help='Update an existing OpenSearch instance.')
     parser_update.add_argument('--name', type=str, required=True, help='Name of the instance to update.')
     parser_update.add_argument('--host', type=str, help='New host for the instance.')
     parser_update.add_argument('--cdmver', type=str, help='New CDM version for the instance.')
-    parser_update.add_argument('--userpass', type=str, nargs='?', const="", default=None, help='New user/password file path. Use --remove-userpass to clear.')
+    parser_update.add_argument('--userpass', type=str, nargs='?', const="", default=None, help='New user/password credentials. Use --remove-userpass to clear.')
     parser_update.add_argument('--remove-userpass', action='store_true', help='Removes the userpass field.')
     parser_update.add_argument('--query', action='store_true', help='Adds/ensures the instance name is in "query-from".')
     parser_update.add_argument('--no-query', action='store_true', help='Removes the instance name from "query-from".')
     parser_update.add_argument('--index', action='store_true', help='Sets "index-to" to this instance name.')
 
-    # --- Info action ---
-    parser_info = subparsers.add_parser('info', help='Display the current configuration from the JSON file.')
+    subparsers.add_parser('info', help='Display the current OpenSearch configuration.')
 
-    parser_queryopt = subparsers.add_parser('query-opt', help='Display the cmdline options to pass to query utils.')
+    subparsers.add_parser('query-opt', help='Display the cmdline options to pass to query utils.')
 
-    parser_indexinstance = subparsers.add_parser('index-instance', help='Display the default instance to index to.')
+    subparsers.add_parser('index-instance', help='Display the default instance to index to.')
 
-    parser_gethostaccss = subparsers.add_parser('instance-host-access-opt', help='Display the host access options for a specific instance.')
-    parser_gethostaccss.add_argument('--name', type=str, required=True, help='Name of the instance.')
+    parser_gethostaccess = subparsers.add_parser('instance-host-access-opt', help='Display the host access options for a specific instance.')
+    parser_gethostaccess.add_argument('--name', type=str, required=True, help='Name of the instance.')
 
     parser_getcdmver = subparsers.add_parser('instance-cdmver-opt', help='Display the CDM version for a specific instance.')
-    parser_getcdmver.add_argument('--name', type=str, required=True, help='Name of the instance')
+    parser_getcdmver.add_argument('--name', type=str, required=True, help='Name of the instance.')
 
-    parser_listinstancenames = subparsers.add_parser('list-instance-names', help='Display a list of all instance names.')
+    subparsers.add_parser('list-instance-names', help='Display a list of all instance names.')
 
     args = parser.parse_args()
 
@@ -348,29 +298,22 @@ def main():
     data = load_json_data(config_filepath)
 
     if args.action == 'add':
-        # argparse for subparser 'add' already handles required fields like name, host, cdmver
         if add_instance(data, args.name, args.host, args.cdmver, args.userpass, args.query, args.index):
             write_required = True
     elif args.action == 'remove':
-        # argparse for subparser 'remove' already handles required field name
         if remove_instance(data, args.name):
             write_required = True
     elif args.action == 'update':
-        # argparse for subparser 'update' already handles required field name
         update_action_specified = any([
             args.host is not None,
             args.cdmver is not None,
-            args.userpass is not None, # This will be true if --userpass is present, even if it's the const ""
+            args.userpass is not None,
             args.remove_userpass,
             args.index,
             args.query,
             args.no_query
         ])
         if not update_action_specified:
-            # This error should ideally be caught by making at least one of these options part of a required group
-            # within the subparser, but for simplicity, we check it here.
-            # Alternatively, the subparser itself could be made to require one of these.
-            # For now, this check suffices.
             parser_update.error("At least one update field (--host, --cdmver, --userpass, --remove-userpass, --index, --query) must be specified.")
 
         effective_userpass = args.userpass if not args.remove_userpass else None
@@ -378,27 +321,21 @@ def main():
             write_required = True
     elif args.action == 'info':
         display_info(config_filepath, data)
-
     elif args.action == 'query-opt':
         query_opt(data)
-
     elif args.action == 'index-instance':
         index_instance(data)
-
     elif args.action == 'gendocs-opt':
         gendocs_opt(data)
-
     elif args.action == 'instance-cdmver-opt':
         instance_cdmver_opt(data, args.name)
-
     elif args.action == 'instance-host-access-opt':
         instance_host_access_opt(data, args.name)
-
     elif args.action == 'list-instance-names':
         list_instance_names(data)
 
     if write_required:
-        print("writing config file");
+        print("writing config file")
         save_json_data(config_filepath, data)
 
 if __name__ == "__main__":

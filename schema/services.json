@@ -126,6 +126,66 @@
             "required": [
                 "monitor"
             ]
+        },
+        "opensearch": {
+            "description": "The opensearch object contains configuration for OpenSearch instances used for indexing and querying benchmark results. This replaces the former config/instances.json file.",
+            "type": "object",
+            "properties": {
+                "instances": {
+                    "description": "A list of OpenSearch instance definitions. Each instance specifies a host, CDM version, and optional authentication credentials.",
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "description": "A unique name identifying this OpenSearch instance",
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "host": {
+                                "description": "The hostname and port of the OpenSearch instance (e.g., 'localhost:9200')",
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "cdmver": {
+                                "description": "The Common Data Model version used by this instance (e.g., 'v8dev', 'v9dev')",
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "userpass": {
+                                "description": "Optional user:password credentials for authenticating with this OpenSearch instance",
+                                "type": "string"
+                            }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                            "name",
+                            "host",
+                            "cdmver"
+                        ]
+                    }
+                },
+                "index-to": {
+                    "description": "The name of the default instance used for indexing new benchmark results. Set to null if no default is configured.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "query-from": {
+                    "description": "A list of instance names that are available for querying results",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "instances",
+                "index-to",
+                "query-from"
+            ]
         }
     },
     "additionalProperties": false,
@@ -133,6 +193,7 @@
         "cdm-server",
         "httpd",
         "image-sourcing",
+        "opensearch",
         "valkey"
     ]
 }

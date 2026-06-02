@@ -31,7 +31,7 @@ Crucible is a container-based performance testing framework built primarily in B
 | Path | Purpose |
 |------|---------|
 | `bin/` | CLI entry point (`crucible`), command router (`_main`), shared library (`base`), and helper scripts |
-| `config/` | JSON configuration: `repos.json`, `services.json`, `registries.json`, `instances.json` |
+| `config/` | JSON configuration: `repos.json`, `services.json`, `registries.json` |
 | `schema/` | JSON schemas for validating config files |
 | `spec/` | Markdown specifications for config file formats and release tags |
 | `subprojects/` | Symlinks to active repo versions, organized by category (see below) |
