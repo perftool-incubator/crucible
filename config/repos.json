@@ -351,6 +351,16 @@
             }
         },
         {
+            "name": "ethtool",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-ethtool",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "examples",
             "type": "doc",
             "repository": "https://github.com/perftool-incubator/crucible-examples",
