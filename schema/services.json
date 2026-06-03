@@ -12,7 +12,7 @@
                     "type": "boolean"
                 },
                 "services": {
-                    "description": "A map of CPU architecture to image sourcing service configuration. Each key is an architecture name (e.g., 'x86_64', 'aarch64') or the special value 'default' which is resolved to the host's native architecture during install/update. Services with 'start' set to true are started locally; non-native architectures are started under QEMU emulation.",
+                    "description": "A map of CPU architecture to image sourcing service configuration. Each key is an architecture name (e.g., 'x86_64', 'aarch64') or the special value 'default' which is resolved to the host's native architecture at runtime. Services with 'start' set to true are started locally; non-native architectures must use a remote service with start set to false.",
                     "type": "object",
                     "minProperties": 1,
                     "patternProperties": {

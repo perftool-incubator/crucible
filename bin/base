@@ -309,19 +309,41 @@ function stop_valkey() {
     return ${RC}
 }
 
+function get_image_sourcing_arches() {
+    local native_arch config_key
+    native_arch=$(uname -m)
+    for config_key in $(jq_query ${SERVICES_CFG} '."image-sourcing".services | keys[]'); do
+        if [ "${config_key}" == "default" ]; then
+            echo "${native_arch}"
+        else
+            echo "${config_key}"
+        fi
+    done
+}
+
+function get_image_sourcing_config_key() {
+    local arch=${1}
+    if jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\"" | grep -q "null"; then
+        echo "default"
+    else
+        echo "${arch}"
+    fi
+}
+
 function start_image_sourcing() {
     local image_sourcing_start_cmd image_sourcing_status_cmd
     local image_sourcing_available image_sourcing_timeout
     local count RC
-    local arch arch_start arch_address arch_port arch_protocol
+    local arch config_key arch_start arch_address arch_port arch_protocol
     local container_name native_arch
 
     native_arch=$(uname -m)
 
     image_sourcing_start_cmd="${CRUCIBLE_HOME}/bin/services/start-image-sourcing.sh ${var_crucible}"
 
-    for arch in $(jq_query ${SERVICES_CFG} '."image-sourcing".services | keys[]'); do
-        arch_start=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".start")
+    for arch in $(get_image_sourcing_arches); do
+        config_key=$(get_image_sourcing_config_key ${arch})
+        arch_start=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${config_key}\".start")
         if [ "${arch_start}" != "true" ]; then
             continue
         fi
@@ -333,9 +355,9 @@ function start_image_sourcing() {
             return 1
         fi
 
-        arch_address=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.address")
-        arch_port=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.port")
-        arch_protocol=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.protocol")
+        arch_address=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${config_key}\".location.address")
+        arch_port=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${config_key}\".location.port")
+        arch_protocol=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${config_key}\".location.protocol")
 
         container_name="crucible-image-sourcing-${arch}"
 
@@ -350,7 +372,7 @@ function start_image_sourcing() {
                 jq_update_validated ${SERVICES_CFG} \
                                     ${SERVICES_CFG_SCHEMA} \
                                     "services:image-sourcing-${arch}-port-search" \
-                                    --arg arch "${arch}" \
+                                    --arg arch "${config_key}" \
                                     ".\"image-sourcing\".services[\$arch].location.port = ${actual_port}"
                 arch_port=${actual_port}
             fi
@@ -394,7 +416,7 @@ function stop_image_sourcing() {
     local RC arch container_name
     RC=0
 
-    for arch in $(jq_query ${SERVICES_CFG} '."image-sourcing".services | keys[]'); do
+    for arch in $(get_image_sourcing_arches); do
         container_name="crucible-image-sourcing-${arch}"
         echo -n "Checking for ${arch} image-sourcing service"
         if podman_running ${container_name}; then

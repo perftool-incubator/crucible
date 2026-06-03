@@ -371,10 +371,11 @@ elif [ "${1}" == "run" ]; then
         # Build per-architecture URL mapping and write to run config
         urls_json="{"
 
-        for arch in $(jq_query ${SERVICES_CFG} '."image-sourcing".services | keys[]'); do
-            arch_address=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.address")
-            arch_port=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.port")
-            arch_protocol=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${arch}\".location.protocol")
+        for arch in $(get_image_sourcing_arches); do
+            config_key=$(get_image_sourcing_config_key ${arch})
+            arch_address=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${config_key}\".location.address")
+            arch_port=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${config_key}\".location.port")
+            arch_protocol=$(jq_query ${SERVICES_CFG} ".\"image-sourcing\".services.\"${config_key}\".location.protocol")
             arch_url="${arch_protocol}://${arch_address}:${arch_port}"
 
             echo "Using ${arch} image-sourcing service @ ${arch_url}"

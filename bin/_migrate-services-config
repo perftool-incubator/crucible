@@ -7,9 +7,9 @@
 #
 # It handles three migration cases (applied in order):
 #   1. Old flat format (location/start/use directly under image-sourcing)
-#      → converted to per-arch services map with native arch as the key
-#   2. New format with "default" placeholder key
-#      → "default" replaced with the host's native architecture
+#      → converted to per-arch services map with "default" as the key
+#   2. Previously resolved native arch key (e.g., "x86_64") without "default"
+#      → renamed back to "default" for portability
 #   3. Standalone instances.json exists
 #      → merged into services.json under the "opensearch" key
 
@@ -34,8 +34,6 @@ fi
 # when this migration script runs.  Use raw jq here; schema validation
 # happens later when bin/base loads and validates the config.
 
-native_arch=$(uname -m)
-
 # Check if this is the old flat format (has image-sourcing.location at top level)
 has_old_format=$(jq -r '."image-sourcing" | has("location")' ${SERVICES_CFG})
 
@@ -49,7 +47,7 @@ if [ "${has_old_format}" == "true" ]; then
     old_protocol=$(jq -r '."image-sourcing".location.protocol' ${SERVICES_CFG})
     old_use=$(jq -r '."image-sourcing".use' ${SERVICES_CFG})
 
-    jq --indent 4 --arg arch "${native_arch}" \
+    jq --indent 4 \
        --argjson start "${old_start}" \
        --arg address "${old_address}" \
        --argjson port "${old_port}" \
@@ -58,7 +56,7 @@ if [ "${has_old_format}" == "true" ]; then
        '."image-sourcing" = {
            "use": $use,
            "services": {
-               ($arch): {
+               "default": {
                    "start": $start,
                    "location": {
                        "address": $address,
@@ -69,22 +67,25 @@ if [ "${has_old_format}" == "true" ]; then
            }
        }' ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
 
-    echo "Migrated image-sourcing config to per-architecture format with key '${native_arch}'"
+    echo "Migrated image-sourcing config to per-architecture format with key 'default'"
     exit 0
 fi
 
-# Check if the new format has a "default" key that needs to be resolved
+# If a previous migration resolved "default" to the native architecture,
+# convert it back to "default" so the config file stays portable.
+native_arch=$(uname -m)
+has_native=$(jq -r --arg arch "${native_arch}" '."image-sourcing".services | has($arch)' ${SERVICES_CFG} 2>/dev/null)
 has_default=$(jq -r '."image-sourcing".services | has("default")' ${SERVICES_CFG} 2>/dev/null)
 
-if [ "${has_default}" == "true" ]; then
-    echo "Resolving 'default' image-sourcing service key to '${native_arch}'..."
+if [ "${has_native}" == "true" -a "${has_default}" != "true" ]; then
+    echo "Converting resolved '${native_arch}' image-sourcing key back to 'default'..."
 
     jq --indent 4 --arg arch "${native_arch}" \
-       '."image-sourcing".services[$arch] = ."image-sourcing".services["default"] |
-        del(."image-sourcing".services["default"])' \
+       '."image-sourcing".services["default"] = ."image-sourcing".services[$arch] |
+        del(."image-sourcing".services[$arch])' \
        ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
 
-    echo "Resolved 'default' to '${native_arch}'"
+    echo "Converted '${native_arch}' to 'default'"
 fi
 
 # Migrate instances.json into the opensearch section of services.json
