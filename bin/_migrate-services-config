@@ -2,14 +2,16 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
-# Migrate config/services.json to the per-architecture image-sourcing format.
+# Migrate config/services.json through all pending format changes.
 # This script is idempotent and safe to run multiple times.
 #
-# It handles two cases:
+# It handles three migration cases (applied in order):
 #   1. Old flat format (location/start/use directly under image-sourcing)
 #      → converted to per-arch services map with native arch as the key
 #   2. New format with "default" placeholder key
 #      → "default" replaced with the host's native architecture
+#   3. Standalone instances.json exists
+#      → merged into services.json under the "opensearch" key
 
 . /etc/sysconfig/crucible
 
@@ -27,6 +29,11 @@ if [ ! -f "${SERVICES_CFG}" ]; then
     exit 0
 fi
 
+# jqlib functions (jq_update, jq_update_validated) depend on exit_error
+# and validate_json_schema from bin/base, which has not been sourced yet
+# when this migration script runs.  Use raw jq here; schema validation
+# happens later when bin/base loads and validates the config.
+
 native_arch=$(uname -m)
 
 # Check if this is the old flat format (has image-sourcing.location at top level)
@@ -42,7 +49,6 @@ if [ "${has_old_format}" == "true" ]; then
     old_protocol=$(jq -r '."image-sourcing".location.protocol' ${SERVICES_CFG})
     old_use=$(jq -r '."image-sourcing".use' ${SERVICES_CFG})
 
-    # Rewrite the image-sourcing section in place
     jq --indent 4 --arg arch "${native_arch}" \
        --argjson start "${old_start}" \
        --arg address "${old_address}" \
@@ -79,7 +85,22 @@ if [ "${has_default}" == "true" ]; then
        ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
 
     echo "Resolved 'default' to '${native_arch}'"
-    exit 0
+fi
+
+# Migrate instances.json into the opensearch section of services.json
+INSTANCES_CFG=${CRUCIBLE_HOME}/config/instances.json
+
+if [ -f "${INSTANCES_CFG}" ]; then
+    echo "Migrating instances.json into services.json opensearch section..."
+
+    instances_content=$(cat ${INSTANCES_CFG})
+
+    jq --indent 4 --argjson instances "${instances_content}" \
+       '.opensearch = $instances' \
+       ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
+
+    mv ${INSTANCES_CFG} ${INSTANCES_CFG}.migrated
+    echo "Migration complete: instances.json content merged into services.json and original renamed to instances.json.migrated"
 fi
 
 # Already migrated — silent exit

@@ -540,7 +540,7 @@ function start_cdm_server() {
         fi
 
         # Get the OpenSearch connection options (--host, --userpass, --ver)
-        cdm_query_opt=$(run_manage_instances query-opt)
+        cdm_query_opt=$(run_manage_opensearch query-opt)
         cdm_server_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/start-server.sh ${cdm_query_opt}"
 
         open_firewall_port ${cdm_server_port} tcp
@@ -625,7 +625,7 @@ function extract_primary_periods() {
     shift
     RUN_ID=$(extract_run_id ${RUN_DIR})
 
-    cdm_query_opt=$(run_manage_instances query-opt)
+    cdm_query_opt=$(run_manage_opensearch query-opt)
     cdm_query_cmd="${CRUCIBLE_HOME}/subprojects/core/CommonDataModel/queries/cdmq/get-primary-periods.sh $cdm_query_opt --run ${RUN_ID}"
     ${podman_run} --name crucible-get-primary-periods-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_query_cmd}
     RC=$?
@@ -1143,15 +1143,15 @@ function validate_json_schema() {
 export TOOLBOX_HOME=${CRUCIBLE_HOME}/subprojects/core/toolbox
 export RICKSHAW_HOME=${CRUCIBLE_HOME}/subprojects/core/rickshaw
 
-# Helper function to run manage_instances.py with common container args
-function run_manage_instances() {
+# Helper function to run manage_opensearch.py with common container args
+function run_manage_opensearch() {
     ${podman_run} \
-        --name crucible-manage-instances--${SESSION_ID} \
+        --name crucible-manage-opensearch--${SESSION_ID} \
         ${container_common_args[@]} \
         ${container_non_service_args[@]} \
         ${CRUCIBLE_CONTROLLER_IMAGE} \
-        ${CRUCIBLE_HOME}/bin/manage_instances.py \
-        --cfg ${INSTANCES_CFG} \
+        ${CRUCIBLE_HOME}/bin/manage_opensearch.py \
+        --cfg ${SERVICES_CFG} \
         "$@"
 }
 
@@ -1177,18 +1177,18 @@ function get_instance_metadata() {
 
     if [ -z "${specified_instance}" ]; then
         # Get the default instance
-        instance=$(run_manage_instances index-instance)
+        instance=$(run_manage_opensearch index-instance)
     else
         instance="${specified_instance}"
     fi
 
-    cdmver_opt=$(run_manage_instances instance-cdmver-opt --name ${instance})
+    cdmver_opt=$(run_manage_opensearch instance-cdmver-opt --name ${instance})
     if [ -z "${cdmver_opt}" ]; then
         echo "ERROR: CDM version informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
         return 1
     fi
 
-    access_opt=$(run_manage_instances instance-host-access-opt --name ${instance})
+    access_opt=$(run_manage_opensearch instance-host-access-opt --name ${instance})
     if [ -z "${access_opt}" ]; then
         echo "ERROR: access informaiton for Opensearch instance ${instance} was empty.  Did you use a valid instance?"
         return 1
@@ -1302,7 +1302,6 @@ SERVICES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/services.json
 if [ -x ${CRUCIBLE_HOME}/bin/_migrate-services-config ]; then
     ${CRUCIBLE_HOME}/bin/_migrate-services-config
 fi
-INSTANCES_CFG=${CRUCIBLE_HOME}/config/instances.json
 REGISTRIES_CFG=${CRUCIBLE_HOME}/config/registries.json
 REGISTRIES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/registries.json
 
@@ -1391,9 +1390,4 @@ if [ -e ${REGISTRIES_CFG} ]; then
     fi
 else
     exit_error "Could not locate ${REGISTRIES_CFG}"
-fi
-
-# If the instances.json is missing, generate the default one
-if [ ! -e ${INSTANCES_CFG} ]; then
-    run_manage_instances info >/dev/null
 fi

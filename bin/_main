@@ -40,13 +40,19 @@ elif [ "${1}" == "ls" -o "${1}" == "tags" -o "${1}" == "result-completion" ]; th
             EXIT_VAL=$?
             ;;
     esac
-elif [ "${1}" == "instances" ]; then
+elif [ "${1}" == "opensearch" ]; then
     shift
-    if [ -z "${1}" ]; then
-        run_manage_instances info
+    if [ "${1}" == "repair" ]; then
+        if start_opensearch; then
+            repair_opensearch
+        else
+            EXIT_VAL=$?
+        fi
+    elif [ -z "${1}" ]; then
+        run_manage_opensearch info
         EXIT_VAL=$?
     else
-        run_manage_instances "$@"
+        run_manage_opensearch "$@"
         EXIT_VAL=$?
     fi
 elif [ "${1}" == "registries" ]; then
@@ -242,15 +248,6 @@ elif [ "${1}" == "extract" ]; then
             EXIT_VAL=1
             ;;
     esac
-elif [ "${1}" == "opensearch" ]; then
-    shift
-    if start_opensearch; then
-        if [ "${1}" == "repair" ]; then
-            repair_opensearch
-        fi
-    else
-        EXIT_VAL=$?
-    fi
 elif [ "${1}" == "postprocess" ]; then
     shift
     base_run_dir=$(echo "$@" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
