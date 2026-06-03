@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=forking
 EnvironmentFile=/etc/sysconfig/crucible
-ExecStart=${CRUCIBLE_HOME}/bin/crucible start image-sourcing
-ExecStop=${CRUCIBLE_HOME}/bin/crucible stop image-sourcing
+ExecStart=__CRUCIBLE_HOME__/bin/crucible start image-sourcing
+ExecStop=__CRUCIBLE_HOME__/bin/crucible stop image-sourcing
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=120

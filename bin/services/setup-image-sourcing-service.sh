@@ -24,7 +24,7 @@ case "${action}" in
     install)
         echo "Installing ${SERVICE_NAME} systemd service..."
 
-        cp "${UNIT_FILE}" "${SYSTEMD_DIR}/${SERVICE_NAME}.service"
+        sed "s|__CRUCIBLE_HOME__|${CRUCIBLE_HOME}|g" "${UNIT_FILE}" > "${SYSTEMD_DIR}/${SERVICE_NAME}.service"
         systemctl daemon-reload
         systemctl enable "${SERVICE_NAME}"
 
