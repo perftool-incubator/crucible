@@ -67,6 +67,13 @@ fi
 
 case "${repo}" in
     "all"|"crucible"|"controller-image")
+        if systemctl is-enabled crucible-image-sourcing 2>/dev/null &&
+           systemctl is-active crucible-image-sourcing 2>/dev/null; then
+            echo "Stopping crucible-image-sourcing systemd service for update..."
+            systemctl stop crucible-image-sourcing
+            touch /tmp/.crucible-restart-image-sourcing
+        fi
+
         echo
         echo "Shutting down existing controller pods:"
         echo
@@ -223,6 +230,12 @@ echo
 ${CRUCIBLE_HOME}/bin/repo info
 echo
 ${CRUCIBLE_HOME}/bin/repo config show
+
+if [ -f /tmp/.crucible-restart-image-sourcing ]; then
+    rm -f /tmp/.crucible-restart-image-sourcing
+    echo "Restarting crucible-image-sourcing systemd service after update..."
+    systemctl start crucible-image-sourcing
+fi
 
 if [ ${RC} != 0 ]; then
     echo

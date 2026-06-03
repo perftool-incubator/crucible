@@ -1,0 +1,17 @@
+[Unit]
+Description=Crucible Image Sourcing Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+EnvironmentFile=/etc/sysconfig/crucible
+ExecStart=__CRUCIBLE_HOME__/bin/crucible start image-sourcing
+ExecStop=__CRUCIBLE_HOME__/bin/crucible stop image-sourcing
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
