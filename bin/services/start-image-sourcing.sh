@@ -4,5 +4,7 @@
 
 log_base="$1"
 
+mkdir -p ${log_base}/logs
+
 python3 -m source_images_service.main 2>&1 \
     | tee ${log_base}/logs/image-sourcing.log
