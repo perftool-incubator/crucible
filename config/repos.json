@@ -361,6 +361,16 @@
             }
         },
         {
+            "name": "dpdk",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-dpdk",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "examples",
             "type": "doc",
             "repository": "https://github.com/perftool-incubator/crucible-examples",
