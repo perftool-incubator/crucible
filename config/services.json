@@ -8,7 +8,7 @@
     "image-sourcing": {
         "use": true,
         "services": {
-            "x86_64": {
+            "default": {
                 "start": true,
                 "location": {
                     "address": "localhost",
