@@ -49,6 +49,15 @@ Defined in `config/repos.json` with categories:
 
 Each entry in `repos.json` has: `name`, `type`, `repository`, `primary-branch`, and `checkout` config.
 
+## Creating New Benchmarks and Tools
+
+When a user asks to create a new benchmark or tool, consult the implementation guides in `docs/` before writing any code:
+
+- **`docs/implementing-a-new-benchmark.md`** — Complete guide for creating a new benchmark: required files (`rickshaw.json`, `workshop.json`, scripts), rickshaw.json schema, client-server messaging, post-processing with the toolbox metrics API, multiplex.json parameter definitions, CPU partitioning support, and reference implementations by complexity level.
+- **`docs/implementing-a-new-tool.md`** — Complete guide for creating a new tool (passive data collector): required files (`rickshaw.json`, `workshop.json`, start/stop/post-process scripts), collector whitelist/blacklist configuration, tool parameter handling, and reference implementations.
+
+These guides define the required file structure, naming conventions, JSON schemas, script patterns, and integration points. Follow them rather than inferring structure from existing code alone.
+
 ## Common Commands
 
 ```bash
