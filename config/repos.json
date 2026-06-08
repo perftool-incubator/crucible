@@ -361,6 +361,16 @@
             }
         },
         {
+            "name": "ebpf-dpdk",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-ebpf-dpdk",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "dpdk",
             "type": "tool",
             "repository": "https://github.com/perftool-incubator/tool-dpdk",
