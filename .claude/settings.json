@@ -20,7 +20,17 @@
             "Bash(cd * && git log*)",
             "Bash(cd * && git show*)",
             "Bash(cd * && git fetch*)",
-            "Bash(cd * && grep *)"
+            "Bash(cd * && grep *)",
+            "Bash(git status *)",
+            "Bash(git log *)",
+            "Bash(git diff *)",
+            "Bash(git show *)",
+            "Bash(git branch *)",
+            "Bash(git stash list *)",
+            "Bash(git fetch *)",
+            "Bash(python3 -m py_compile *)",
+            "Bash(find *)",
+            "Bash(grep *)"
         ]
     }
 }

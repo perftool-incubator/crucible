@@ -4,3 +4,4 @@ config/instances.json
 config/registries.json
 config/valkey_pass
 bin/_logger_lib/__pycache__/
+.claude/settings.local.json
