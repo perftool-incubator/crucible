@@ -346,7 +346,8 @@ use toolbox::metrics;
 ### Output format
 
 The post-process script must write `post-process-data.json` to the
-current directory:
+`postprocess/` subdirectory. The toolbox metrics library automatically
+writes metric-data files there as well:
 
 ```json
 {
@@ -404,7 +405,8 @@ def main():
             'metric-files': [metric_file_name]
         }]
     }
-    with open('post-process-data.json', 'w') as f:
+    os.makedirs('postprocess', exist_ok=True)
+    with open('postprocess/post-process-data.json', 'w') as f:
         json.dump(output, f)
 
 if __name__ == "__main__":
@@ -440,7 +442,7 @@ coordinated by roadblock synchronization:
 2. For each iteration/sample/collector combination, the controller
    runs the tool's `post-script` in that sample's output directory
 3. Post-process script reads compressed raw output, calls
-   `log_sample` / `finish_samples`, writes `post-process-data.json`
+   `log_sample` / `finish_samples`, writes `postprocess/post-process-data.json`
 4. Rickshaw indexes the metrics into the result store
 
 ---
