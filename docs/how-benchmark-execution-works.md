@@ -10,6 +10,8 @@ For instructions on creating a new benchmark, see
 [implementing-a-new-benchmark.md](implementing-a-new-benchmark.md).
 For how tool collection works alongside benchmarks, see
 [how-tool-collection-works.md](how-tool-collection-works.md).
+For how results are stored and queried, see
+[how-cdm-works.md](how-cdm-works.md).
 
 ## Overview
 

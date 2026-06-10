@@ -9,6 +9,10 @@ For how the image-sourcing service builds images, see
 [how-image-sourcing-works.md](how-image-sourcing-works.md).
 For how roadblock uses the valkey service, see
 [how-roadblock-works.md](how-roadblock-works.md).
+For how the controller image contains these services, see
+[how-the-controller-image-works.md](how-the-controller-image-works.md).
+For how crucible captures command output, see
+[how-the-logger-works.md](how-the-logger-works.md).
 
 ## Overview
 
