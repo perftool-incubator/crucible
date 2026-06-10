@@ -49,12 +49,33 @@ Defined in `config/repos.json` with categories:
 
 Each entry in `repos.json` has: `name`, `type`, `repository`, `primary-branch`, and `checkout` config.
 
-## Creating New Benchmarks and Tools
+## Documentation
 
-When a user asks to create a new benchmark or tool, consult the implementation guides in `docs/` before writing any code:
+The `docs/` directory contains detailed guides for how each crucible subsystem operates. Consult these when working on, debugging, or analyzing any part of the framework.
 
-- **`docs/implementing-a-new-benchmark.md`** — Complete guide for creating a new benchmark: required files (`rickshaw.json`, `workshop.json`, scripts), rickshaw.json schema, client-server messaging, post-processing with the toolbox metrics API, multiplex.json parameter definitions, CPU partitioning support, and reference implementations by complexity level.
-- **`docs/implementing-a-new-tool.md`** — Complete guide for creating a new tool (passive data collector): required files (`rickshaw.json`, `workshop.json`, start/stop/post-process scripts), collector whitelist/blacklist configuration, tool parameter handling, and reference implementations.
+### Architecture and subsystem guides
+
+- **`docs/crucible-architecture-overview.md`** — High-level overview of all components and how they fit together. Start here.
+- **`docs/how-benchmark-execution-works.md`** — Parameter expansion, engine deployment, synchronized execution, periods, and result generation.
+- **`docs/how-tool-collection-works.md`** — Tool lifecycle, collection models, deployment, and how CDM queries extract tool data by time range.
+- **`docs/how-engines-work.md`** — Bootstrap, execution phases, files-from-controller, CPU partitioning, data archival.
+- **`docs/how-endpoints-work.md`** — Remotehosts, kube, and osp endpoint types, validation, deployment, service discovery.
+- **`docs/how-image-sourcing-works.md`** — The multi-stage image build pipeline, content-based tagging, multi-architecture support.
+- **`docs/how-roadblock-works.md`** — Distributed synchronization, barrier protocol, messaging, wait-for mechanism.
+- **`docs/how-cdm-works.md`** — Document hierarchy, metric model, indexing pipeline, query system, web dashboard.
+- **`docs/how-services-work.md`** — Valkey, OpenSearch, httpd, CDM server, image-sourcing service management.
+- **`docs/how-the-controller-image-works.md`** — What the controller contains, how it's built, the automated build pipeline.
+- **`docs/how-the-repo-system-works.md`** — repos.json, cloning, symlink activation, updating, multi-fork support.
+- **`docs/how-releases-work.md`** — Quarterly releases, follow vs locked mode, set-release.
+- **`docs/how-ci-works.md`** — Workflow hierarchy, capability-based runner matching, release matrix testing.
+- **`docs/how-the-logger-works.md`** — Pipe-based output capture, SQLite storage, log viewing commands.
+
+### Implementation guides
+
+When creating new benchmarks or tools, consult these before writing any code:
+
+- **`docs/implementing-a-new-benchmark.md`** — Required files, rickshaw.json schema, client-server messaging, post-processing, multiplex.json, and reference implementations.
+- **`docs/implementing-a-new-tool.md`** — Required files, collector whitelist/blacklist, tool parameters, and reference implementations.
 
 These guides define the required file structure, naming conventions, JSON schemas, script patterns, and integration points. Follow them rather than inferring structure from existing code alone.
 
