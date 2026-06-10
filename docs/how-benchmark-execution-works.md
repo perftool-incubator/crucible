@@ -79,6 +79,12 @@ set-specific parameters).
 }
 ```
 
+Run files are validated against `rickshaw/schema/run-file.json`
+before execution begins. Each benchmark's `rickshaw.json` is
+validated against `rickshaw/schema/benchmark.json`. These
+schemas enforce valid parameter structures, endpoint
+configurations, and benchmark integration fields.
+
 ### Structure and fields
 
 **global-options** (required): An array of named parameter groups.

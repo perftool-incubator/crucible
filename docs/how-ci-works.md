@@ -153,8 +153,8 @@ capabilities rather than hardcoded runner types.
 
 ### Configuration
 
-The `crucible-ci.json` file (in rickshaw's `util/` directory)
-defines:
+The `crucible-ci.json` file (in rickshaw's `util/` directory,
+validated against `rickshaw/schema/crucible-ci.json`) defines:
 
 - **Capabilities**: A dictionary of valid capability names
   with descriptions (e.g., `k8s-cluster`,

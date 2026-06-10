@@ -224,8 +224,10 @@ and kernel trace data.
 ## Tool deployment: where tools run
 
 Tools deploy to specific node types based on their `rickshaw.json`
-collector configuration. Each tool defines a whitelist (where it
-should run) and a blacklist (where it should not run).
+collector configuration, which is validated against
+`rickshaw/schema/tool.json`. Each tool defines a whitelist
+(where it should run) and a blacklist (where it should not
+run).
 
 ### Collector types
 

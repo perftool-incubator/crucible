@@ -117,8 +117,9 @@ OpenSearch indices
 
 ### Document generation
 
-`rickshaw-gen-docs.py` reads the post-processing output and
-generates OpenSearch documents:
+`rickshaw-gen-docs.py` reads the post-processing output
+(validated against `rickshaw/schema/bench-metric.json`)
+and generates OpenSearch documents:
 
 1. Creates **run**, **tag**, and **param** documents from
    the run configuration

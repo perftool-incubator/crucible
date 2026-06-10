@@ -78,6 +78,10 @@ source-images-service runs inside the controller container
 and may not have direct access to the host filesystem, so
 everything must be transmitted via the API.
 
+The API request is validated against
+`rickshaw/schema/source-images-input.json` and the response
+against `rickshaw/schema/source-images-output.json`.
+
 After submitting the job, the bridge polls for completion
 with adaptive intervals (faster initially, slowing over
 time). It streams build logs to stdout so the user can
@@ -108,6 +112,10 @@ multiple OS distributions with distribution-specific package
 names or build procedures.
 
 ### Requirement types
+
+Workshop.json files are validated against the workshop schema
+(`workshop/schema.json`). The schema enforces valid userenv
+definitions and requirement structures.
 
 Workshop.json supports several requirement types:
 

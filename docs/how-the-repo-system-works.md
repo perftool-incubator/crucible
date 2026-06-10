@@ -296,4 +296,7 @@ crucible repo config update \
 ```
 
 All configuration changes are validated against the
-`schema/repos.json` schema before being saved.
+`schema/repos.json` JSON schema before being saved. The
+schema enforces valid repo types, checkout modes, branch
+names, and URL formats, preventing misconfiguration that
+could break the update or install process.

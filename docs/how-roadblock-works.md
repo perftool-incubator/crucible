@@ -342,7 +342,8 @@ with consumer group semantics. This ensures:
 
 ### Timeout settings
 
-Timeouts are configured in `rickshaw-settings.json`:
+Timeouts are configured in `rickshaw-settings.json`
+(validated against `rickshaw/schema/rickshaw-settings.json`):
 
 ```json
 {

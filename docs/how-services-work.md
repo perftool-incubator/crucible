@@ -171,7 +171,12 @@ when services start and closed when they stop.
 ## Configuration
 
 All service configuration lives in `config/services.json`,
-which is validated against `schema/services.json`.
+which is validated against `schema/services.json`. The schema
+enforces valid port numbers, endpoint types, image-sourcing
+structure, and OpenSearch instance fields. Changes made via
+crucible commands are validated before being saved; manual
+edits should be checked with `crucible repo config show` to
+confirm validity.
 
 ### Structure
 

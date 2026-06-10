@@ -250,6 +250,12 @@ modification.
 }
 ```
 
+Endpoint configurations in run files are validated against
+endpoint-specific schemas (`rickshaw/schema/remotehosts.json`,
+`rickshaw/schema/kube.json`, `rickshaw/schema/osp.json`).
+The overall run file structure is validated against
+`rickshaw/schema/run-file.json`.
+
 Key settings:
 - `osruntime`: `"podman"` (default) or `"chroot"`
 - `cpu-partitioning`: Enable CPU isolation for latency-sensitive
