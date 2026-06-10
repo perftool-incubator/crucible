@@ -33,7 +33,24 @@ stages:
 
 ### 1. Configuration
 
-Tools are configured in the run file's `tool-params` section:
+Crucible includes a default tool set that runs automatically if
+the run file does not specify `tool-params`. The defaults are
+defined in `rickshaw/config/tool-params.json`:
+
+```json
+[
+    { "tool": "sysstat" },
+    { "tool": "procstat" }
+]
+```
+
+This means every run automatically collects CPU, memory, I/O,
+and process metrics via sysstat and procstat unless the user
+overrides or disables them.
+
+Users can customize the tool set by specifying `tool-params` in
+the run file. This replaces the defaults entirely — only the
+tools listed in the run file will run:
 
 ```json
 "tool-params": [
@@ -53,9 +70,13 @@ Tools are configured in the run file's `tool-params` section:
 ]
 ```
 
-Each tool entry specifies the tool name and parameters. Parameters
-become `--key value` arguments passed to the tool's start script.
-Tools can be disabled for a specific run by adding `"enabled": "no"`.
+Each tool entry specifies the tool name and optional parameters.
+Parameters become `--key value` arguments passed to the tool's
+start script. When no parameters are specified (as in the
+defaults), the tool uses its own built-in defaults.
+
+Tools can be disabled for a specific run by adding
+`"enabled": "no"`.
 
 ### 2. Deployment
 
