@@ -230,4 +230,5 @@ Available skills:
 - **Review requests**: When opening PRs, request review from the **Developers** team and self-assign the PR.
 - **Commit messages**: Use conventional commits format (`feat:`, `fix:`, `docs:`, etc.). Be precise and descriptive — prefer nuanced descriptions over broad generalizations.
 - **CLAUDE.md updates**: When making structural changes to a subproject, update that subproject's CLAUDE.md in the same PR. Claude should author CLAUDE.md content, not humans — the human role is review and approval.
+- **Documentation updates**: When making changes to any crucible repo that affect user-facing behavior, configuration, architecture, or workflows, check whether the `docs/` guides need corresponding updates. Consult the documentation index in the Documentation section above to identify which guides cover the affected area. Documentation must stay in sync with the code — treat stale docs as a bug. This applies to all repos in the organization, not just the crucible repo itself.
 - **Branch rulesets**: `.github/rulesets/` files are backups of configured rulesets, not authoritative. Do not read or modify them to determine required status checks.
