@@ -197,7 +197,7 @@ Image tags are SHA256 hashes of the stage's content:
 <registry>/<repo>:<hash>_<arch>
 ```
 
-For example: `quay.io/crucible/engines:a1b2c3d4e5f6_x86_64`
+For example: `<registry>/<repo>:a1b2c3d4e5f6_x86_64`
 
 ### How the hash is computed
 

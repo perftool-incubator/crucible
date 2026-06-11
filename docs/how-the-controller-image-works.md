@@ -173,7 +173,7 @@ Architecture-specific images use:
 ```
 
 For example:
-`quay.io/crucible/controller:2026-06-10_a1b2c3d4_x86_64`
+`<registry>/<repo>:2026-06-10_a1b2c3d4_x86_64`
 
 ### Tag management
 

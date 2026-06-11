@@ -155,9 +155,9 @@ benchmark::role::userenv::arch::image_url[::auth_file]
 
 Examples:
 ```
-uperf::all::rhubi9::x86_64::quay.io/crucible/engines:abc123_x86_64
-trafficgen::client::alma8::x86_64::quay.io/crucible/engines:def456_x86_64
-sysstat::all::fedora-latest::x86_64::quay.io/crucible/engines:ghi789_x86_64
+uperf::all::rhubi9::x86_64::<registry>/<repo>:abc123_x86_64
+trafficgen::client::alma8::x86_64::<registry>/<repo>:def456_x86_64
+sysstat::all::fedora-latest::x86_64::<registry>/<repo>:ghi789_x86_64
 ```
 
 The `role` field is `all` for standard benchmarks or
