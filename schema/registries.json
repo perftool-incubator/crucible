@@ -1,22 +1,29 @@
 {
+    "title": "Registries Configuration Schema",
+    "description": "Schema for crucible's registries.json configuration file.  Defines the container registries used for the controller image, engine images (public and optional private), and optional external userenv image sources.",
     "type": "object",
     "properties": {
 	"controller": {
+	    "description": "Configuration for the controller container image registry.  The controller image contains all software needed to orchestrate benchmark runs.",
 	    "type": "object",
 	    "properties": {
 		"url": {
+		    "description": "The full URL of the controller container image (e.g., 'quay.io/org/controller').",
 		    "type": "string",
 		    "minLength": 1
 		},
 		"tag": {
+		    "description": "The image tag to pull.  Typically 'latest' for upstream installations.",
 		    "type": "string",
 		    "minLength": 1
 		},
 		"pull-token": {
+		    "description": "The path to a Docker/Podman auth JSON file for pulling the controller image, if authentication is required.",
 		    "type": "string",
 		    "minLength": 1
 		},
 		"tls-verify": {
+		    "description": "Whether TLS certificate verification is enabled when pulling the controller image.",
 		    "type": "boolean"
 		}
 	    },
@@ -27,23 +34,29 @@
 	    ]
 	},
 	"engines": {
+	    "description": "Configuration for engine container image registries.  Engine images contain benchmark and tool software.  A public registry is required; a private registry is optional for authenticated environments.",
 	    "type": "object",
 	    "properties": {
 		"public": {
+		    "description": "The public engine registry configuration.  This is the primary registry where engine images are pushed to and pulled from.",
 		    "type": "object",
 		    "properties": {
 			"url": {
+			    "description": "The full repository URL for the public engine registry.",
 			    "type": "string",
 			    "minLength": 1
 			},
 			"push-token": {
+			    "description": "The path to a Docker/Podman auth JSON file for pushing engine images to this registry.",
 			    "type": "string",
 			    "minLength": 1
 			},
 			"tls-verify": {
+			    "description": "Whether TLS certificate verification is enabled for this registry.",
 			    "type": "boolean"
 			},
 			"quay": {
+			    "description": "Quay-specific configuration for managing image tag expirations.",
 			    "$ref": "#/definitions/quay"
 			}
 		    },
@@ -53,20 +66,25 @@
 		    ]
 		},
 		"private": {
+		    "description": "An optional private engine registry configuration for environments that require authenticated image pulls.",
 		    "type": "object",
 		    "properties": {
 			"url": {
+			    "description": "The full repository URL for the private engine registry.",
 			    "type": "string",
 			    "minLength": 1
 			},
 			"tokens": {
+			    "description": "Authentication token file paths for push and pull operations on the private registry.",
 			    "type": "object",
 			    "properties": {
 				"push": {
+				    "description": "The path to a Docker/Podman auth JSON file for pushing images.",
 				    "type": "string",
 				    "minLength": 1
 				},
 				"pull": {
+				    "description": "The path to a Docker/Podman auth JSON file for pulling images.",
 				    "type": "string",
 				    "minLength": 1
 				}
@@ -78,9 +96,11 @@
 			    ]
 			},
 			"tls-verify": {
+			    "description": "Whether TLS certificate verification is enabled for this registry.",
 			    "type": "boolean"
 			},
 			"quay": {
+			    "description": "Quay-specific configuration for managing image tag expirations.",
 			    "$ref": "#/definitions/quay"
 			}
 		    },
@@ -97,21 +117,26 @@
 	    ]
 	},
 	"userenvs": {
+	    "description": "An optional array of external userenv image sources.  These registries provide additional base container images beyond the built-in userenvs.",
 	    "type": "array",
 	    "uniqueItems": true,
 	    "minItems": 1,
 	    "items": {
+		"description": "An external userenv image source with its registry URL and authentication.",
 		"type": "object",
 		"properties": {
 		    "url": {
+			"description": "The registry URL where userenv images are stored.",
 			"type": "string",
 			"minLength": 1
 		    },
 		    "pull-token": {
+			"description": "The path to a Docker/Podman auth JSON file for pulling images from this userenv registry.",
 			"type": "string",
 			"minLength": 1
 		    },
 		    "tls-verify": {
+			"description": "Whether TLS certificate verification is enabled for this userenv registry.",
 			"type": "boolean"
 		    }
 		},
@@ -130,25 +155,31 @@
     ],
     "definitions": {
 	"quay": {
+	    "description": "Configuration for Quay.io-specific image tag expiration management.  Quay automatically deletes images after their expiration period, so crucible can refresh expirations to prevent cached images from being deleted.",
 	    "type": "object",
 	    "properties": {
 		"expiration-length": {
+		    "description": "The duration for image tag expiration, specified as a number followed by 'w' (weeks) or 'd' (days).  For example, '13w' means 13 weeks.",
 		    "type": "string",
 		    "minLength": 2,
 		    "pattern": "^[1-9][0-9]*[wd]$"
 		},
 		"refresh-expiration": {
+		    "description": "Configuration for automatically refreshing image tag expirations via the Quay API.",
 		    "type": "object",
 		    "properties": {
 			"token-file": {
+			    "description": "The file path containing the OAuth refresh token for authenticating with the Quay API.",
 			    "type": "string",
 			    "minLength": 1
 			},
 			"api-url": {
+			    "description": "The Quay API URL used for expiration management operations.",
 			    "type": "string",
 			    "minLength": 1
 			},
 			"require-success": {
+			    "description": "Whether a successful image push is required before refreshing the expiration timer.  When true, only images that were actually pushed get their expirations refreshed.",
 			    "type": "boolean"
 			}
 		    },
