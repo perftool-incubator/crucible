@@ -49,12 +49,35 @@ Defined in `config/repos.json` with categories:
 
 Each entry in `repos.json` has: `name`, `type`, `repository`, `primary-branch`, and `checkout` config.
 
-## Creating New Benchmarks and Tools
+## Documentation
 
-When a user asks to create a new benchmark or tool, consult the implementation guides in `docs/` before writing any code:
+The `docs/` directory contains detailed guides for how each crucible subsystem operates. Consult these when working on, debugging, or analyzing any part of the framework.
 
-- **`docs/implementing-a-new-benchmark.md`** — Complete guide for creating a new benchmark: required files (`rickshaw.json`, `workshop.json`, scripts), rickshaw.json schema, client-server messaging, post-processing with the toolbox metrics API, multiplex.json parameter definitions, CPU partitioning support, and reference implementations by complexity level.
-- **`docs/implementing-a-new-tool.md`** — Complete guide for creating a new tool (passive data collector): required files (`rickshaw.json`, `workshop.json`, start/stop/post-process scripts), collector whitelist/blacklist configuration, tool parameter handling, and reference implementations.
+### Architecture and subsystem guides
+
+- **`docs/crucible-architecture-overview.md`** — High-level overview of all components and how they fit together. Start here.
+- **`docs/how-the-installer-works.md`** — Installation, prerequisites, registry configuration, release installs.
+- **`docs/how-run-files-work.md`** — Run file structure: benchmarks, endpoints, parameters, tools, tags.
+- **`docs/how-benchmark-execution-works.md`** — Parameter expansion, engine deployment, synchronized execution, periods, and result generation.
+- **`docs/how-tool-collection-works.md`** — Tool lifecycle, collection models, deployment, and how CDM queries extract tool data by time range.
+- **`docs/how-engines-work.md`** — Bootstrap, execution phases, files-from-controller, CPU partitioning, data archival.
+- **`docs/how-endpoints-work.md`** — Remotehosts, kube, and osp endpoint types, validation, deployment, service discovery.
+- **`docs/how-image-sourcing-works.md`** — The multi-stage image build pipeline, content-based tagging, multi-architecture support.
+- **`docs/how-roadblock-works.md`** — Distributed synchronization, barrier protocol, messaging, wait-for mechanism.
+- **`docs/how-cdm-works.md`** — Document hierarchy, metric model, indexing pipeline, query system, web dashboard.
+- **`docs/how-services-work.md`** — Valkey, OpenSearch, httpd, CDM server, image-sourcing service management.
+- **`docs/how-the-controller-image-works.md`** — What the controller contains, how it's built, the automated build pipeline.
+- **`docs/how-the-repo-system-works.md`** — repos.json, cloning, symlink activation, updating, multi-fork support.
+- **`docs/how-releases-work.md`** — Quarterly releases, follow vs locked mode, set-release.
+- **`docs/how-ci-works.md`** — Workflow hierarchy, capability-based runner matching, release matrix testing.
+- **`docs/how-the-logger-works.md`** — Pipe-based output capture, SQLite storage, log viewing commands.
+
+### Implementation guides
+
+When creating new benchmarks or tools, consult these before writing any code:
+
+- **`docs/implementing-a-new-benchmark.md`** — Required files, rickshaw.json schema, client-server messaging, post-processing, multiplex.json, and reference implementations.
+- **`docs/implementing-a-new-tool.md`** — Required files, collector whitelist/blacklist, tool parameters, and reference implementations.
 
 These guides define the required file structure, naming conventions, JSON schemas, script patterns, and integration points. Follow them rather than inferring structure from existing code alone.
 
@@ -207,4 +230,5 @@ Available skills:
 - **Review requests**: When opening PRs, request review from the **Developers** team and self-assign the PR.
 - **Commit messages**: Use conventional commits format (`feat:`, `fix:`, `docs:`, etc.). Be precise and descriptive — prefer nuanced descriptions over broad generalizations.
 - **CLAUDE.md updates**: When making structural changes to a subproject, update that subproject's CLAUDE.md in the same PR. Claude should author CLAUDE.md content, not humans — the human role is review and approval.
+- **Documentation updates**: When making changes to any crucible repo that affect user-facing behavior, configuration, architecture, or workflows, check whether the `docs/` guides need corresponding updates. Consult the documentation index in the Documentation section above to identify which guides cover the affected area. Documentation must stay in sync with the code — treat stale docs as a bug. This applies to all repos in the organization, not just the crucible repo itself.
 - **Branch rulesets**: `.github/rulesets/` files are backups of configured rulesets, not authoritative. Do not read or modify them to determine required status checks.

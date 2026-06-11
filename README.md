@@ -44,6 +44,27 @@ Through the use of containers built at runtime for software distribution (which 
 
 ## Documentation
 
+### Architecture and subsystem guides
+
+- [Architecture Overview](docs/crucible-architecture-overview.md) — Start here for a high-level understanding of how crucible works
+- [How the Installer Works](docs/how-the-installer-works.md)
+- [How Run Files Work](docs/how-run-files-work.md)
+- [How Benchmark Execution Works](docs/how-benchmark-execution-works.md)
+- [How Tool Collection Works](docs/how-tool-collection-works.md)
+- [How Engines Work](docs/how-engines-work.md)
+- [How Endpoints Work](docs/how-endpoints-work.md)
+- [How Image Sourcing Works](docs/how-image-sourcing-works.md)
+- [How Roadblock Works](docs/how-roadblock-works.md)
+- [How CDM Works](docs/how-cdm-works.md)
+- [How Services Work](docs/how-services-work.md)
+- [How the Controller Image Works](docs/how-the-controller-image-works.md)
+- [How the Repo System Works](docs/how-the-repo-system-works.md)
+- [How Releases Work](docs/how-releases-work.md)
+- [How CI Works](docs/how-ci-works.md)
+- [How the Logger Works](docs/how-the-logger-works.md)
+
+### Implementation guides
+
 - [Implementing a New Benchmark](docs/implementing-a-new-benchmark.md)
 - [Implementing a New Tool](docs/implementing-a-new-tool.md)
 
