@@ -47,6 +47,8 @@ Through the use of containers built at runtime for software distribution (which 
 ### Architecture and subsystem guides
 
 - [Architecture Overview](docs/crucible-architecture-overview.md) — Start here for a high-level understanding of how crucible works
+- [How the Installer Works](docs/how-the-installer-works.md)
+- [How Run Files Work](docs/how-run-files-work.md)
 - [How Benchmark Execution Works](docs/how-benchmark-execution-works.md)
 - [How Tool Collection Works](docs/how-tool-collection-works.md)
 - [How Engines Work](docs/how-engines-work.md)

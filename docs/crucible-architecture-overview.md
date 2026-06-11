@@ -198,6 +198,8 @@ before they cause runtime failures.
 
 | If you want to understand... | Read... |
 |------------------------------|---------|
+| How to install crucible | [How the installer works](how-the-installer-works.md) |
+| How to write a run file | [How run files work](how-run-files-work.md) |
 | How benchmarks run | [How benchmark execution works](how-benchmark-execution-works.md) |
 | How tools collect data | [How tool collection works](how-tool-collection-works.md) |
 | How engines operate inside | [How engines work](how-engines-work.md) |

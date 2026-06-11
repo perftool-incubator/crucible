@@ -56,6 +56,8 @@ The `docs/` directory contains detailed guides for how each crucible subsystem o
 ### Architecture and subsystem guides
 
 - **`docs/crucible-architecture-overview.md`** — High-level overview of all components and how they fit together. Start here.
+- **`docs/how-the-installer-works.md`** — Installation, prerequisites, registry configuration, release installs.
+- **`docs/how-run-files-work.md`** — Run file structure: benchmarks, endpoints, parameters, tools, tags.
 - **`docs/how-benchmark-execution-works.md`** — Parameter expansion, engine deployment, synchronized execution, periods, and result generation.
 - **`docs/how-tool-collection-works.md`** — Tool lifecycle, collection models, deployment, and how CDM queries extract tool data by time range.
 - **`docs/how-engines-work.md`** — Bootstrap, execution phases, files-from-controller, CPU partitioning, data archival.
