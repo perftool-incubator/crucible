@@ -32,7 +32,8 @@ before execution begins.
 
 ## Top-level structure
 
-A run file has five sections:
+A run file has five sections. `benchmarks` and `endpoints`
+are required; the rest are optional:
 
 ```json
 {
@@ -43,6 +44,11 @@ A run file has five sections:
     "tags": { ... }
 }
 ```
+
+When `tool-params` is omitted, the default tool set is used
+(see [Tool parameters](#tool-parameters)). When `run-params`
+is omitted, defaults are applied: 1 sample, 1 max failure,
+and sample test order.
 
 ## Benchmarks
 
@@ -317,7 +323,8 @@ matrix.
 
 ## Run parameters
 
-The `run-params` section controls execution behavior:
+The `run-params` section is optional and controls execution
+behavior. When omitted entirely, all defaults apply:
 
 ```json
 "run-params": {
