@@ -103,7 +103,7 @@ command-line arguments in two modes:
     --max-sample-failures=1 \
     --endpoint-deploy-timeout=<seconds> \
     --engine-script-start-timeout=<seconds> \
-    --image=<image-specs> \
+    --image-map=<path-to-image-map.json> \
     --roadblock-id=<uuid> \
     --roadblock-passwd=<password> \
     --crucible-dir=... \
@@ -225,8 +225,8 @@ than reimplementing them.
 
 | Function | Purpose |
 |----------|---------|
-| `get_image(settings, ...)` | Retrieve container image URL for a benchmark/tool |
-| `get_engine_id_image(settings, ...)` | Get image for a specific engine by role and ID |
+| `get_image(settings, ...)` | Retrieve image info dict for a benchmark/tool |
+| `get_engine_id_image(settings, ...)` | Get image info dict for a specific engine by role and ID |
 | `get_benchmark(settings, id)` | Look up benchmark name from engine ID |
 | `build_benchmark_engine_mapping(...)` | Build mapping of benchmarks to engine IDs |
 | `expand_ids(ids)` | Expand ID range strings to lists |
@@ -376,34 +376,34 @@ destroying engines for each sample.
 
 ## Image management
 
-### Image format
+### Image map
 
-Container images are passed to endpoints via the `--image` CLI
-argument using a structured format:
-
-```
-benchmark::role::userenv::arch::image_url[::auth_file]
-```
-
-The `role` field is `all` for standard benchmarks or
-`client`/`server` for benchmarks with separate images per role.
+Container images are passed to endpoints via the
+`--image-map=<filepath>` CLI argument, pointing to a JSON file
+(schema: `schema/image-map.json`) that maps benchmark and tool
+names to container image URLs organized by role, userenv, and
+architecture.
 
 ### Pulling images
 
 Your endpoint must pull the required images onto its
-infrastructure before launching engines. Use the helper
+infrastructure before launching engines.  Use the helper
 functions:
 
 - `endpoints.get_engine_id_image(settings, role, id, userenv,
-  arch)` — get the image URL for a specific engine
+  arch)` — get the image info for a specific engine
 - `endpoints.get_image(settings, image_role, engine_role,
-  userenv, arch)` — get an image by role and userenv
+  userenv, arch)` — get image info by role and userenv
+
+Both return a dict with an `image` key (the container image
+URL) and an optional `auth-file` key (path to auth
+credentials), or None if no matching image is found.
 
 ### Authentication
 
-When an image requires authentication, the auth file path is
-appended as a 6th `::` field in the image string. Your endpoint
-must:
+When an image requires authentication, the image info dict
+contains an `auth-file` key with the path to a Docker/Podman
+auth JSON file.  Your endpoint must:
 
 1. Copy the auth file to the remote infrastructure (or create
    the equivalent, e.g., a Kubernetes ImagePullSecret)
