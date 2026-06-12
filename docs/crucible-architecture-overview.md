@@ -215,3 +215,5 @@ before they cause runtime failures.
 | How command output is captured | [How the logger works](how-the-logger-works.md) |
 | How to write a new benchmark | [Implementing a new benchmark](implementing-a-new-benchmark.md) |
 | How to write a new tool | [Implementing a new tool](implementing-a-new-tool.md) |
+| How to write a new endpoint | [Implementing a new endpoint](implementing-a-new-endpoint.md) |
+| Development workflow | [Developer guide](developer-guide.md) |
