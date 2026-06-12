@@ -1,10 +1,14 @@
 {
+    "title": "Repos Configuration Schema",
+    "description": "Schema for crucible's repos.json configuration file.  Defines the subproject repositories that make up the crucible installation, organized into official (maintained by the project) and unofficial (user-added) categories.",
     "type": "object",
     "properties": {
         "official": {
+            "description": "Repositories that are part of the official crucible project.  These are managed by the crucible maintainers and included in releases.",
             "$ref": "#/definitions/repo-array"
         },
         "unofficial": {
+            "description": "User-added repositories that extend crucible with custom benchmarks, tools, or other subprojects.  These are not managed by the crucible maintainers.",
             "$ref": "#/definitions/repo-array"
         }
     },
@@ -15,16 +19,20 @@
     ],
     "definitions": {
         "repo-array": {
+            "description": "An array of repository definitions, each specifying a subproject's name, type, source, and checkout configuration.",
             "type": "array",
             "uniqueItems": true,
             "items": {
+                "description": "A repository definition for a single subproject.",
                 "type": "object",
                 "properties": {
                     "name": {
+                        "description": "The subproject name, used as the directory name under subprojects/ and for referencing this repo in commands.",
                         "type": "string",
                         "minLength": 1
                     },
                     "type": {
+                        "description": "The category of this subproject, determining where it is symlinked under subprojects/.  'primary' is crucible itself, 'core' is essential infrastructure, 'benchmark' and 'tool' are workload components, 'doc' is documentation, and 'userenvs' provides external userenv definitions.",
                         "type": "string",
                         "enum": [
                             "primary",
@@ -36,10 +44,12 @@
                         ]
                     },
                     "repository": {
+                        "description": "The git repository URL to clone from (e.g., 'https://github.com/perftool-incubator/rickshaw.git').",
                         "type": "string",
                         "minLength": 1
                     },
                     "primary-branch": {
+                        "description": "The default branch of the repository.  'HEAD' defers to the repository's configured default, while 'main' or 'master' specify explicitly.",
                         "type": "string",
                         "enum": [
                             "HEAD",
@@ -48,9 +58,11 @@
                         ]
                     },
                     "checkout": {
+                        "description": "Controls how the repository is checked out and updated.",
                         "type": "object",
                         "properties": {
                             "mode": {
+                                "description": "The checkout mode.  'follow' tracks a branch and pulls updates on 'crucible update'.  'locked' stays at a fixed commit or tag and does not update.",
                                 "type": "string",
                                 "enum": [
                                     "follow",
@@ -58,6 +70,7 @@
                                 ]
                             },
                             "target": {
+                                "description": "The branch name, tag, or commit hash to check out.  For 'follow' mode, this is typically the primary branch.  For 'locked' mode, this is the release branch or specific commit.",
                                 "type": "string",
                                 "minLength": 1
                             }
