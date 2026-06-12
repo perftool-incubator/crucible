@@ -144,24 +144,51 @@ containers or pods for each sample.
 
 ## Image management
 
-### The image format
+### The image map
 
-Container images are passed to endpoints using a structured
-format:
+Container images are passed to endpoints via a structured JSON
+file (`image-map.json`) using the `--image-map=<filepath>` CLI
+argument.  The file maps benchmark and tool names to their
+container image URLs, organized by engine role, userenv, and
+CPU architecture:
 
-```
-benchmark::role::userenv::arch::image_url[::auth_file]
+```json
+{
+    "uperf": {
+        "all": {
+            "rhubi9": {
+                "x86_64": {
+                    "image": "<registry>/<repo>:abc123_x86_64"
+                }
+            }
+        }
+    },
+    "trafficgen": {
+        "client": {
+            "alma8": {
+                "x86_64": {
+                    "image": "<registry>/<repo>:def456_x86_64"
+                }
+            }
+        }
+    },
+    "sysstat": {
+        "all": {
+            "fedora-latest": {
+                "x86_64": {
+                    "image": "<registry>/<repo>:ghi789_x86_64",
+                    "auth-file": "/path/to/pull-token.json"
+                }
+            }
+        }
+    }
+}
 ```
 
-Examples:
-```
-uperf::all::rhubi9::x86_64::<registry>/<repo>:abc123_x86_64
-trafficgen::client::alma8::x86_64::<registry>/<repo>:def456_x86_64
-sysstat::all::fedora-latest::x86_64::<registry>/<repo>:ghi789_x86_64
-```
-
-The `role` field is `all` for standard benchmarks or
+The role key is `all` for standard benchmarks or
 `client`/`server` for benchmarks with split workshop files.
+The optional `auth-file` field provides a path to a
+Docker/Podman auth JSON file for private registries.
 
 ### Image pulling
 

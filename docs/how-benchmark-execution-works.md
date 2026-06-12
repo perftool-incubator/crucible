@@ -193,8 +193,9 @@ requirements (like trafficgen) can use separate
 `client-workshop.json` and `server-workshop.json` files instead
 of a single `workshop.json`. This produces different container
 images for each role, reducing image size and allowing different
-base images (userenvs) per role. The `--image` format includes
-a role field (`bench::role::userenv::arch::image`) so each engine
+base images (userenvs) per role.  The image-map JSON file
+passed to endpoints includes a role key in its hierarchy
+(`bench → role → userenv → arch → image`) so each engine
 gets the correct image for its role.
 
 ### Userenvs
