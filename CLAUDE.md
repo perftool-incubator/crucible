@@ -78,6 +78,8 @@ When creating new benchmarks or tools, consult these before writing any code:
 
 - **`docs/implementing-a-new-benchmark.md`** — Required files, rickshaw.json schema, client-server messaging, post-processing, multiplex.json, and reference implementations.
 - **`docs/implementing-a-new-tool.md`** — Required files, collector whitelist/blacklist, tool parameters, and reference implementations.
+- **`docs/implementing-a-new-endpoint.md`** — Directory structure, validation protocol, base module, engine deployment, roadblock integration, and reference implementations.
+- **`docs/developer-guide.md`** — Development environment, repository structure, testing, cross-repo coordination, PR workflow, code conventions, and debugging.
 
 These guides define the required file structure, naming conventions, JSON schemas, script patterns, and integration points. Follow them rather than inferring structure from existing code alone.
 
@@ -132,6 +134,7 @@ Follow existing code style conventions exactly — check surrounding code for pa
 - **JSON processing**: Use `jq_query()` helper from `bin/base`; validate configs against schemas in `schema/`
 - **Variable naming**: Lowercase with underscores for locals; uppercase for exported/environment variables (e.g., `CRUCIBLE_HOME`, `CRUCIBLE_CONTROLLER_IMAGE`)
 - **CLI parameters**: When adding a new CLI parameter, option, or subcommand, update all three locations: `bin/_help` (main help output), `bin/_crucible_completions` (bash tab completions), and the relevant command's own help text
+- **Comments**: Write comments that explain the intent behind the code — why a decision was made, what constraint is being satisfied, or what behavior would surprise a future reader. Focus on the WHY rather than restating WHAT the code does.
 
 ## Language Strategy
 - **New code**: Write new functionality in Python 3 by default
