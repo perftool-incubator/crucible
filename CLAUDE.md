@@ -78,6 +78,8 @@ When creating new benchmarks or tools, consult these before writing any code:
 
 - **`docs/implementing-a-new-benchmark.md`** — Required files, rickshaw.json schema, client-server messaging, post-processing, multiplex.json, and reference implementations.
 - **`docs/implementing-a-new-tool.md`** — Required files, collector whitelist/blacklist, tool parameters, and reference implementations.
+- **`docs/implementing-a-new-endpoint.md`** — Directory structure, validation protocol, base module, engine deployment, roadblock integration, and reference implementations.
+- **`docs/developer-guide.md`** — Development environment, repository structure, testing, cross-repo coordination, PR workflow, code conventions, and debugging.
 
 These guides define the required file structure, naming conventions, JSON schemas, script patterns, and integration points. Follow them rather than inferring structure from existing code alone.
 
