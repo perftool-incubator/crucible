@@ -512,7 +512,6 @@ Perl.
 
 Post-process scripts use the toolbox metrics library:
 
-**Python:**
 ```python
 import sys, os, json, math
 from pathlib import Path
@@ -521,12 +520,6 @@ TOOLBOX_HOME = os.environ.get('TOOLBOX_HOME')
 p = Path(TOOLBOX_HOME) / 'python'
 sys.path.append(str(p))
 from toolbox.metrics import log_sample, finish_samples
-```
-
-**Perl:**
-```perl
-use lib "$ENV{'TOOLBOX_HOME'}/perl";
-use toolbox::metrics;
 ```
 
 ### Key functions
