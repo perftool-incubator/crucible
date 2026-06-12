@@ -571,7 +571,28 @@ function start_cdm_server() {
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start CDM server"
         else
-            echo "Successfully started CDM server on port ${cdm_server_port}"
+            local cdm_available=0
+            local cdm_count=1
+            local cdm_timeout=120
+            local cdm_status_cmd="curl --silent --show-error --stderr - -X GET localhost:${cdm_server_port}/health"
+            echo "Waiting for CDM server to be available (${cdm_timeout} seconds maximum)..."
+            while [ ${cdm_available} != 1 -a ${cdm_count} -lt ${cdm_timeout} ]; do
+                local pod_name=crucible-cdm-server-status-check-${SESSION_ID}-$(uuidgen)
+                local status_check=$(${podman_run} --name ${pod_name} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${cdm_status_cmd})
+                if echo "${status_check}" | grep -q '"status":"OK"'; then
+                    echo "CDM server is online after ${cdm_count} seconds"
+                    cdm_available=1
+                else
+                    sleep 1
+                fi
+                (( cdm_count += 1 ))
+            done
+            if [ ${cdm_available} -eq 0 ]; then
+                echo "ERROR: CDM server failed to become available within ${cdm_timeout} seconds"
+                RC=1
+            else
+                echo "Successfully started CDM server on port ${cdm_server_port}"
+            fi
         fi
     fi
     return ${RC}
