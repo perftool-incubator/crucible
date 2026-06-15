@@ -62,10 +62,10 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "--action" -- "${COMP_WORDS[2]}"))
                 ;;
             postprocess)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
             index)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
             archive)
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
@@ -80,6 +80,8 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "info add remove update query-opt index-instance instance-host-access-opt instance-cdmver-opt list-instance-names repair" -- "${COMP_WORDS[2]}"))
                 ;;
         esac
+    elif [ "${COMP_WORDS[$num_index-1]}" == "--log-level" ]; then
+        COMPREPLY=($(compgen -W "normal verbose debug verbose-debug" -- "${COMP_WORDS[$num_index]}"))
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "ls" ]; then
         case "${COMP_WORDS[2]}" in
             --type)
@@ -140,6 +142,12 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "--json" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
+    elif [ ${COMP_WORDS[1]} == "run" ]; then
+        COMPREPLY=($(compgen -W "--log-level --help" -f -- "${COMP_WORDS[$num_index]}"))
+    elif [ ${COMP_WORDS[1]} == "postprocess" ]; then
+        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[$num_index]}"))
+    elif [ ${COMP_WORDS[1]} == "index" ]; then
+        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[$num_index]}"))
     fi
 }
 

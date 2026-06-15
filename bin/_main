@@ -168,8 +168,35 @@ elif [ "${1}" == "rm" ]; then
 
 elif [ "${1}" == "index" ]; then
     shift
+    run_log_level="normal"
     instance=""
     base_run_dir=""
+    # Pre-extract --log-level before positional parsing
+    remaining_args=()
+    while [ $# -gt 0 ]; do
+        case "${1}" in
+            --log-level)
+                shift
+                if [ $# -eq 0 ]; then
+                    exit_error "--log-level requires a value (normal, verbose, debug, verbose-debug)"
+                fi
+                case "${1}" in
+                    normal|verbose|debug|verbose-debug)
+                        run_log_level="${1}"
+                        ;;
+                    *)
+                        exit_error "Invalid --log-level value '${1}'. Must be one of: normal, verbose, debug, verbose-debug"
+                        ;;
+                esac
+                shift
+                ;;
+            *)
+                remaining_args+=("${1}")
+                shift
+                ;;
+        esac
+    done
+    set -- "${remaining_args[@]}"
     # There is an optional positional argument for which overrides the
     # default opensearch instance.  This argument must come immediately
     # after "crucible index" and before any arguments passed to rickshaw
@@ -250,7 +277,40 @@ elif [ "${1}" == "extract" ]; then
     esac
 elif [ "${1}" == "postprocess" ]; then
     shift
-    base_run_dir=$(echo "$@" | sed -e "s/--base-run-dir\(\s\+\|=\)//")
+    run_log_level="normal"
+    base_run_dir=""
+    while [ $# -gt 0 ]; do
+        case "${1}" in
+            --log-level)
+                shift
+                if [ $# -eq 0 ]; then
+                    exit_error "--log-level requires a value (normal, verbose, debug, verbose-debug)"
+                fi
+                case "${1}" in
+                    normal|verbose|debug|verbose-debug)
+                        run_log_level="${1}"
+                        ;;
+                    *)
+                        exit_error "Invalid --log-level value '${1}'. Must be one of: normal, verbose, debug, verbose-debug"
+                        ;;
+                esac
+                shift
+                ;;
+            --base-run-dir)
+                shift
+                base_run_dir="${1}"
+                shift
+                ;;
+            --base-run-dir=*)
+                base_run_dir="${1#*=}"
+                shift
+                ;;
+            *)
+                base_run_dir="${1}"
+                shift
+                ;;
+        esac
+    done
     post_process_run "${base_run_dir}"
     EXIT_VAL=$?
 elif [ "${1}" == "run" ]; then
@@ -267,14 +327,14 @@ elif [ "${1}" == "run" ]; then
             --log-level)
                 shift
                 if [ $# -eq 0 ]; then
-                    exit_error "--log-level requires a value (normal, verbose, debug)"
+                    exit_error "--log-level requires a value (normal, verbose, debug, verbose-debug)"
                 fi
                 case "${1}" in
-                    normal|verbose|debug)
+                    normal|verbose|debug|verbose-debug)
                         run_log_level="${1}"
                         ;;
                     *)
-                        exit_error "Invalid --log-level value '${1}'. Must be one of: normal, verbose, debug"
+                        exit_error "Invalid --log-level value '${1}'. Must be one of: normal, verbose, debug, verbose-debug"
                         ;;
                 esac
                 shift
