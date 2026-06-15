@@ -204,19 +204,99 @@ within that time window.
 
 ### Breakout dimensions
 
-Metrics can be broken down by their dimension values. For
+Metrics can be broken down by their dimension values.  For
 example, `Busy-CPU` from mpstat has dimensions like
-`hostname` and `cpu`. Querying with `breakouts: ["hostname"]`
-returns separate time series per host. Adding `"cpu"` splits
+`hostname` and `cpu`.  Querying with `breakouts: ["hostname"]`
+returns separate time series per host.  Adding `"cpu"` splits
 further by individual CPU.
 
-The query API supports:
+#### Response format
 
-- **Expanding**: Add a breakout dimension to see more detail
-- **Filtering**: Limit to specific dimension values (exact
-  match, regex, or multiple values)
-- **Collapsing**: Remove a breakout to aggregate across that
-  dimension
+The metric-data API response includes three fields that
+describe breakout state:
+
+```json
+{
+    "values": {
+        "": [{ "begin": 1648111546729, "end": 1648111635267, "value": 45.2 }]
+    },
+    "usedBreakouts": [],
+    "remainingBreakouts": ["hostname", "cpu", "type"]
+}
+```
+
+- **`values`** — metric data keyed by breakout labels.
+  Without breakouts, the key is an empty string (aggregated
+  across all dimensions).  With breakouts, each key encodes
+  the dimension values in angle brackets:
+  `"<host1>-<0>"`, `"<host1>-<1>"`, `"<host2>-<0>"`.
+- **`usedBreakouts`** — dimensions currently applied to
+  produce the value keys.
+- **`remainingBreakouts`** — dimensions still available for
+  further disaggregation.  These are the dimensions you can
+  add to the `breakouts` array to split the data further.
+
+With breakouts applied:
+
+```json
+{
+    "values": {
+        "<host1>-<0>": [{ "begin": 1648111546729, "end": 1648111635267, "value": 78.5 }],
+        "<host1>-<1>": [{ "begin": 1648111546729, "end": 1648111635267, "value": 65.2 }],
+        "<host2>-<0>": [{ "begin": 1648111546729, "end": 1648111635267, "value": 82.1 }]
+    },
+    "usedBreakouts": ["hostname", "cpu"],
+    "remainingBreakouts": ["type"]
+}
+```
+
+#### Breakout query syntax
+
+The `breakouts` array supports three forms:
+
+- **Basic**: `["hostname", "cpu"]` — split by all values
+  of each dimension
+- **Value-filtered**: `["hostname=host1+host2"]` — return
+  separate series only for the specified values
+- **Regex**: `["hostname=r/^worker-.*/"]` — return series
+  for values matching the pattern
+
+#### Available dimensions
+
+The dimensions available for breakout depend on the metric
+source.  Each metric's `metric_desc` document in OpenSearch
+records which dimensions are present.  Common dimensions
+include:
+
+| Dimension | Description |
+|-----------|-------------|
+| `hostname` | Host where the metric was collected |
+| `cpu` | CPU number |
+| `csid` | Client-server ID — identifies which engine pair produced the metric |
+| `cstype` | Client-server type (e.g., `client`, `server`, `profiler`) |
+| `engine-id` | Numeric engine ID |
+| `type` | Sub-metric type (e.g., CPU mode for mpstat: `usr`, `sys`, `irq`) |
+| `dev` | Device name (for storage or network metrics) |
+| `cmd` | Process command name |
+
+The `remainingBreakouts` field in the API response is the
+authoritative source for what dimensions are available on a
+given metric.
+
+#### Per-pair analysis
+
+Runs with multiple parallel engine pairs (`"ids": "1+2"`)
+produce combined metric values by default.  To separate
+results per pair, add a breakout on `csid` or `engine-id`.
+
+Note that benchmark metrics and tool metrics use different
+`csid` label formats.  Benchmark `csid` values are numeric
+(e.g., `1`, `2`), while tool `csid` values include the
+endpoint and tool name (e.g., `remotehosts-1-sysstat-1`).
+Use the `remainingBreakouts` response to discover which
+dimensions are available, then query breakout values with
+`POST /api/v1/iterations/breakout-values` to see the actual
+values before filtering.
 
 ## The web dashboard
 
