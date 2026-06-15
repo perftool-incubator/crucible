@@ -139,8 +139,57 @@ all multi-valued parameters to produce the iteration matrix.
 | `val` | Yes* | Single value (alternative to `vals`) |
 | `role` | No | Restrict to a specific role: `"client"`, `"server"`, or `"all"` (default) |
 | `enabled` | No | `"yes"` (default) or `"no"` — disabled params are excluded |
+| `id` | No | Restrict this parameter to a single engine ID.  When set, only the engine whose ID matches receives this parameter.  Without `id`, the parameter applies to all engines of the specified role. |
+| `ids` | No | Array of engine ID ranges (e.g., `["1", "2-4"]`) that this parameter applies to.  Alternative to `id` for targeting multiple engines. |
 
 *One of `vals` or `val` is required.
+
+### Per-engine parameter scoping
+
+When running multiple client-server pairs in parallel, each
+engine may need different parameter values.  For example, in a
+two-pair run comparing RHEL 9 vs RHEL 10, each client must
+connect to its own paired server — not to all servers.
+
+Without per-engine scoping, a `remotehost` parameter applies
+to all clients, causing every client to connect to every
+server.  The `id` field solves this by restricting a parameter
+to the engine whose ID matches:
+
+```json
+"mv-params": {
+    "sets": [{
+        "params": [
+            { "arg": "test-type", "vals": ["stream"], "role": "client" },
+            { "arg": "protocol", "vals": ["tcp"], "role": "client" },
+            { "arg": "duration", "vals": ["60"], "role": "client" },
+            { "arg": "wsize", "vals": ["256", "1024"], "role": "client" },
+            { "arg": "nthreads", "vals": ["1", "4"], "role": "client" },
+            { "arg": "remotehost", "vals": ["10.0.0.2"], "role": "client", "id": "1" },
+            { "arg": "remotehost", "vals": ["10.0.0.4"], "role": "client", "id": "2" }
+        ]
+    }]
+}
+```
+
+Here, client 1 connects to 10.0.0.2 (its paired server) and
+client 2 connects to 10.0.0.4.  All other parameters
+(test-type, protocol, etc.) apply to both clients since they
+have no `id` field.
+
+The `id` value is a string matching the engine IDs assigned
+in the endpoint's `engines` array.  Two parameters with the
+same `arg` and `role` but different `id` values are treated
+as distinct — they coexist rather than overriding each other.
+
+The `ids` field accepts an array of ID ranges for targeting
+multiple engines:
+
+```json
+{ "arg": "bs", "vals": ["64"], "ids": ["1", "3-5"] }
+```
+
+This applies to engines 1, 3, 4, and 5.
 
 ### How parameters become iterations
 
