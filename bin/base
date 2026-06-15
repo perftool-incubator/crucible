@@ -682,6 +682,7 @@ function post_process_run() {
     local rs_pp_b_cmd ps_pp_t_cmd
     local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
+    local log_level="${run_log_level:-normal}"
 
     RUN_DIR=${1}
     echo "Benchmark result is in ${RUN_DIR}"
@@ -689,8 +690,10 @@ function post_process_run() {
 
     rs_pp_b_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-bench.py"
     rs_pp_b_cmd+=" --base-run-dir=${RUN_DIR}"
+    rs_pp_b_cmd+=" --log-level=${log_level}"
     rs_pp_t_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-post-process-tools.py"
     rs_pp_t_cmd+=" --base-run-dir=${RUN_DIR}"
+    rs_pp_t_cmd+=" --log-level=${log_level}"
 
     post_process_fail=0
     echo "Post-processing benchmark data with $rs_pp_b_cmd"
@@ -721,6 +724,7 @@ function index_run() {
     local run_json this_id RUN_DIR
     local post_process_fail RC result_summary
     local access_opt cdmver_opt
+    local log_level="${run_log_level:-normal}"
 
     access_opt=${1}
     shift
@@ -745,7 +749,7 @@ function index_run() {
 
     # Generate the CDM documents
     gen_docs_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-gen-docs.py"
-    gen_docs_cmd+=" --base-run-dir=${RUN_DIR} ${cdmver_opt}"
+    gen_docs_cmd+=" --base-run-dir=${RUN_DIR} --log-level=${log_level} ${cdmver_opt}"
     echo "Generating CDM documents with ${gen_docs_cmd}"
     ${podman_run}\
         --name crucible-rickshaw-gen-docs-${SESSION_ID}\
