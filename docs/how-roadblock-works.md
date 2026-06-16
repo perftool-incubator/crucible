@@ -138,8 +138,8 @@ between them.
 ```json
 {
     "recipient": {
-        "type": "all",
-        "id": "all"
+        "type": "follower",
+        "id": "client-1"
     },
     "user-object": {
         "svc": {
@@ -150,9 +150,28 @@ between them.
 }
 ```
 
-Messages specify a recipient (leader, follower, or all) and
-carry a JSON payload. The payload is application-defined —
-roadblock delivers it without interpreting it.
+Messages specify a recipient and carry a JSON payload. The
+payload is application-defined — roadblock delivers it
+without interpreting it.
+
+### Message addressing
+
+The `recipient` field controls delivery:
+
+- **Broadcast**: `{"type": "all", "id": "all"}` — delivered
+  to all participants via the global Redis stream
+- **Targeted**: `{"type": "follower", "id": "<follower-id>"}`
+  — delivered only to the named follower via its personal
+  Redis stream. Only that follower sees the message in its
+  message log.
+
+Targeted messaging avoids unnecessary traffic and processing.
+The engine-script-library automatically wraps benchmark
+service payloads in targeted messages to the server's endpoint
+(for potential address transformation) and the paired client
+(as a direct fallback). Broadcast is used only when all
+participants genuinely need the message (e.g., error abort,
+timeout adjustment).
 
 ### Common use cases
 

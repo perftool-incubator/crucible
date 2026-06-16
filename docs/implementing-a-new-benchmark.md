@@ -409,9 +409,10 @@ Starts the server process, publishes service information, and exits:
    ```bash
    let "port = 2 * $id + 30000"
    ```
-5. Publish service info for clients via messaging:
+5. Publish service info as a raw payload — the engine
+   infrastructure handles delivery:
    ```bash
-   echo '{"recipient":{"type":"all","id":"all"},"user-object":{"svc":{"ip":"'$ip'","ports":['$port']}}}' >msgs/tx/svc
+   echo '{"svc":{"ip":"'$ip'","ports":['$port']}}' >msgs/tx/svc
    ```
 6. Start the server in the background:
    ```bash
@@ -453,49 +454,51 @@ instead they write and read JSON files in `msgs/` directories.
 
 ### How it works
 
-1. **Server writes** a JSON message to `msgs/tx/svc` containing its
-   IP and port(s) during the server-start phase.
-2. **Roadblock** collects messages from `msgs/tx/` and delivers them
-   to other participants during synchronization.
-3. **Endpoints** (Kubernetes, remote hosts) may modify the service
-   information (e.g., creating a LoadBalancer or NodePort) and write
-   an adjusted message.
-4. **Client reads** service information from `msgs/rx/` before
-   connecting to the server.
+1. **Server writes** a raw JSON payload to `msgs/tx/svc`
+   during the server-start phase. No roadblock addressing
+   or recipient information is needed.
+2. **Engine infrastructure** wraps the payload in targeted
+   roadblock messages and delivers them to the endpoint and
+   paired client.
+3. **Endpoints** (Kubernetes, remote hosts) may modify the
+   service information (e.g., creating a LoadBalancer or
+   NodePort) and send a targeted message to the client with
+   the adjusted address.
+4. **Engine infrastructure** resolves the best message
+   (preferring endpoint-relayed over server-direct) and
+   writes it to `msgs/rx/svc`.
+5. **Client reads** `msgs/rx/svc` before connecting to the
+   server.
 
 ### Message format
 
+The server writes a plain payload (no roadblock wrapping):
+
 ```json
 {
-    "recipient": { "type": "all", "id": "all" },
-    "user-object": {
-        "svc": {
-            "ip": "192.168.1.100",
-            "ports": [30000, 30001]
-        }
+    "svc": {
+        "ip": "192.168.1.100",
+        "ports": [30000, 30001]
     }
 }
 ```
 
 ### Reading messages on the client side
 
-The client should check for messages in this order of preference:
+The engine infrastructure resolves the best message and writes
+it to `msgs/rx/svc`. The client reads from this single file:
 
 ```bash
-file="msgs/rx/endpoint-start-end:1"
-if [ ! -e "${file}" ]; then
-    file="msgs/rx/server-start-end:1"
-fi
+file="msgs/rx/svc"
 if [ -e "$file" ]; then
     remotehost=$(jq -r '.svc.ip' $file)
     port=$(jq -r '.svc.ports[0]' $file)
 fi
 ```
 
-The `endpoint-start-end` message takes priority because the endpoint
-may have transformed the server's IP/port (e.g., through a Kubernetes
-Service). The `server-start-end` message is the fallback when no
-endpoint transformation occurred.
+The engine automatically prefers endpoint-relayed messages
+(which may have transformed addresses) over direct server
+messages.
 
 ---
 
@@ -776,7 +779,7 @@ Once your benchmark repository is ready:
 - [ ] `multiplex.json` with parameter defaults and validations (recommended)
 - [ ] `<name>-base` script sourcing toolbox bench-base (recommended)
 - [ ] For client-server: `<name>-server-start` and `<name>-server-stop`
-- [ ] For client-server: messaging via `msgs/tx/svc` and `msgs/rx/`
+- [ ] For client-server: service info via `msgs/tx/svc` (server) and `msgs/rx/svc` (client)
 - [ ] `LICENSE` (Apache 2.0)
 - [ ] `README.md`
 - [ ] Entry in `crucible/config/repos.json`
