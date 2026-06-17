@@ -57,8 +57,9 @@ Endpoints output specific keywords that rickshaw-run.py parses:
 
 - **`arch`** — CPU architectures available (e.g., `x86_64`,
   `aarch64`). Used to determine which container images to build.
-- **`userenv`** — user environments (base images) available.
-  Repeated for each userenv.
+- **`engine-userenv`** — maps each engine to its userenv.
+  Format: `engine-userenv <role> <id> <userenv>`. One line per
+  non-profiler engine.
 - **`client`** / **`server`** — engine IDs for each role
 - **`engine-types`** — what roles this endpoint supports
   (client, server, profiler, worker, master)
