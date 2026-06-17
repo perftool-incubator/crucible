@@ -279,36 +279,42 @@ roadblock synchronization.
 
 ### How it works
 
-1. During **server-start**, the server script writes a JSON
-   message to `msgs/tx/svc` containing its IP and port(s):
+1. During **server-start**, the server script writes a raw
+   payload to `msgs/tx/svc`:
    ```json
-   {
-       "recipient": {"type": "all", "id": "all"},
-       "user-object": {
-           "svc": {"ip": "10.244.1.5", "ports": [30000]}
-       }
-   }
+   {"svc": {"ip": "10.244.1.5", "ports": [30002, 30003]}}
    ```
 
-2. During the roadblock synchronization between server-start-end
-   and client-start-begin, messages are collected and delivered
-   to all participants.
+   The benchmark does not specify recipients or use roadblock
+   addressing. The engine infrastructure handles delivery.
 
-3. **Endpoints may modify the service information.** On
+2. The **engine-script-library** detects the raw payload (no
+   `recipient` key) and automatically wraps it in two targeted
+   roadblock messages: one to the server's endpoint and one
+   directly to the paired client.
+
+3. At the **server-start-end** barrier, both messages are
+   delivered via roadblock. The endpoint receives its copy;
+   the client receives its copy. Each follower's message log
+   only contains messages targeted to it.
+
+4. **Endpoints may modify the service information.** On
    Kubernetes, the endpoint creates a Service resource and
    replaces the pod IP with the Service ClusterIP, NodePort
-   address, or LoadBalancer VIP. This is written as an
-   `endpoint-start-end` message.
+   address, or LoadBalancer VIP. The endpoint sends a
+   targeted message to the client with the transformed address.
 
-4. During **client-start**, the client reads service information
-   from `msgs/rx/`, preferring `endpoint-start-end` messages
-   (which have endpoint-transformed addresses) over
-   `server-start-end` messages (which have raw pod IPs).
+5. After **endpoint-start-end**, the engine-script-library
+   resolves the best message — preferring endpoint-relayed
+   (potentially transformed) over server-direct — and writes
+   it to `msgs/rx/svc`.
 
-This indirection allows the same benchmark code to work across
-different endpoint types without modification — the client always
-reads from `msgs/rx/` and gets the appropriate address for its
-deployment context.
+6. During **client-start**, the client reads `msgs/rx/svc`
+   for the resolved service information.
+
+Benchmarks never deal with roadblock addressing or endpoint
+details. The engine infrastructure handles message targeting,
+delivery, and resolution transparently.
 
 ## Controller scripts
 

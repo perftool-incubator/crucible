@@ -232,8 +232,10 @@ system. The client reads the message and connects directly.
 Kubernetes networking requires additional abstraction because
 pod IPs are internal to the cluster:
 
-1. During **server-start**, the server pod publishes its pod IP
-   and ports via `msgs/tx/svc`
+1. During **server-start**, the server pod writes its pod IP
+   and ports as a raw payload to `msgs/tx/svc`. The engine
+   infrastructure wraps it in targeted messages to the
+   endpoint and the paired client.
 2. During **endpoint-start**, the kube endpoint creates a
    Kubernetes Service (ClusterIP, NodePort, or LoadBalancer)
    that routes to the server pod
