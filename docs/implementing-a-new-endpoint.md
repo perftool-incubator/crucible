@@ -141,7 +141,7 @@ using specific keywords that `rickshaw-run.py` parses:
 | Keyword | Format | Purpose |
 |---------|--------|---------|
 | `arch` | `arch x86_64 [aarch64...]` | CPU architectures available |
-| `userenv` | `userenv rhubi9` (one per line) | User environments available |
+| `engine-userenv` | `engine-userenv client 1 rhubi9` | Maps each engine (by role and ID) to its userenv |
 | `engine-types` | `engine-types client server profiler` | Supported engine roles |
 | `client` | `client 1 2 3` | Client engine IDs |
 | `server` | `server 4 5 6` | Server engine IDs |
@@ -180,7 +180,10 @@ using specific keywords that `rickshaw-run.py` parses:
 engine-types client server profiler
 client 1 2
 server 3 4
-userenv rhubi9
+engine-userenv client 1 rhubi9
+engine-userenv client 2 rhubi9
+engine-userenv server 3 rhubi9
+engine-userenv server 4 rhubi9
 arch x86_64
 ```
 
