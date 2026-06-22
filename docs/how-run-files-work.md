@@ -392,6 +392,8 @@ behavior. When omitted entirely, all defaults apply:
 | `test-order` | Execution order: `"sample"`, `"iteration"`, or `"random"` | `"sample"` |
 | `name` | Override user name (both name and email required if either specified) | From identity |
 | `email` | Override user email | From identity |
+| `ssh-key-algorithm` | SSH key algorithm for engine communication (`ecdsa`, `ed25519`, or `rsa`). Use `ecdsa` or `rsa` in FIPS environments. | `ed25519` |
+| `ssh-key-bits` | Key size in bits for RSA or ECDSA. Cannot be used with Ed25519. RSA: 2048/3072/4096. ECDSA: 256/384/521. | ssh-keygen default |
 
 ### Test order
 
@@ -401,6 +403,41 @@ behavior. When omitted entirely, all defaults apply:
   then sample 2 of all iterations, etc.
 - **`random`** (or `"r"`): Randomized order to reduce
   systematic bias
+
+### SSH key algorithm
+
+Crucible generates a per-run SSH key for secure communication
+between the controller and engines. By default, Ed25519 is
+used. In FIPS-compliant environments where Ed25519 is not an
+approved algorithm, specify `"ecdsa"` or `"rsa"`:
+
+```json
+"run-params": {
+    "ssh-key-algorithm": "ecdsa"
+}
+```
+
+To also specify key size (optional — ssh-keygen defaults are
+used when omitted):
+
+```json
+"run-params": {
+    "ssh-key-algorithm": "rsa",
+    "ssh-key-bits": 4096
+}
+```
+
+Valid key sizes depend on the algorithm:
+
+- **RSA**: 2048, 3072 (default), 4096
+- **ECDSA**: 256 (default, P-256 curve), 384 (P-384), 521 (P-521)
+- **Ed25519**: fixed size, `ssh-key-bits` cannot be used
+
+Before generating the key, crucible validates that the
+controller's sshd configuration accepts the requested
+algorithm. If the algorithm is not in the server's
+`PubkeyAcceptedAlgorithms`, the run fails with a clear error
+listing the supported algorithms.
 
 ## Tags
 
