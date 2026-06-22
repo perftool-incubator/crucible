@@ -480,6 +480,54 @@ elif [ "${1}" == "run" ]; then
         exit ${EXIT_VAL}
     fi
 
+    # determine SSH key algorithm and optional key size from run-file
+    ssh_key_algorithm=$(jq_query ${run_file} '.["run-params"]["ssh-key-algorithm"] // empty')
+    if [ -z "${ssh_key_algorithm}" ]; then
+        ssh_key_algorithm="ed25519"
+    fi
+    case "${ssh_key_algorithm}" in
+        ecdsa|ed25519|rsa)
+            ;;
+        *)
+            exit_error "Invalid ssh-key-algorithm '${ssh_key_algorithm}'. Must be one of: ecdsa, ed25519, rsa"
+            ;;
+    esac
+
+    ssh_key_bits=$(jq_query ${run_file} '.["run-params"]["ssh-key-bits"] // empty')
+    ssh_key_bits_args=""
+    if [ -n "${ssh_key_bits}" ]; then
+        if [ "${ssh_key_algorithm}" == "ed25519" ]; then
+            exit_error "ssh-key-bits cannot be used with ed25519 (fixed key size)"
+        fi
+        ssh_key_bits_args="-b ${ssh_key_bits}"
+    fi
+
+    # validate that the controller's sshd accepts the requested algorithm
+    accepted_algos=$(sshd -T 2>/dev/null | grep "^pubkeyacceptedalgorithms ")
+    if [ -n "${accepted_algos}" ]; then
+        case "${ssh_key_algorithm}" in
+            ed25519)
+                algo_pattern="ssh-ed25519"
+                ;;
+            rsa)
+                algo_pattern="rsa-sha2-"
+                ;;
+            ecdsa)
+                algo_pattern="ecdsa-sha2-nistp"
+                ;;
+        esac
+        if ! echo "${accepted_algos}" | grep -q "${algo_pattern}"; then
+            supported=""
+            echo "${accepted_algos}" | grep -q "ssh-ed25519" && supported+=" ed25519"
+            echo "${accepted_algos}" | grep -q "rsa-sha2-" && supported+=" rsa"
+            echo "${accepted_algos}" | grep -q "ecdsa-sha2-nistp" && supported+=" ecdsa"
+            supported="${supported# }"
+            exit_error "The controller's sshd does not accept '${ssh_key_algorithm}' keys (not in PubkeyAcceptedAlgorithms). Supported algorithms: ${supported:-none detected}"
+        fi
+    fi
+
+    echo "Using SSH key algorithm: ${ssh_key_algorithm}${ssh_key_bits:+ (${ssh_key_bits} bits)}"
+
     # create and add SSH key
     RUN_SSH_DIR="${base_run_dir}/config/ssh"
     SSH_AUTH_KEYS_FILE="/root/.ssh/authorized_keys"
@@ -492,7 +540,7 @@ elif [ "${1}" == "run" ]; then
             exit_error "Setting ssh_home_t SELinux label on ${RUN_SSH_DIR} failed"
         fi
     fi
-    ssh-keygen -f ${RUN_SSH_DIR}/${SESSION_ID} -C "${SSH_KEY_PREFIX}-${SESSION_ID}@$(hostname -f)" -N "" > ${RUN_SSH_DIR}/${SESSION_ID}.log.txt 2>&1
+    ssh-keygen -t ${ssh_key_algorithm} ${ssh_key_bits_args} -f ${RUN_SSH_DIR}/${SESSION_ID} -C "${SSH_KEY_PREFIX}-${SESSION_ID}@$(hostname -f)" -N "" > ${RUN_SSH_DIR}/${SESSION_ID}.log.txt 2>&1
     RC=$?
     if [ ${RC} != 0 ]; then
         exit_error "ssh-keygen failed with RC=${RC}"
