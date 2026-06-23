@@ -120,6 +120,16 @@ Defines how the benchmark runs on client engines:
   the start script. Used when the benchmark binary has a different
   argument format than crucible's `--key=value` convention (see fio
   for an example).
+- **`client-server-ratio`** (optional): Controls how client and
+  server engine counts are validated and paired. When absent or
+  `"1:1"` (default), rickshaw requires each benchmark entry to
+  have equal numbers of client and server engines and pairs them
+  positionally. When set to `"1:N"`, one or more clients can
+  drive any number of servers — rickshaw distributes servers
+  across clients round-robin within each run-file benchmark entry.
+  The pairing is logged early in the console output so users can
+  verify the topology before execution begins.
+  See trafficgen for a reference implementation.
 
 ### Server section (client-server benchmarks only)
 
@@ -141,6 +151,9 @@ Defines how the benchmark runs on client engines:
 - **`start`** (required): Starts the server process. Must
   background the server and exit 0 on success.
 - **`stop`** (required): Cleanly shuts down the server process.
+- **`required`** (optional): Boolean. When `false`, the benchmark
+  can run without any server engines (e.g., trafficgen where
+  servers are optional external DUTs). Defaults to `true`.
 
 ### Minimal example (client-only)
 
