@@ -51,7 +51,6 @@
           "gzip",
           "jq",
           "git",
-          "cpio",
           "findutils",
           "hostname",
           "iputils",
