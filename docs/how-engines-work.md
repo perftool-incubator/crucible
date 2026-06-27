@@ -42,35 +42,36 @@ to establish that connection and fetch everything else.
 
 This is a deliberate minimal footprint: only the bootstrap
 logic is embedded in the image, keeping the image stable and
-cacheable. All other scripts (engine-script, benchmark scripts,
-tool scripts, roadblock client) are fetched from the controller
-at runtime, enabling modification without image rebuilds.
+cacheable. All other scripts (engine main script, benchmark
+scripts, tool scripts, roadblock client) are fetched from the
+controller at runtime, enabling modification without image
+rebuilds.
 
 ### What bootstrap does
 
 1. **Receives identity**: The engine's cs-label, role, and ID
-   are passed as arguments by the endpoint that created it.
+   are passed via environment variables set by the endpoint.
 
-2. **Sets up SSH keys**: Creates an SSH private key from an
-   injected environment variable. This key enables secure file
-   transfer from the controller throughout the run.
-
-3. **Fetches engine scripts**: Uses SCP to retrieve the main
-   execution scripts from the controller:
-   - `engine-script` — the main execution driver
-   - `engine-script-library` — shared functions
-   - `roadblocker.py` — the roadblock synchronization client
-   - `rickshaw-settings.json.xz` — run configuration
-
-4. **CPU partitioning discovery**: If cpu-partitioning is
+2. **CPU partitioning discovery**: If cpu-partitioning is
    enabled, runs `discover-cpu-partitioning.py` to detect which
    CPUs are isolated for workload use and which are available
    for housekeeping (see [CPU partitioning](#cpu-partitioning)
    below).
 
-5. **Hands off to engine-script**: Once initialization is
-   complete, bootstrap executes `engine-script` which drives
-   the rest of the engine's lifecycle.
+3. **Sets up SSH keys**: Creates an SSH private key from an
+   injected environment variable. This key enables secure file
+   transfer from the controller throughout the run.
+
+4. **Fetches engine scripts**: Uses paramiko SFTP to retrieve
+   the main execution scripts from the controller:
+   - `engine.py` — the main execution driver
+   - `engine_lib.py` — the engine library
+   - `roadblocker.py` — the roadblock synchronization client
+   - `rickshaw-settings.json.xz` — run configuration
+
+5. **Hands off to engine.py**: Once initialization is complete,
+   bootstrap execs `python3 engine.py` which drives the rest
+   of the engine's lifecycle.
 
 ## Execution phases
 
@@ -210,8 +211,10 @@ declare -a ARGS=(
 ```
 
 The array preserves quoting and handles values with spaces
-correctly. The engine executes the command via `eval`, which
-processes the array declaration and runs the benchmark script.
+correctly. The engine executes the command via `invoke.run()`,
+which spawns a subprocess that processes the array declaration
+and runs the benchmark script. Benchmark scripts remain Bash
+regardless of the engine runtime.
 
 ### Runtime discovery
 
@@ -251,13 +254,15 @@ For each tool in the JSON:
 
 1. The engine creates a `tool-data/<tool-name>/` subdirectory
 2. Changes into that directory
-3. Executes the command via `eval`
+3. Executes the command via `invoke.run()`
 4. The tool's start script launches background processes and
    records PIDs
 
 At stop time, the engine reads the stop JSON and executes each
-tool's stop command in the same tool directory. After stopping,
-it copies `engine-env.txt` into each tool's directory so the
+tool's stop command in the same tool directory. Stop commands
+run via roadblock's wait-for mechanism so tool shutdown happens
+concurrently with barrier synchronization. After stopping,
+`engine-env.txt` is copied into each tool's directory so the
 post-processor has access to the engine's environment context.
 
 ### Profiler engines
@@ -339,11 +344,14 @@ working directory and transfers it to the controller.
 ### Archive process
 
 1. The entire `cs_dir` is packaged into a compressed tarball
-2. The tar stream is piped through SSH directly to the
-   controller (no intermediate file on the engine)
+2. The tarball is transferred to the controller via Fabric's
+   SFTP `put()` (Python engine) or piped through SSH (bash
+   fallback)
 3. The controller writes it to
    `run/engine/archives/<cs_label>-data.tgz`
 4. Transfer retries up to 10 times with backoff on failure
+5. Data transfer runs via roadblock's wait-for mechanism so
+   archival happens concurrently with barrier synchronization
 
 ### What gets archived
 
