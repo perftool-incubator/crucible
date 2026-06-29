@@ -62,11 +62,15 @@ claude plugin marketplace add \
 
 Available skills:
 
-- `/crucible-tools:repo-status` — git status across all repos
-- `/crucible-tools:open-prs` — open PRs in the org
-- `/crucible-tools:dev-activity` — development activity charts
-- `/crucible-tools:weekly-summary` — weekly activity report
-- `ci-analyzer` agent — diagnose CI failures
+- `/crucible-tools:activity-summary` — generate an activity summary for the GitHub organization
+- `/crucible-tools:debug-log` — analyze crucible logs to debug failed runs or commands
+- `/crucible-tools:dev-activity` — generate development activity charts (commits, PRs, workflow runs)
+- `/crucible-tools:image-cleanup` — clean up local podman images (engine images, dangling images, local builds)
+- `/crucible-tools:new-repo` — create a new repository in the GitHub organization with standard config
+- `/crucible-tools:open-prs` — show all open PRs in the org (optionally filter by author)
+- `/crucible-tools:repo-status` — git status across all crucible repos
+- `/crucible-tools:workflow-status` — show active CI workflow runs across crucible repos
+- `ci-analyzer` agent — analyze GitHub Actions CI workflow runs to diagnose failures
 
 ## Repository structure
 

@@ -167,7 +167,7 @@ def load_rickshaw_run(result_directory):
             else:
                 myglobal.log.debug("did not find %s" % (rickshaw_run_output))
 
-                rickshaw_run_output = result_directory / 'run' / 'rickshaw-run.json'
+                rickshaw_run_output = result_directory / 'config' / 'rickshaw-run.json'
                 if rickshaw_run_output.exists():
                     myglobal.log.debug("found %s" % (rickshaw_run_output))
                     with open(rickshaw_run_output, 'rt') as json_file:
@@ -229,7 +229,7 @@ def replace_rickshaw_run(result_directory, data):
 
             rickshaw_run_output = result_directory / 'config' / 'rickshaw-run.json.xz'
             if rickshaw_run_output.exists():
-                myglobal.log.debug("found %s" % (rickshaw_run_ouput))
+                myglobal.log.debug("found %s" % (rickshaw_run_output))
 
                 backup_rickshaw_run(rickshaw_run_output)
 
@@ -467,7 +467,7 @@ def archives_ls_mode():
 
             ls_archive(archive)
     else:
-        myglobal.log.error("Invalid Crucible archive directory '%s'!" % (myglobal.archive_Dir))
+        myglobal.log.error("Invalid Crucible archive directory '%s'!" % (myglobal.archive_dir))
         return 1
 
     return 0
