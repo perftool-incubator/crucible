@@ -208,10 +208,14 @@ claude plugin marketplace add ${CRUCIBLE_HOME}/subprojects/core/crucible-dev-too
 Claude Code will prompt you to install the crucible-tools plugin — accept it.
 
 Available skills:
+- `/crucible-tools:activity-summary` — generate an activity summary for the GitHub organization
+- `/crucible-tools:debug-log` — analyze crucible logs to debug failed runs or commands
+- `/crucible-tools:dev-activity` — generate development activity charts (commits, PRs, workflow runs)
+- `/crucible-tools:image-cleanup` — clean up local podman images (engine images, dangling images, local builds)
+- `/crucible-tools:new-repo` — create a new repository in the GitHub organization with standard config
+- `/crucible-tools:open-prs` — show all open PRs in the org (optionally filter by author)
 - `/crucible-tools:repo-status` — git status across all crucible repos
-- `/crucible-tools:open-prs` — open PRs in the org (optionally filter by author)
-- `/crucible-tools:dev-activity` — development activity charts (commits, PRs, workflow runs)
-- `/crucible-tools:weekly-summary` — weekly activity report with PR links
+- `/crucible-tools:workflow-status` — show active CI workflow runs across crucible repos
 - `ci-analyzer` agent — analyze GitHub Actions CI workflow runs to diagnose failures
 
 ## Common Terminology
