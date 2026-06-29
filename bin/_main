@@ -164,7 +164,7 @@ elif [ "${1}" == "rm" ]; then
             ${access_opt} ${cdmver_opt} "$@"
         RC=$?
     fi
-    EXIT_VAL=$?
+    EXIT_VAL=${RC}
 
 elif [ "${1}" == "index" ]; then
     shift
