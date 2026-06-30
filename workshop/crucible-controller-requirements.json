@@ -23,7 +23,8 @@
         "opensearch",
         "logging-perl-modules",
         "gh-cli-repo",
-        "gh-cli"
+        "gh-cli",
+        "rclone"
       ]
     }
   ],
@@ -211,6 +212,15 @@
       "distro_info": {
         "packages": [
           "gh"
+        ]
+      }
+    },
+    {
+      "name": "rclone",
+      "type": "distro",
+      "distro_info": {
+        "packages": [
+          "rclone"
         ]
       }
     }
