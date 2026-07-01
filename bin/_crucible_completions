@@ -62,16 +62,16 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "--action" -- "${COMP_WORDS[2]}"))
                 ;;
             postprocess)
-                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
                 ;;
             index)
-                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
                 ;;
             archive)
-                COMPREPLY=($(compgen -W "config --local --remote --delete-local $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "config --local --remote --delete-local $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
                 ;;
             unarchive)
-                COMPREPLY=($(compgen -W "--local --remote --delete-remote $(crucible result-completion --type archive)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--local --remote --delete-remote $(crucible result-completion --type archive 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
                 ;;
             reset)
                 COMPREPLY=($(compgen -W "hard" -- "${COMP_WORDS[2]}"))
@@ -88,7 +88,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "archive tags run-id short" -- "${COMP_WORDS[3]}"))
                 ;;
             --result-dir)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[3]}"))
                 ;;
             --filter-type)
                 COMPREPLY=($(compgen -W "name tags" -- "${COMP_WORDS[3]}"))
@@ -103,7 +103,7 @@ _crucible_completions() {
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "extract" ]; then
         case "${COMP_WORDS[2]}" in
             run-id|primary-periods)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "repo" ]; then
@@ -126,7 +126,7 @@ _crucible_completions() {
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "rm" ]; then
         case "${COMP_WORDS[2]}" in
             --run)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-id)" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-id 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "sessions" ]; then
@@ -151,9 +151,9 @@ _crucible_completions() {
     elif [ ${COMP_WORDS[1]} == "run" ]; then
         COMPREPLY=($(compgen -W "--log-level --help" -f -- "${COMP_WORDS[$num_index]}"))
     elif [ ${COMP_WORDS[1]} == "postprocess" ]; then
-        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[$num_index]}"))
+        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[$num_index]}"))
     elif [ ${COMP_WORDS[1]} == "index" ]; then
-        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[$num_index]}"))
+        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[$num_index]}"))
     fi
 }
 
