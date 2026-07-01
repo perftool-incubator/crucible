@@ -56,7 +56,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "run-id primary-periods" -- "${COMP_WORDS[2]}"))
                 ;;
             ls)
-                COMPREPLY=($(compgen -W "--type --result-dir --filter-type --filters" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--type --result-dir --filter-type --filters --remote" -- "${COMP_WORDS[2]}"))
                 ;;
             tags)
                 COMPREPLY=($(compgen -W "--action" -- "${COMP_WORDS[2]}"))
@@ -85,7 +85,7 @@ _crucible_completions() {
     elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "ls" ]; then
         case "${COMP_WORDS[2]}" in
             --type)
-                COMPREPLY=($(compgen -W "tags run-id short" -- "${COMP_WORDS[3]}"))
+                COMPREPLY=($(compgen -W "archive tags run-id short" -- "${COMP_WORDS[3]}"))
                 ;;
             --result-dir)
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[3]}"))
