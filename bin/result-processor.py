@@ -290,10 +290,10 @@ def log_result_directory(result_directory, result_status):
         # bash tab completion engine
         if myglobal.args.type == "run-dir":
             if not result_directory.is_symlink():
-                myglobal.log.info("%s" % (result_directory))
+                myglobal.log.info("%s" % (result_directory.name))
             else:
                 symlink_target = result_directory.readlink()
-                myglobal.log.info("%s" % (symlink_target))
+                myglobal.log.info("%s" % (symlink_target.name))
     else:
         if not result_directory.is_symlink():
             myglobal.log.info("result: %s" % (result_directory.name))
@@ -311,10 +311,10 @@ def log_archive(archive):
         # completion mode uses a very terse output data to feed into a
         # bash tab completion engine
         if not archive.is_symlink():
-            myglobal.log.info("%s" % (archive))
+            myglobal.log.info("%s" % (archive.name))
         else:
             symlink_target = archive.readlink()
-            myglobal.log.info("%s" % (symlink_target))
+            myglobal.log.info("%s" % (symlink_target.name))
     else:
         return 1
 
