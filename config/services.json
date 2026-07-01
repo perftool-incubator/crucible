@@ -37,6 +37,21 @@
             "local-v8"
         ]
     },
+    "remote-archive": {
+        "remotes": {
+            "test-s3": {
+                "type": "s3",
+                "credentials": "/root/crucible-internal/s3-creds.json",
+                "bucket": "crucible-archives",
+                "tls-verify": false,
+                "settings": {
+                    "endpoint": "http://192.168.12.100:9000",
+                    "region": "us-east-1"
+                }
+            }
+        },
+        "default": "test-s3"
+    },
     "valkey": {
         "monitor": {
             "enabled": false

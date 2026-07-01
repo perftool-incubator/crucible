@@ -3,6 +3,8 @@
 '''Utility to handle various run result processing actions'''
 
 import argparse
+import os
+import subprocess
 import sys
 import logging
 import re
@@ -70,9 +72,15 @@ def process_options():
     parser_ls.add_argument("--type",
                            dest = "type",
                            help = "What type of result listing to display",
-                           choices = [ "tags", "run-id", "short" ],
+                           choices = [ "tags", "run-id", "short", "archive" ],
                            type = str,
                            default = "tags")
+
+    parser_ls.add_argument("--remote",
+                           dest = "remote",
+                           help = "List archives on a remote storage backend (use with --type archive)",
+                           type = str,
+                           default = None)
 
     parser_ls.add_argument("--result-dir",
                            dest = "result_dir",
@@ -282,10 +290,10 @@ def log_result_directory(result_directory, result_status):
         # bash tab completion engine
         if myglobal.args.type == "run-dir":
             if not result_directory.is_symlink():
-                myglobal.log.info("%s" % (result_directory))
+                myglobal.log.info("%s" % (result_directory.name))
             else:
                 symlink_target = result_directory.readlink()
-                myglobal.log.info("%s" % (symlink_target))
+                myglobal.log.info("%s" % (symlink_target.name))
     else:
         if not result_directory.is_symlink():
             myglobal.log.info("result: %s" % (result_directory.name))
@@ -303,10 +311,10 @@ def log_archive(archive):
         # completion mode uses a very terse output data to feed into a
         # bash tab completion engine
         if not archive.is_symlink():
-            myglobal.log.info("%s" % (archive))
+            myglobal.log.info("%s" % (archive.name))
         else:
             symlink_target = archive.readlink()
-            myglobal.log.info("%s" % (symlink_target))
+            myglobal.log.info("%s" % (symlink_target.name))
     else:
         return 1
 
@@ -454,7 +462,109 @@ def ls_result_directory(result_directory):
     return 0
 
 
+def remote_archives_ls(remote_name):
+    """List archives on a remote storage backend via rclone."""
+    services_cfg = Path(os.environ.get("CRUCIBLE_HOME", "/opt/crucible")) / "config" / "services.json"
+
+    with open(services_cfg, 'r') as f:
+        services = json.load(f)
+
+    remote_archive = services.get("remote-archive", {})
+    remotes = remote_archive.get("remotes", {})
+
+    if remote_name == "all":
+        remote_names = sorted(remotes.keys())
+        if not remote_names:
+            myglobal.log.error("No remotes configured")
+            return 1
+    elif remote_name == "default":
+        default = remote_archive.get("default")
+        if not default:
+            myglobal.log.error("No default remote configured")
+            return 1
+        remote_names = [default]
+    else:
+        if remote_name not in remotes:
+            myglobal.log.error("Remote '%s' is not configured" % remote_name)
+            return 1
+        remote_names = [remote_name]
+
+    for rname in remote_names:
+        remote_cfg = remotes[rname]
+        rclone_args = _build_rclone_args_py(remote_cfg)
+        if rclone_args is None:
+            return 1
+
+        remote_addr = rclone_args.pop("_remote_addr")
+
+        if len(remote_names) > 1:
+            myglobal.log.info("[%s]" % rname)
+
+        cmd = ["rclone", "lsf"] + rclone_args["flags"] + [remote_addr + "/"]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                myglobal.log.error("Failed to list remote '%s': %s" % (rname, result.stderr.strip()))
+                return 1
+            for line in sorted(result.stdout.strip().split("\n")):
+                if line:
+                    myglobal.log.info(line)
+        except FileNotFoundError:
+            myglobal.log.error("rclone is not installed")
+            return 1
+
+    return 0
+
+
+def _build_rclone_args_py(remote_cfg):
+    """Build rclone CLI flags from a remote config dict."""
+    remote_type = remote_cfg.get("type")
+    cred_file = remote_cfg.get("credentials")
+    tls_verify = remote_cfg.get("tls-verify", True)
+
+    flags = []
+
+    if not tls_verify:
+        flags.append("--no-check-certificate")
+
+    try:
+        with open(cred_file, 'r') as f:
+            creds = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        myglobal.log.error("Failed to read credential file '%s': %s" % (cred_file, e))
+        return None
+
+    if remote_type == "s3":
+        access_key = creds.get("access_key_id")
+        secret_key = creds.get("secret_access_key")
+        if not access_key or not secret_key:
+            myglobal.log.error("Credential file '%s' missing access_key_id or secret_access_key" % cred_file)
+            return None
+
+        bucket = remote_cfg.get("bucket", "")
+        settings = remote_cfg.get("settings", {})
+
+        flags.extend(["--s3-provider", "Other"])
+        flags.extend(["--s3-access-key-id", access_key])
+        flags.extend(["--s3-secret-access-key", secret_key])
+        flags.append("--s3-no-check-bucket")
+
+        if "endpoint" in settings:
+            flags.extend(["--s3-endpoint", settings["endpoint"]])
+        if "region" in settings:
+            flags.extend(["--s3-region", settings["region"]])
+
+        return {"flags": flags, "_remote_addr": ":s3:%s" % bucket}
+
+    else:
+        myglobal.log.error("Unsupported remote type '%s'" % remote_type)
+        return None
+
+
 def archives_ls_mode():
+    if hasattr(myglobal.args, 'remote') and myglobal.args.remote is not None:
+        return remote_archives_ls(myglobal.args.remote)
+
     archive_dir = Path(myglobal.archive_dir)
     if archive_dir.exists() and archive_dir.is_dir():
         archive_list = []
@@ -496,6 +606,9 @@ def run_results_ls_mode():
             dir_list = sorted(dir_list)
             for result in dir_list:
                 if result.name == "latest":
+                    continue
+
+                if not result.is_dir():
                     continue
 
                 ls_result_directory(result)
