@@ -20,7 +20,7 @@ _crucible_completions() {
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "archive log repo userenvs update run" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "archive log repo unarchive userenvs update run" -- "${COMP_WORDS[2]}"))
                 ;;
             log)
                 COMPREPLY=($(compgen -W "clear info init sessions tidy view" -- "${COMP_WORDS[2]}"))
