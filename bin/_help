@@ -89,8 +89,8 @@ function help() {
         ${CRUCIBLE_HOME}/bin/update help
     elif [ "${1}" == "run" ]; then
         run_help
-    elif [ "${1}" == "archive" ]; then
-        ${CRUCIBLE_HOME}/bin/remote help
+    elif [ "${1}" == "archive" -o "${1}" == "unarchive" ]; then
+        archive_help
     else
         help
     fi
