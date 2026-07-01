@@ -127,6 +127,68 @@
                 "monitor"
             ]
         },
+        "remote-archive": {
+            "description": "The remote-archive object contains configuration for remote storage backends used to upload and download result archives. Each remote defines a storage backend type, credentials file path, and backend-specific settings.",
+            "type": "object",
+            "properties": {
+                "remotes": {
+                    "description": "A map of user-defined remote names to storage backend configurations. Each remote specifies how to connect to and authenticate with a storage service.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "description": "Configuration for a single remote storage backend",
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "description": "The rclone backend type for this remote (e.g., 's3' for S3-compatible storage)",
+                                "type": "string",
+                                "enum": [
+                                    "s3"
+                                ]
+                            },
+                            "credentials": {
+                                "description": "Absolute path to a JSON credential file for authenticating with this remote. The file format is specific to the backend type.",
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "bucket": {
+                                "description": "The bucket name for S3-compatible storage backends. Required for type 's3', not used for other types.",
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "tls-verify": {
+                                "description": "Whether to verify TLS certificates when connecting to this remote. Defaults to true. Set to false for self-signed certificates.",
+                                "type": "boolean"
+                            },
+                            "settings": {
+                                "description": "Backend-specific configuration settings (e.g., endpoint URL, region, root folder ID). Keys and values vary by backend type.",
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                            "type",
+                            "credentials",
+                            "settings"
+                        ]
+                    }
+                },
+                "default": {
+                    "description": "The name of the default remote, used when '--remote default' is specified. Set to null if no default is configured.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "remotes",
+                "default"
+            ]
+        },
         "opensearch": {
             "description": "The opensearch object contains configuration for OpenSearch instances used for indexing and querying benchmark results. This replaces the former config/instances.json file.",
             "type": "object",
@@ -194,6 +256,7 @@
         "httpd",
         "image-sourcing",
         "opensearch",
+        "remote-archive",
         "valkey"
     ]
 }
