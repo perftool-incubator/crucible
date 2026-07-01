@@ -608,6 +608,9 @@ def run_results_ls_mode():
                 if result.name == "latest":
                     continue
 
+                if not result.is_dir():
+                    continue
+
                 ls_result_directory(result)
         else:
             myglobal.log.error("Invalid Crucible run results directory '%s'!" % (myglobal.run_dir))
