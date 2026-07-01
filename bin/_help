@@ -17,6 +17,7 @@ function help() {
     echo "  info [--json]               |    - Show log database summary"
     echo "  clear                       |    - Delete all log entries"
     echo "registries                    |  Get info on or configure the container image registries"
+    echo "archive config                |  Manage remote archive storage backends (add, remove, info, default)"
     echo "repo                          |  Get info on or configure the crucible and subproject git repos"
     echo "userenvs                      |  List available userenvs (official, external, deprecated)"
     echo "update                        |  Update all or part of the crucible software"
@@ -83,6 +84,8 @@ function help() {
         ${CRUCIBLE_HOME}/bin/update help
     elif [ "${1}" == "run" ]; then
         run_help
+    elif [ "${1}" == "archive" ]; then
+        ${CRUCIBLE_HOME}/bin/remote help
     else
         help
     fi

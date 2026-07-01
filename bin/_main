@@ -584,11 +584,22 @@ elif [ "${1}" == "run" ]; then
     fi
 elif [ "${1}" == "archive" ]; then
     shift
-    while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
-        archive_run "${1}"
-        EXIT_VAL=$?
+    if [ "${1}" == "config" ]; then
         shift
-    done
+        if [ -z "${1}" ]; then
+            ${CRUCIBLE_HOME}/bin/remote info
+            EXIT_VAL=$?
+        else
+            ${CRUCIBLE_HOME}/bin/remote "$@"
+            EXIT_VAL=$?
+        fi
+    else
+        while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
+            archive_run "${1}"
+            EXIT_VAL=$?
+            shift
+        done
+    fi
 elif [ "${1}" == "unarchive" ]; then
     shift
     while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
