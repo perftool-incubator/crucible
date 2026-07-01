@@ -104,4 +104,17 @@ if [ -f "${INSTANCES_CFG}" ]; then
     echo "Migration complete: instances.json content merged into services.json and original renamed to instances.json.migrated"
 fi
 
+# Add remote-archive section if missing
+has_remote_archive=$(jq -r 'has("remote-archive")' ${SERVICES_CFG} 2>/dev/null)
+
+if [ "${has_remote_archive}" != "true" ]; then
+    echo "Adding remote-archive section to services.json..."
+
+    jq --indent 4 \
+       '."remote-archive" = { "remotes": {}, "default": null }' \
+       ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
+
+    echo "Added default remote-archive configuration"
+fi
+
 # Already migrated — silent exit

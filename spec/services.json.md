@@ -66,3 +66,55 @@ used for indexing and querying benchmark results.
 - **query-from**: List of instance names available for querying
 
 Managed via `crucible opensearch [add|remove|update|info|...]`.
+
+## remote-archive section
+The `remote-archive` section configures remote storage backends for
+uploading and downloading result archives via rclone. This enables
+backup, sharing, and centralized storage of benchmark results on
+services like S3-compatible storage.
+
+- **remotes**: A map of user-defined remote names to backend
+  configurations. Each remote has:
+  - `type`: The rclone backend type (`s3`)
+  - `credentials`: Absolute path to a JSON credential file (format
+    varies by backend type, see below)
+  - `bucket` (optional, S3 only): The target bucket name
+  - `tls-verify` (optional): Whether to verify TLS certificates
+    when connecting (default: `true`). Set to `false` for
+    self-signed certificates.
+  - `settings`: Backend-specific configuration (non-secret settings
+    like endpoint URL, region, root folder ID)
+- **default**: Name of the default remote (used with `--remote default`),
+  or `null` if no default is configured
+
+### Credential file formats
+
+**S3** (`s3-creds.json`):
+```json
+{
+    "access_key_id": "AKIAIOSFODNN7EXAMPLE",
+    "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+}
+```
+
+### Example configuration
+
+```json
+"remote-archive": {
+    "remotes": {
+        "team-s3": {
+            "type": "s3",
+            "credentials": "/root/crucible-internal/s3-creds.json",
+            "bucket": "crucible-archives",
+            "tls-verify": false,
+            "settings": {
+                "endpoint": "https://rustfs.example.com:9000",
+                "region": "us-east-1"
+            }
+        }
+    },
+    "default": "team-s3"
+}
+```
+
+Managed via `crucible archive config [add|remove|info|default]`.
