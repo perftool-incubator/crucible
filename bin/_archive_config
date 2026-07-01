@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# remote archive storage management
+
+source /etc/sysconfig/crucible
+
+if [ ! -e "${CRUCIBLE_HOME}" ]; then
+    echo "Could not find $CRUCIBLE_HOME, exiting."
+    exit 1
+fi
+
+source "${CRUCIBLE_HOME}/bin/base"
+source "${CRUCIBLE_HOME}/bin/jqlib"
+
+VALID_TYPES="s3"
+
+function help() {
+    echo "Usage:"
+    echo "  archive config <command> [command-specific-options]"
+    echo ""
+    echo "The following commands are supported"
+    echo ""
+    echo "add <name> --type <s3> --credentials <path> [options]"
+    echo "                    |  Add a remote storage backend"
+    echo "                    |    --bucket <name>                 Bucket name (required for s3)"
+    echo "                    |    --tls-verify <true|false>       Verify TLS certificates (default: true)"
+    echo "                    |    --setting <key>=<value>         Backend-specific setting (repeatable)"
+    echo "remove <name>       |  Remove a remote storage backend"
+    echo "info [<name>]       |  Show configured remotes (default)"
+    echo "default <name>      |  Set the default remote"
+    echo "default --clear     |  Clear the default remote"
+    echo ""
+}
+
+function validate_type() {
+    local type="${1}"
+    local valid_type
+
+    for valid_type in ${VALID_TYPES}; do
+        if [ "${type}" == "${valid_type}" ]; then
+            return 0
+        fi
+    done
+
+    echo "ERROR: Invalid remote type '${type}'"
+    echo "       Valid types: ${VALID_TYPES}"
+    return 1
+}
+
+function add_remote() {
+    local name=""
+    local type=""
+    local credentials=""
+    local bucket=""
+    local tls_verify="true"
+    local -a settings=()
+    local error=0
+
+    if [ -z "${1}" ]; then
+        echo "ERROR: You must specify a remote name"
+        echo ""
+        help
+        exit 1
+    fi
+
+    name="${1}"
+    shift
+
+    while [ $# -gt 0 ]; do
+        case "${1}" in
+            --type)
+                shift
+                type="${1}"
+                ;;
+            --credentials)
+                shift
+                credentials="${1}"
+                ;;
+            --bucket)
+                shift
+                bucket="${1}"
+                ;;
+            --tls-verify)
+                shift
+                tls_verify="${1}"
+                ;;
+            --setting)
+                shift
+                settings+=("${1}")
+                ;;
+            *)
+                echo "ERROR: Unknown option '${1}'"
+                error=1
+                ;;
+        esac
+        shift
+    done
+
+    if [ -z "${type}" ]; then
+        echo "ERROR: You must specify --type"
+        error=1
+    fi
+
+    if [ -z "${credentials}" ]; then
+        echo "ERROR: You must specify --credentials"
+        error=1
+    fi
+
+    if [ ${error} -ne 0 ]; then
+        exit 1
+    fi
+
+    if ! validate_type "${type}"; then
+        exit 1
+    fi
+
+    if [ ! -f "${credentials}" ]; then
+        echo "ERROR: Credential file '${credentials}' does not exist"
+        exit 1
+    fi
+
+    if ! jq . "${credentials}" > /dev/null 2>&1; then
+        echo "ERROR: Credential file '${credentials}' is not valid JSON"
+        exit 1
+    fi
+
+    if [ "${type}" == "s3" -a -z "${bucket}" ]; then
+        echo "ERROR: You must specify --bucket for s3 remotes"
+        exit 1
+    fi
+
+    if [ "${tls_verify}" != "true" -a "${tls_verify}" != "false" ]; then
+        echo "ERROR: --tls-verify must be 'true' or 'false'"
+        exit 1
+    fi
+
+    local existing
+    existing=$(jq_query ${SERVICES_CFG} --arg name "${name}" '."remote-archive".remotes | has($name)')
+    if [ "${existing}" == "true" ]; then
+        echo "ERROR: Remote '${name}' already exists"
+        echo "       Use 'crucible archive config remove ${name}' first"
+        exit 1
+    fi
+
+    # Build the settings object from --setting key=value pairs
+    local settings_json="{}"
+    local setting
+    for setting in "${settings[@]}"; do
+        local key="${setting%%=*}"
+        local value="${setting#*=}"
+        if [ "${key}" == "${setting}" ]; then
+            echo "ERROR: Invalid --setting format '${setting}', expected key=value"
+            exit 1
+        fi
+        settings_json=$(echo "${settings_json}" | jq --arg k "${key}" --arg v "${value}" '. + {($k): $v}')
+    done
+
+    local jq_args=(
+        --arg name "${name}"
+        --arg type "${type}"
+        --arg credentials "${credentials}"
+        --argjson tls_verify "${tls_verify}"
+        --argjson settings "${settings_json}"
+    )
+
+    local jq_filter
+
+    if [ -n "${bucket}" ]; then
+        jq_args+=(--arg bucket "${bucket}")
+        jq_filter='."remote-archive".remotes[$name] = {
+            "type": $type,
+            "credentials": $credentials,
+            "bucket": $bucket,
+            "tls-verify": $tls_verify,
+            "settings": $settings
+        }'
+    else
+        jq_filter='."remote-archive".remotes[$name] = {
+            "type": $type,
+            "credentials": $credentials,
+            "tls-verify": $tls_verify,
+            "settings": $settings
+        }'
+    fi
+
+    jq_update_validated ${SERVICES_CFG} \
+                        ${SERVICES_CFG_SCHEMA} \
+                        "remote-archive:add" \
+                        "${jq_args[@]}" \
+                        "${jq_filter}"
+
+    echo "Successfully added remote '${name}' (type: ${type})"
+    echo ""
+    show_remote "${name}"
+}
+
+function remove_remote() {
+    local name="${1}"
+
+    if [ -z "${name}" ]; then
+        echo "ERROR: You must specify a remote name"
+        exit 1
+    fi
+
+    local existing
+    existing=$(jq_query ${SERVICES_CFG} --arg name "${name}" '."remote-archive".remotes | has($name)')
+    if [ "${existing}" != "true" ]; then
+        echo "ERROR: Remote '${name}' does not exist"
+        exit 1
+    fi
+
+    # If this remote is the default, clear the default first
+    local current_default
+    current_default=$(jq_query ${SERVICES_CFG} '."remote-archive".default')
+    if [ "${current_default}" == "${name}" ]; then
+        jq_update_validated ${SERVICES_CFG} \
+                            ${SERVICES_CFG_SCHEMA} \
+                            "remote-archive:clear-default" \
+                            '."remote-archive".default = null'
+    fi
+
+    jq_update_validated ${SERVICES_CFG} \
+                        ${SERVICES_CFG_SCHEMA} \
+                        "remote-archive:remove" \
+                        --arg name "${name}" \
+                        'del(."remote-archive".remotes[$name])'
+
+    echo "Successfully removed remote '${name}'"
+}
+
+function show_remote() {
+    local name="${1}"
+
+    if [ -n "${name}" ]; then
+        local existing
+        existing=$(jq_query ${SERVICES_CFG} --arg name "${name}" '."remote-archive".remotes | has($name)')
+        if [ "${existing}" != "true" ]; then
+            echo "ERROR: Remote '${name}' does not exist"
+            exit 1
+        fi
+        jq_query ${SERVICES_CFG} --arg name "${name}" '."remote-archive".remotes[$name]'
+    else
+        local remote_count
+        remote_count=$(jq_query ${SERVICES_CFG} '."remote-archive".remotes | length')
+        if [ "${remote_count}" == "0" ]; then
+            echo "No remotes configured"
+            echo ""
+            echo "Add one with: crucible archive config add <name> --type <s3> --credentials <path> [options]"
+        else
+            local default_name
+            default_name=$(jq_query ${SERVICES_CFG} '."remote-archive".default')
+
+            local remote_name
+            for remote_name in $(jq_query ${SERVICES_CFG} '."remote-archive".remotes | keys[]'); do
+                local remote_type
+                remote_type=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].type')
+
+                if [ "${remote_name}" == "${default_name}" ]; then
+                    echo "${remote_name} (type: ${remote_type}) [default]"
+                else
+                    echo "${remote_name} (type: ${remote_type})"
+                fi
+            done
+        fi
+    fi
+}
+
+function set_default() {
+    if [ "${1}" == "--clear" ]; then
+        local current_default
+        current_default=$(jq_query ${SERVICES_CFG} '."remote-archive".default')
+        if [ "${current_default}" == "null" ]; then
+            echo "No default remote is set"
+            return
+        fi
+
+        jq_update_validated ${SERVICES_CFG} \
+                            ${SERVICES_CFG_SCHEMA} \
+                            "remote-archive:clear-default" \
+                            '."remote-archive".default = null'
+
+        echo "Cleared default remote (was: ${current_default})"
+        return
+    fi
+
+    local name="${1}"
+
+    if [ -z "${name}" ]; then
+        echo "ERROR: You must specify a remote name or --clear"
+        exit 1
+    fi
+
+    local existing
+    existing=$(jq_query ${SERVICES_CFG} --arg name "${name}" '."remote-archive".remotes | has($name)')
+    if [ "${existing}" != "true" ]; then
+        echo "ERROR: Remote '${name}' does not exist"
+        exit 1
+    fi
+
+    jq_update_validated ${SERVICES_CFG} \
+                        ${SERVICES_CFG_SCHEMA} \
+                        "remote-archive:set-default" \
+                        --arg name "${name}" \
+                        '."remote-archive".default = $name'
+
+    echo "Default remote set to '${name}'"
+}
+
+if [ "$1" == "help" ]; then
+    help
+    exit
+elif [ -z "$1" ]; then
+    command="info"
+else
+    command=$1
+    shift
+fi
+
+case "${command}" in
+    info)
+        show_remote "$@"
+        ;;
+    add)
+        add_remote "$@"
+        ;;
+    remove)
+        remove_remote "$@"
+        ;;
+    default)
+        set_default "$@"
+        ;;
+    *)
+        echo "ERROR: Unknown remote command '${command}'"
+        echo ""
+        help
+        exit 1
+        ;;
+esac

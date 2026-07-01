@@ -20,7 +20,7 @@ _crucible_completions() {
     elif [ $num_words -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "log repo userenvs update run" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "archive log repo userenvs update run" -- "${COMP_WORDS[2]}"))
                 ;;
             log)
                 COMPREPLY=($(compgen -W "clear info init sessions tidy view" -- "${COMP_WORDS[2]}"))
@@ -68,7 +68,7 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
             archive)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "config $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
             unarchive)
                 COMPREPLY=($(compgen -W "$(crucible result-completion --type archive)" -- "${COMP_WORDS[2]}"))
@@ -113,6 +113,12 @@ _crucible_completions() {
                 ;;
             config)
                 COMPREPLY=($(compgen -W "add help remove show update" -- "${COMP_WORDS[3]}"))
+                ;;
+        esac
+    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "archive" ]; then
+        case "${COMP_WORDS[2]}" in
+            config)
+                COMPREPLY=($(compgen -W "add remove info default" -- "${COMP_WORDS[3]}"))
                 ;;
         esac
     elif [ ${COMP_WORDS[1]} == "userenvs" -a "${COMP_WORDS[2]}" == "list" ]; then
