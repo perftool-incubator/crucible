@@ -48,6 +48,7 @@ function help() {
     echo "  run-id <dir>                |    - Such as the run ID"
     echo "  primary-periods <dir>       |    - Or a list of the primary period IDs"
     echo "ls                            |  List the run results with optional arguments"
+    echo "  [--type archive]            |    List local archives; add --remote <name|all> for remote archives"
     echo "tags                          |  Manage the tags associated with run results"
     echo "archive <dir> [--local]        |  Create an archive of the run result pointed to by <dir> and remove it from the run directory"
     echo "  [--remote <name|all>]       |    Optional: also upload to a remote storage backend (or all configured remotes)"
