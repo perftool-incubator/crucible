@@ -68,10 +68,10 @@ _crucible_completions() {
                 COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
             archive)
-                COMPREPLY=($(compgen -W "config $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "config --local --remote --delete-local $(crucible result-completion --type run-dir)" -- "${COMP_WORDS[2]}"))
                 ;;
             unarchive)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type archive)" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "--local --remote --delete-remote $(crucible result-completion --type archive)" -- "${COMP_WORDS[2]}"))
                 ;;
             reset)
                 COMPREPLY=($(compgen -W "hard" -- "${COMP_WORDS[2]}"))

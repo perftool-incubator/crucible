@@ -594,18 +594,62 @@ elif [ "${1}" == "archive" ]; then
             EXIT_VAL=$?
         fi
     else
-        while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
-            archive_run "${1}"
-            EXIT_VAL=$?
+        archive_flags=()
+        archive_runs=()
+        while [ $# -gt 0 ]; do
+            case "${1}" in
+                --local)
+                    archive_flags+=("--local")
+                    ;;
+                --remote)
+                    archive_flags+=("--remote" "${2}")
+                    shift
+                    ;;
+                --delete-local)
+                    archive_flags+=("--delete-local")
+                    ;;
+                *)
+                    archive_runs+=("${1}")
+                    ;;
+            esac
             shift
+        done
+        for archive_run_dir in "${archive_runs[@]}"; do
+            archive_run "${archive_run_dir}" "${archive_flags[@]}"
+            EXIT_VAL=$?
+            if [ ${EXIT_VAL} != 0 ]; then
+                break
+            fi
         done
     fi
 elif [ "${1}" == "unarchive" ]; then
     shift
-    while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
-        unarchive_run "${1}"
-        EXIT_VAL=$?
+    unarchive_flags=()
+    unarchive_archives=()
+    while [ $# -gt 0 ]; do
+        case "${1}" in
+            --local)
+                unarchive_flags+=("--local")
+                ;;
+            --remote)
+                unarchive_flags+=("--remote" "${2}")
+                shift
+                ;;
+            --delete-remote)
+                unarchive_flags+=("--delete-remote")
+                ;;
+            *)
+                unarchive_archives+=("${1}")
+                ;;
+        esac
         shift
+    done
+    for unarchive_name in "${unarchive_archives[@]}"; do
+        unarchive_run "${unarchive_name}" "${unarchive_flags[@]}"
+        EXIT_VAL=$?
+        if [ ${EXIT_VAL} != 0 ]; then
+            break
+        fi
     done
 elif [ "${1}" == "reset" ]; then
     shift
