@@ -1154,7 +1154,8 @@ function archive_run() {
         for rname in "${remote_names[@]}"; do
             if ! remote_archive_upload "${archive_dest}/${ARCHIVE_NAME}" "${rname}"; then
                 if [ "${do_local}" != "1" ]; then
-                    rm -rf "${archive_dest}"
+                    echo "Staged archive preserved at: ${archive_dest}/${ARCHIVE_NAME}"
+                    echo "You can retry the upload manually or remove it when no longer needed."
                 fi
                 return 1
             fi
