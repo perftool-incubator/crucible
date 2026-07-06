@@ -938,6 +938,10 @@ function unarchive_run() {
 
         echo "${ARCHIVE_FILE} successfully unpacked to ${var_run_crucible}/${RUN_NAME}"
 
+        echo "Removing downloaded archive:"
+        echo -e "\t${ARCHIVE_FILE}"
+        rm -f "${ARCHIVE_FILE}"
+
         if [ "${delete_remote}" == "1" ]; then
             remote_archive_delete "${ARCHIVE}" "${do_remote}"
         fi
