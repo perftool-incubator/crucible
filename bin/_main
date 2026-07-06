@@ -633,37 +633,37 @@ elif [ "${1}" == "unarchive" ]; then
     if [ "${1}" == "help" -o "${1}" == "--help" ]; then
         archive_help
     else
-    unarchive_flags=()
-    unarchive_archives=()
-    while [ $# -gt 0 ]; do
-        case "${1}" in
-            --local)
-                unarchive_flags+=("--local")
-                ;;
-            --remote)
-                unarchive_flags+=("--remote" "${2}")
-                shift
-                ;;
-            --delete-remote)
-                unarchive_flags+=("--delete-remote")
-                ;;
-            --help)
-                archive_help
-                exit 0
-                ;;
-            *)
-                unarchive_archives+=("${1}")
-                ;;
-        esac
-        shift
-    done
-    for unarchive_name in "${unarchive_archives[@]}"; do
-        unarchive_run "${unarchive_name}" "${unarchive_flags[@]}"
-        EXIT_VAL=$?
-        if [ ${EXIT_VAL} != 0 ]; then
-            break
-        fi
-    done
+        unarchive_flags=()
+        unarchive_archives=()
+        while [ $# -gt 0 ]; do
+            case "${1}" in
+                --local)
+                    unarchive_flags+=("--local")
+                    ;;
+                --remote)
+                    unarchive_flags+=("--remote" "${2}")
+                    shift
+                    ;;
+                --delete-remote)
+                    unarchive_flags+=("--delete-remote")
+                    ;;
+                --help)
+                    archive_help
+                    exit 0
+                    ;;
+                *)
+                    unarchive_archives+=("${1}")
+                    ;;
+            esac
+            shift
+        done
+        for unarchive_name in "${unarchive_archives[@]}"; do
+            unarchive_run "${unarchive_name}" "${unarchive_flags[@]}"
+            EXIT_VAL=$?
+            if [ ${EXIT_VAL} != 0 ]; then
+                break
+            fi
+        done
     fi
 elif [ "${1}" == "reset" ]; then
     shift
