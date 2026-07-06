@@ -127,9 +127,12 @@ function remote_archive_upload() {
     archive_basename=$(basename "${archive_file}")
 
     # check if archive already exists on remote
-    local existing
-    existing=$(_run_rclone lsf "${rclone_args[@]}" "${remote_addr}/" 2>/dev/null | grep -Fx "${archive_basename}")
-    if [ -n "${existing}" ]; then
+    local lsf_output
+    if ! lsf_output=$(_run_rclone lsf "${rclone_args[@]}" "${remote_addr}/"); then
+        echo "ERROR: Failed to list remote '${remote_name}' contents"
+        return 1
+    fi
+    if echo "${lsf_output}" | grep -Fxq "${archive_basename}"; then
         echo "Archive '${archive_basename}' already exists on remote '${remote_name}', skipping"
         return 0
     fi
