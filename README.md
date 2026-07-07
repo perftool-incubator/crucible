@@ -102,6 +102,9 @@ tracer | Framework for Linux kernel latency tracer/workload tools | https://gith
 trafficgen | TRex based high speed packet forwarding throughput and loss analysis using binary search logic | https://github.com/perftool-incubator/bench-trafficgen
 uperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-uperf
 **Tools** | |
+dpdk | DPDK tooling | https://github.com/perftool-incubator/tool-dpdk
+ebpf-dpdk | eBPF DPDK tooling | https://github.com/perftool-incubator/tool-ebpf-dpdk
+ethtool | ethtool data collection | https://github.com/perftool-incubator/tool-ethtool
 forkstat | A tool to capture fork+exec statistics | https://github.com/perftool-incubator/tool-forkstat
 ftrace | Linux kernel tracing | https://github.com/perftool-incubator/tool-ftrace
 kernel | Various kernel tools (turbostat, perf, sst, tracing) | https://github.com/perftool-incubator/tool-kernel
