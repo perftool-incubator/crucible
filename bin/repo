@@ -172,7 +172,7 @@ function handle_scope() {
         fi
 
         if [ "${scope}" == "crucible" ]; then
-            exit
+            return
         fi
     fi
 

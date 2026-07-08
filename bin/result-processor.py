@@ -428,7 +428,8 @@ def ls_result_directory(result_directory):
         if data is not None:
             show_tags(data)
         else:
-            myglobal.log.error("Could not find a valid rickshaw-run.json[.xz]")
+            if myglobal.args.mode != "completion":
+                myglobal.log.error("Could not find a valid rickshaw-run.json[.xz]")
     elif myglobal.args.type == "run-id":
         # check if the result directory conforms to the "new"
         # format where the session-id/run-id is embedded in
@@ -454,7 +455,8 @@ def ls_result_directory(result_directory):
                     if myglobal.args.mode != "completion":
                         myglobal.log.error("run-id: Not Found")
             else:
-                myglobal.log.error("Could not find a valid rickshaw-run.json[.xz]")
+                if myglobal.args.mode != "completion":
+                    myglobal.log.error("Could not find a valid rickshaw-run.json[.xz]")
 
     if myglobal.args.mode != "completion":
         myglobal.log.info("")

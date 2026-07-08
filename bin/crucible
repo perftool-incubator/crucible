@@ -140,6 +140,10 @@ elif [ "${1}" == "reset" ]; then
             exit $?
         fi
     fi
+elif [ "${1}" == "result-completion" ]; then
+    shift
+    ${podman_run} --name crucible-result-processor-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${CRUCIBLE_HOME}/bin/result-processor.py completion "$@"
+    exit $?
 elif [ "${1}" == "run-ci" ]; then
     confirm_continue confirm "run crucible-ci stage 1"
     if [ "${confirm}" == "YES" ]; then
