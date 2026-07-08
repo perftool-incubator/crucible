@@ -208,4 +208,22 @@ else
     echo "WARNING: The _logger container exited prematurely!"
 fi
 
+# clean up stale controller image left by a previous update — deferred
+# to this point because the logger container held a reference to the
+# old image while it was running
+if [ -e "${STALE_CONTROLLER_IMAGE_FILE}" ]; then
+    stale_id=$(cat "${STALE_CONTROLLER_IMAGE_FILE}")
+    if [ -n "${stale_id}" ]; then
+        if podman image exists ${stale_id} 2>/dev/null; then
+            if podman rmi ${stale_id} 2>/dev/null; then
+                rm -f "${STALE_CONTROLLER_IMAGE_FILE}"
+            fi
+        else
+            rm -f "${STALE_CONTROLLER_IMAGE_FILE}"
+        fi
+    else
+        rm -f "${STALE_CONTROLLER_IMAGE_FILE}"
+    fi
+fi
+
 exit ${RET_VAL}

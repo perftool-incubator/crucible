@@ -148,8 +148,8 @@ case "${repo}" in
         else
             new_id=$(podman images -q ${CRUCIBLE_CONTROLLER_IMAGE})
             if [ -n "${old_id}" ] && [ "${old_id}" != "${new_id}" ]; then
-                echo "Removing previous controller image ${old_id}"
-                podman rmi ${old_id} 2>/dev/null || true
+                echo "Deferring removal of previous controller image ${old_id}"
+                echo "${old_id}" > "${STALE_CONTROLLER_IMAGE_FILE}"
             fi
         fi
         ;;
