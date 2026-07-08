@@ -86,6 +86,29 @@ benchmark and tool engines. It runs per-architecture instances
 native architecture runs locally; non-native architectures
 require remote builder hosts.
 
+### Remote archive storage
+
+Remote archive storage enables uploading and downloading result
+archives to centralized storage services via rclone. This supports
+S3-compatible storage (including self-hosted services like rustfs
+and MinIO) and other S3-compatible backends.
+
+Unlike the other services listed above, remote archive storage
+does not run as a long-lived container. Instead, rclone commands
+execute inside the controller container on demand when archiving
+or unarchiving results with the `--remote` flag.
+
+Configuration is stored in the `remote-archive` section of
+`services.json`. Each named remote specifies a backend type,
+credential file path, and backend-specific settings. Credential
+files are stored externally and referenced by absolute path —
+the same pattern used by registry credentials in
+`registries.json`. A `tls-verify` option (default `true`)
+controls TLS certificate verification for each remote,
+allowing connections to services with self-signed certificates.
+
+Managed via `crucible archive config [add|remove|info|default]`.
+
 ## Service lifecycle
 
 ### Starting and stopping
@@ -224,6 +247,28 @@ confirm validity.
 }
 ```
 
+The `remote-archive` section configures remote storage backends:
+
+```json
+{
+    "remote-archive": {
+        "remotes": {
+            "team-s3": {
+                "type": "s3",
+                "credentials": "/path/to/s3-creds.json",
+                "bucket": "crucible-archives",
+                "tls-verify": false,
+                "settings": {
+                    "endpoint": "https://s3.example.com:9000",
+                    "region": "us-east-1"
+                }
+            }
+        },
+        "default": "team-s3"
+    }
+}
+```
+
 ### Key settings
 
 - **httpd.port**: Web UI listening port
@@ -238,6 +283,10 @@ confirm validity.
 - **image-sourcing.use**: Enable/disable image sourcing
 - **image-sourcing.services**: Per-architecture SIS
   configuration
+- **remote-archive.remotes**: Named map of remote storage
+  backends
+- **remote-archive.default**: Default remote for `--remote
+  default`
 
 ## OpenSearch instance management
 

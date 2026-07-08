@@ -17,6 +17,7 @@ function help() {
     echo "  info [--json]               |    - Show log database summary"
     echo "  clear                       |    - Delete all log entries"
     echo "registries                    |  Get info on or configure the container image registries"
+    echo "archive config                |  Manage remote archive storage backends (add, remove, info, default)"
     echo "repo                          |  Get info on or configure the crucible and subproject git repos"
     echo "userenvs                      |  List available userenvs (official, external, deprecated)"
     echo "update                        |  Update all or part of the crucible software"
@@ -47,9 +48,14 @@ function help() {
     echo "  run-id <dir>                |    - Such as the run ID"
     echo "  primary-periods <dir>       |    - Or a list of the primary period IDs"
     echo "ls                            |  List the run results with optional arguments"
+    echo "  [--type archive]            |    List local archives; add --remote <name|all> for remote archives"
     echo "tags                          |  Manage the tags associated with run results"
-    echo "archive <dir>                 |  Create an archive of the run result pointed to by <dir> and remove it from the run directory"
+    echo "archive <dir> [--local]        |  Create an archive of the run result pointed to by <dir> and remove it from the run directory"
+    echo "  [--remote <name|all>]       |    Optional: also upload to a remote storage backend (or all configured remotes)"
+    echo "  [--delete-local]            |    Optional: delete the run directory after successful remote upload"
     echo "unarchive <archive>           |  Unpack an archive named <archive> and put it back in the run directory"
+    echo "  [--remote <name>] [--local] |    Optional: download from remote; with --local, download to archive dir only"
+    echo "  [--delete-remote]           |    Optional: delete the archive from the remote after successful download"
     echo "ps                            |  Show running crucible containers"
     echo "images                        |  Show crucible container images"
     echo "start <service list>          |  Start the specified service(s) manually.  Not required, Crucible will start the services it needs when it needs them."
@@ -83,6 +89,8 @@ function help() {
         ${CRUCIBLE_HOME}/bin/update help
     elif [ "${1}" == "run" ]; then
         run_help
+    elif [ "${1}" == "archive" -o "${1}" == "unarchive" ]; then
+        archive_help
     else
         help
     fi

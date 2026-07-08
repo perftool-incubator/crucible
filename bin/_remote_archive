@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# Remote archive storage helper functions.
+# Sourced by bin/base — requires bin/base and bin/jqlib to be loaded first.
+
+function validate_remote() {
+    local remote_name="${1}"
+
+    if [ -z "${remote_name}" ]; then
+        echo "ERROR: No remote name specified"
+        return 1
+    fi
+
+    local exists
+    exists=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes | has($name)')
+    if [ "${exists}" != "true" ]; then
+        echo "ERROR: Remote '${remote_name}' is not configured"
+        echo "       Use 'crucible archive config info' to see configured remotes"
+        return 1
+    fi
+
+    local cred_file
+    cred_file=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].credentials')
+    if [ ! -f "${cred_file}" ]; then
+        echo "ERROR: Credential file '${cred_file}' for remote '${remote_name}' does not exist"
+        return 1
+    fi
+
+    return 0
+}
+
+function _build_rclone_args() {
+    local remote_name="${1}"
+    local -n _rclone_args=${2}
+    local -n _rclone_remote_addr=${3}
+
+    local remote_type
+    remote_type=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].type')
+
+    local cred_file
+    cred_file=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].credentials')
+
+    local tls_verify
+    tls_verify=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name]."tls-verify" // true')
+
+    _rclone_args=()
+
+    if [ "${tls_verify}" == "false" ]; then
+        _rclone_args+=("--no-check-certificate")
+    fi
+
+    case "${remote_type}" in
+        s3)
+            local access_key secret_key endpoint region bucket
+
+            access_key=$(jq_query "${cred_file}" '.access_key_id')
+            secret_key=$(jq_query "${cred_file}" '.secret_access_key')
+
+            if [ "${access_key}" == "null" -o "${secret_key}" == "null" ]; then
+                echo "ERROR: Credential file '${cred_file}' missing access_key_id or secret_access_key"
+                return 1
+            fi
+
+            bucket=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].bucket')
+            endpoint=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].settings.endpoint // empty')
+            region=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].settings.region // empty')
+
+            _rclone_args+=("--s3-provider" "Other")
+            _rclone_args+=("--s3-access-key-id" "${access_key}")
+            _rclone_args+=("--s3-secret-access-key" "${secret_key}")
+            _rclone_args+=("--s3-no-check-bucket")
+
+            if [ -n "${endpoint}" ]; then
+                _rclone_args+=("--s3-endpoint" "${endpoint}")
+            fi
+
+            if [ -n "${region}" ]; then
+                _rclone_args+=("--s3-region" "${region}")
+            fi
+
+            _rclone_remote_addr=":s3:${bucket}"
+            ;;
+
+        *)
+            echo "ERROR: Unsupported remote type '${remote_type}'"
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+function _run_rclone() {
+    local rclone_cmd_args=("$@")
+
+    ${podman_run} --name crucible-rclone-${SESSION_ID} \
+        "${container_common_args[@]}" \
+        "${container_non_service_args[@]}" \
+        ${CRUCIBLE_CONTROLLER_IMAGE} \
+        rclone "${rclone_cmd_args[@]}"
+    return $?
+}
+
+function remote_archive_upload() {
+    local archive_file="${1}"
+    local remote_name="${2}"
+
+    if ! validate_remote "${remote_name}"; then
+        return 1
+    fi
+
+    if [ ! -f "${archive_file}" ]; then
+        echo "ERROR: Archive file '${archive_file}' does not exist"
+        return 1
+    fi
+
+    local rclone_args=()
+    local remote_addr=""
+
+    if ! _build_rclone_args "${remote_name}" rclone_args remote_addr; then
+        return 1
+    fi
+
+    local archive_basename
+    archive_basename=$(basename "${archive_file}")
+
+    # check if archive already exists on remote
+    local lsf_output
+    if ! lsf_output=$(_run_rclone lsf "${rclone_args[@]}" "${remote_addr}/"); then
+        echo "ERROR: Failed to list remote '${remote_name}' contents"
+        return 1
+    fi
+    if echo "${lsf_output}" | grep -Fxq "${archive_basename}"; then
+        echo "Archive '${archive_basename}' already exists on remote '${remote_name}', skipping"
+        return 0
+    fi
+
+    echo "Uploading '${archive_basename}' to remote '${remote_name}'..."
+
+    if ! _run_rclone copyto "${rclone_args[@]}" "${archive_file}" "${remote_addr}/${archive_basename}"; then
+        echo "ERROR: Failed to upload '${archive_basename}' to remote '${remote_name}'"
+        return 1
+    fi
+
+    echo "Successfully uploaded '${archive_basename}' to remote '${remote_name}'"
+    return 0
+}
+
+function remote_archive_download() {
+    local archive_name="${1}"
+    local remote_name="${2}"
+    local dest_dir="${3}"
+
+    if ! validate_remote "${remote_name}"; then
+        return 1
+    fi
+
+    if [ ! -d "${dest_dir}" ]; then
+        echo "ERROR: Destination directory '${dest_dir}' does not exist"
+        return 1
+    fi
+
+    local rclone_args=()
+    local remote_addr=""
+
+    if ! _build_rclone_args "${remote_name}" rclone_args remote_addr; then
+        return 1
+    fi
+
+    echo "Downloading '${archive_name}' from remote '${remote_name}'..."
+
+    if ! _run_rclone copyto "${rclone_args[@]}" "${remote_addr}/${archive_name}" "${dest_dir}/${archive_name}"; then
+        echo "ERROR: Failed to download '${archive_name}' from remote '${remote_name}'"
+        return 1
+    fi
+
+    echo "Successfully downloaded '${archive_name}' from remote '${remote_name}'"
+    return 0
+}
+
+function remote_archive_list() {
+    local remote_name="${1}"
+
+    if ! validate_remote "${remote_name}"; then
+        return 1
+    fi
+
+    local rclone_args=()
+    local remote_addr=""
+
+    if ! _build_rclone_args "${remote_name}" rclone_args remote_addr; then
+        return 1
+    fi
+
+    _run_rclone lsf "${rclone_args[@]}" "${remote_addr}/"
+    return $?
+}
+
+function remote_archive_delete() {
+    local archive_name="${1}"
+    local remote_name="${2}"
+
+    if ! validate_remote "${remote_name}"; then
+        return 1
+    fi
+
+    local rclone_args=()
+    local remote_addr=""
+
+    if ! _build_rclone_args "${remote_name}" rclone_args remote_addr; then
+        return 1
+    fi
+
+    echo "Deleting '${archive_name}' from remote '${remote_name}'..."
+
+    if ! _run_rclone deletefile "${rclone_args[@]}" "${remote_addr}/${archive_name}"; then
+        echo "ERROR: Failed to delete '${archive_name}' from remote '${remote_name}'"
+        return 1
+    fi
+
+    echo "Successfully deleted '${archive_name}' from remote '${remote_name}'"
+    return 0
+}

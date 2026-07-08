@@ -584,18 +584,87 @@ elif [ "${1}" == "run" ]; then
     fi
 elif [ "${1}" == "archive" ]; then
     shift
-    while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
-        archive_run "${1}"
-        EXIT_VAL=$?
+    if [ "${1}" == "help" -o "${1}" == "--help" ]; then
+        archive_help
+    elif [ "${1}" == "config" ]; then
         shift
-    done
+        if [ -z "${1}" ]; then
+            ${CRUCIBLE_HOME}/bin/_archive_config info
+            EXIT_VAL=$?
+        else
+            ${CRUCIBLE_HOME}/bin/_archive_config "$@"
+            EXIT_VAL=$?
+        fi
+    else
+        archive_flags=()
+        archive_runs=()
+        while [ $# -gt 0 ]; do
+            case "${1}" in
+                --local)
+                    archive_flags+=("--local")
+                    ;;
+                --remote)
+                    archive_flags+=("--remote" "${2}")
+                    shift
+                    ;;
+                --delete-local)
+                    archive_flags+=("--delete-local")
+                    ;;
+                --help)
+                    archive_help
+                    exit 0
+                    ;;
+                *)
+                    archive_runs+=("${1}")
+                    ;;
+            esac
+            shift
+        done
+        for archive_run_dir in "${archive_runs[@]}"; do
+            archive_run "${archive_run_dir}" "${archive_flags[@]}"
+            EXIT_VAL=$?
+            if [ ${EXIT_VAL} != 0 ]; then
+                break
+            fi
+        done
+    fi
 elif [ "${1}" == "unarchive" ]; then
     shift
-    while [ $# -gt 0 -a ${EXIT_VAL} == 0 ]; do
-        unarchive_run "${1}"
-        EXIT_VAL=$?
-        shift
-    done
+    if [ "${1}" == "help" -o "${1}" == "--help" ]; then
+        archive_help
+    else
+        unarchive_flags=()
+        unarchive_archives=()
+        while [ $# -gt 0 ]; do
+            case "${1}" in
+                --local)
+                    unarchive_flags+=("--local")
+                    ;;
+                --remote)
+                    unarchive_flags+=("--remote" "${2}")
+                    shift
+                    ;;
+                --delete-remote)
+                    unarchive_flags+=("--delete-remote")
+                    ;;
+                --help)
+                    archive_help
+                    exit 0
+                    ;;
+                *)
+                    unarchive_archives+=("${1}")
+                    ;;
+            esac
+            shift
+        done
+        for unarchive_name in "${unarchive_archives[@]}"; do
+            unarchive_run "${unarchive_name}" "${unarchive_flags[@]}"
+            EXIT_VAL=$?
+            if [ ${EXIT_VAL} != 0 ]; then
+                break
+            fi
+        done
+    fi
 elif [ "${1}" == "reset" ]; then
     shift
 

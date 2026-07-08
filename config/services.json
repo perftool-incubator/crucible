@@ -41,5 +41,9 @@
         "monitor": {
             "enabled": false
         }
+    },
+    "remote-archive": {
+        "remotes": {},
+        "default": null
     }
 }

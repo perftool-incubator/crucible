@@ -838,8 +838,118 @@ function get_result() {
 
 function unarchive_run() {
     local ARCHIVE ARCHIVE_FILE TMP_ARCHIVE_FILE LINK_ARCHIVE RUN_NAME UNARCHIVE_CMD
-    ARCHIVE=${1}
+    local do_local=""
+    local do_remote=""
+    local delete_remote=""
 
+    # parse --local/--remote flags from the argument list
+    local -a positional=()
+    while [ $# -gt 0 ]; do
+        case "${1}" in
+            --local)
+                do_local=1
+                ;;
+            --remote)
+                shift
+                if [ -z "${1}" ]; then
+                    echo "ERROR: --remote requires a remote name"
+                    return 1
+                fi
+                do_remote="${1}"
+                ;;
+            --delete-remote)
+                delete_remote=1
+                ;;
+            *)
+                positional+=("${1}")
+                ;;
+        esac
+        shift
+    done
+
+    if [ ${#positional[@]} -eq 0 ]; then
+        echo "ERROR: No archive specified"
+        return 1
+    fi
+    ARCHIVE="${positional[0]}"
+
+    # default behavior: no flags = local unarchive only
+    if [ -z "${do_local}" -a -z "${do_remote}" ]; then
+        do_local=1
+    fi
+
+    if [ -n "${delete_remote}" -a -z "${do_remote}" ]; then
+        echo "ERROR: --delete-remote requires --remote"
+        return 1
+    fi
+
+    # resolve default remote
+    if [ -n "${do_remote}" ] && [ "${do_remote}" == "default" ]; then
+        do_remote=$(jq_query ${SERVICES_CFG} '."remote-archive".default')
+        if [ "${do_remote}" == "null" ]; then
+            echo "ERROR: No default remote configured"
+            return 1
+        fi
+    fi
+
+    # remote download mode
+    if [ -n "${do_remote}" ]; then
+        if ! validate_remote "${do_remote}"; then
+            return 1
+        fi
+
+        # ensure archive name has .tar.xz extension
+        if ! echo "${ARCHIVE}" | grep -q '\.tar\.xz$'; then
+            ARCHIVE="${ARCHIVE}.tar.xz"
+        fi
+
+        if ! remote_archive_download "${ARCHIVE}" "${do_remote}" "${var_archive_crucible}"; then
+            return 1
+        fi
+
+        ARCHIVE_FILE="${var_archive_crucible}/${ARCHIVE}"
+
+        # --local --remote: download to local archive dir only, don't extract
+        if [ "${do_local}" == "1" ]; then
+            echo "Archive downloaded to ${ARCHIVE_FILE}"
+            if [ "${delete_remote}" == "1" ]; then
+                remote_archive_delete "${ARCHIVE}" "${do_remote}"
+            fi
+            return 0
+        fi
+
+        # --remote only: download, extract to run dir, remove local copy
+        ARCHIVE_NAME=$(basename ${ARCHIVE_FILE})
+        RUN_NAME=$(echo "${ARCHIVE_NAME}" | sed -e "s/\.tar\.xz//")
+
+        if [ -e "${var_run_crucible}/${RUN_NAME}" ]; then
+            echo "ERROR: There is already a run result at ${var_run_crucible}/${RUN_NAME}"
+            return 1
+        fi
+
+        UNARCHIVE_CMD="unxz --threads=0 --stdout ${ARCHIVE_FILE} | tar --extract --directory=${var_run_crucible}"
+
+        echo "Unpacking archive:"
+        ${podman_run} --name crucible-unarchive-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${UNARCHIVE_CMD}"
+        if [ $? != 0 ]; then
+            echo "ERROR: Failed to unpack ${ARCHIVE_FILE} to ${var_run_crucible}/${RUN_NAME}"
+            return 1
+        fi
+
+        echo "${ARCHIVE_FILE} successfully unpacked to ${var_run_crucible}/${RUN_NAME}"
+
+        echo "Removing downloaded archive:"
+        echo -e "\t${ARCHIVE_FILE}"
+        rm -f "${ARCHIVE_FILE}"
+
+        if [ "${delete_remote}" == "1" ]; then
+            remote_archive_delete "${ARCHIVE}" "${do_remote}"
+        fi
+
+        return 0
+    fi
+
+    # local-only unarchive (original behavior)
     if ! echo "${ARCHIVE}" | grep -q "^${var_archive_crucible}"; then
         ARCHIVE_FILE="${var_archive_crucible}/${ARCHIVE}"
     else
@@ -847,7 +957,7 @@ function unarchive_run() {
     fi
 
     if [ ! -e "${ARCHIVE_FILE}" ]; then
-        echo "ERROR: The specified archive does not exit (${ARCHIVE_FILE})"
+        echo "ERROR: The specified archive does not exist (${ARCHIVE_FILE})"
         return 1
     fi
 
@@ -904,7 +1014,85 @@ function unarchive_run() {
 
 function archive_run() {
     local RUN RUN_DIR TMP_RUN_DIR LINK_CLEANUP RUN_NAME ARCHIVE_NAME ARCHIVE_CMD
-    RUN=${1}
+    local do_local=""
+    local explicit_local=""
+    local do_remote=""
+    local delete_local=""
+    local -a remote_names=()
+
+    # parse --local/--remote flags from the argument list
+    local -a positional=()
+    while [ $# -gt 0 ]; do
+        case "${1}" in
+            --local)
+                do_local=1
+                explicit_local=1
+                ;;
+            --remote)
+                shift
+                if [ -z "${1}" ]; then
+                    echo "ERROR: --remote requires a remote name or 'all'"
+                    return 1
+                fi
+                do_remote="${1}"
+                ;;
+            --delete-local)
+                delete_local=1
+                ;;
+            *)
+                positional+=("${1}")
+                ;;
+        esac
+        shift
+    done
+
+    if [ ${#positional[@]} -eq 0 ]; then
+        echo "ERROR: No run directory specified"
+        return 1
+    fi
+    RUN="${positional[0]}"
+
+    # default behavior: no flags = local only
+    if [ -z "${do_local}" -a -z "${do_remote}" ]; then
+        do_local=1
+    fi
+
+    if [ -n "${delete_local}" -a -z "${do_remote}" ]; then
+        echo "ERROR: --delete-local requires --remote"
+        return 1
+    fi
+
+    # resolve remote names
+    if [ -n "${do_remote}" ]; then
+        if [ "${do_remote}" == "all" ]; then
+            local remote_count
+            remote_count=$(jq_query ${SERVICES_CFG} '."remote-archive".remotes | length')
+            if [ "${remote_count}" == "0" ]; then
+                echo "ERROR: No remotes configured"
+                return 1
+            fi
+            while IFS= read -r rname; do
+                remote_names+=("${rname}")
+            done < <(jq_query ${SERVICES_CFG} '."remote-archive".remotes | keys[]')
+        elif [ "${do_remote}" == "default" ]; then
+            local default_name
+            default_name=$(jq_query ${SERVICES_CFG} '."remote-archive".default')
+            if [ "${default_name}" == "null" ]; then
+                echo "ERROR: No default remote configured"
+                return 1
+            fi
+            remote_names+=("${default_name}")
+        else
+            remote_names+=("${do_remote}")
+        fi
+
+        local rname
+        for rname in "${remote_names[@]}"; do
+            if ! validate_remote "${rname}"; then
+                return 1
+            fi
+        done
+    fi
 
     if ! echo "${RUN}" | grep -q "^${var_run_crucible}"; then
         RUN_DIR="${var_run_crucible}/${RUN}"
@@ -934,18 +1122,55 @@ function archive_run() {
     BASE_DIR=$(dirname ${RUN_DIR})
     ARCHIVE_NAME="${RUN_NAME}.tar.xz"
 
-    if [ -e "${var_archive_crucible}/${ARCHIVE_NAME}" ]; then
+    local archive_dest
+    if [ "${do_local}" == "1" ]; then
+        archive_dest="${var_archive_crucible}"
+    else
+        archive_dest=$(mktemp -d -p "${var_crucible}")
+    fi
+
+    if [ "${do_local}" == "1" ] && [ -e "${var_archive_crucible}/${ARCHIVE_NAME}" ]; then
         echo "ERROR: There is already an archive at ${var_archive_crucible}/${ARCHIVE_NAME}"
         return 1
     fi
 
-    ARCHIVE_CMD="pushd ${BASE_DIR} > /dev/null && tar --create ${RUN_NAME} | xz --threads=0 --stdout > ${var_archive_crucible}/${ARCHIVE_NAME}"
+    ARCHIVE_CMD="pushd ${BASE_DIR} > /dev/null && tar --create ${RUN_NAME} | xz --threads=0 --stdout > ${archive_dest}/${ARCHIVE_NAME}"
 
     echo "Creating archive:"
     ${podman_run} --name crucible-archive-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} /bin/bash -c "${ARCHIVE_CMD}"
-    if [ $? == 0 ]; then
-        echo "${RUN_DIR} successfully archived to ${var_archive_crucible}/${ARCHIVE_NAME}"
+    if [ $? != 0 ]; then
+        echo "ERROR: Failed to archive ${RUN_DIR} to ${archive_dest}/${ARCHIVE_NAME}"
+        if [ "${do_local}" != "1" ]; then
+            rm -rf "${archive_dest}"
+        fi
+        return 1
+    fi
 
+    echo "${RUN_DIR} successfully archived to ${archive_dest}/${ARCHIVE_NAME}"
+
+    # upload to remote(s) if requested
+    if [ -n "${do_remote}" ]; then
+        local rname
+        for rname in "${remote_names[@]}"; do
+            if ! remote_archive_upload "${archive_dest}/${ARCHIVE_NAME}" "${rname}"; then
+                if [ "${do_local}" != "1" ]; then
+                    echo "Staged archive preserved at: ${archive_dest}/${ARCHIVE_NAME}"
+                    echo "You can retry the upload manually or remove it when no longer needed."
+                fi
+                return 1
+            fi
+        done
+    fi
+
+    # clean up temp directory if not keeping local
+    if [ "${do_local}" != "1" ]; then
+        rm -rf "${archive_dest}"
+    fi
+
+    # no flags = original move-to-archive behavior, delete the run dir
+    # --delete-local = explicit request to delete after successful upload
+    # any other flags = copy behavior, preserve the source
+    if [ -z "${do_remote}" -a -z "${explicit_local}" ] || [ "${delete_local}" == "1" ]; then
         echo "Removing non-archived data:"
 
         echo -e "\t${RUN_DIR}"
@@ -961,9 +1186,6 @@ function archive_run() {
                return 1
            fi
         fi
-    else
-        echo "ERROR: Failed to archive ${RUN_DIR} to ${var_archive_crucible}/${ARCHIVE_NAME}"
-        return 1
     fi
 
     return 0
@@ -1202,6 +1424,39 @@ function run_manage_opensearch() {
         "$@"
 }
 
+function archive_help() {
+    echo "Usage:"
+    echo "  crucible archive <dir> [<dir2> ...] [OPTIONS]"
+    echo "  crucible unarchive <archive> [OPTIONS]"
+    echo "  crucible archive config <command> [OPTIONS]"
+    echo ""
+    echo "Archive:"
+    echo "  crucible archive <dir>                          Create a local archive and remove the run directory"
+    echo "  crucible archive <dir> --remote <name|all>      Upload to a remote (run directory preserved)"
+    echo "  crucible archive <dir> --local                  Create a local archive (run directory preserved)"
+    echo "  crucible archive <dir> --local --remote <name>  Create local archive and upload to remote"
+    echo "  crucible archive <dir> --remote <name> --delete-local"
+    echo "                                                  Upload to remote, then delete the run directory"
+    echo ""
+    echo "Unarchive:"
+    echo "  crucible unarchive <archive>                    Extract from local archive to run directory"
+    echo "  crucible unarchive <name> --remote <name>       Download from remote and extract to run directory"
+    echo "  crucible unarchive <name> --local --remote <name>"
+    echo "                                                  Download from remote to local archive only"
+    echo "  crucible unarchive <name> --remote <name> --delete-remote"
+    echo "                                                  Download from remote, then delete the remote copy"
+    echo ""
+    echo "Remote names: a configured name, 'all' (archive only), or 'default'"
+    echo ""
+    echo "Config (manage remote storage backends):"
+    echo "  crucible archive config info [<name>]           Show configured remotes"
+    echo "  crucible archive config add <name> --type s3 --credentials <path> --bucket <name>"
+    echo "                              [--tls-verify <true|false>] [--setting key=value ...]"
+    echo "  crucible archive config remove <name>           Remove a remote"
+    echo "  crucible archive config default <name>          Set the default remote"
+    echo "  crucible archive config default --clear         Clear the default remote"
+}
+
 function run_help() {
     echo "Usage: crucible run [OPTIONS] <run-file>"
     echo ""
@@ -1341,6 +1596,9 @@ podman_ps="podman_wrapper ps"
 
 # load the jqlib library
 source ${CRUCIBLE_HOME}/bin/jqlib
+
+# load remote archive helper functions
+source ${CRUCIBLE_HOME}/bin/_remote_archive
 
 SERVICES_CFG=${CRUCIBLE_HOME}/config/services.json
 SERVICES_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/services.json
