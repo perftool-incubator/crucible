@@ -2,159 +2,693 @@
 # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
 
+# ---------------------------------------------------------------------------
+# Helper functions: dynamic data retrieval
+# ---------------------------------------------------------------------------
+
+_crucible_get_subproject_names() {
+    find "${CRUCIBLE_HOME}/subprojects/" -type l -printf '%f\n' 2>/dev/null
+}
+
+_crucible_get_subproject_paths() {
+    find "${CRUCIBLE_HOME}/subprojects/" -type l -printf '%P\n' 2>/dev/null
+}
+
+_crucible_get_remote_names() {
+    jq -r '."remote-archive".remotes // {} | keys[]' "${CRUCIBLE_HOME}/config/services.json" 2>/dev/null
+}
+
+_crucible_get_run_dirs() {
+    crucible result-completion --type run-dir 2>/dev/null | tr -d '\r'
+}
+
+_crucible_get_archives() {
+    crucible result-completion --type archive 2>/dev/null | tr -d '\r'
+}
+
+_crucible_get_run_ids() {
+    crucible result-completion --type run-id 2>/dev/null | tr -d '\r'
+}
+
+_crucible_get_opensearch_instances() {
+    crucible opensearch list-instance-names 2>/dev/null
+}
+
+_crucible_get_session_ids() {
+    . "${CRUCIBLE_HOME}/bin/base"
+    crucible_log getsessionids "${LOG_DB}"
+}
+
+# Remove flags already present in COMP_WORDS from a candidate list.
+# Usage: _crucible_filter_used_flags <start_pos> <flag1> [flag2 ...]
+# Outputs the flags not yet on the command line.
+_crucible_filter_used_flags() {
+    local start_pos="${1}"
+    shift
+    local flag used found remaining=""
+    local i
+
+    for flag in "$@"; do
+        found=0
+        for ((i = start_pos; i < num_index; i++)); do
+            if [ "${COMP_WORDS[$i]}" == "${flag}" ]; then
+                found=1
+                break
+            fi
+        done
+        if [ "${found}" -eq 0 ]; then
+            remaining+="${flag} "
+        fi
+    done
+    echo "${remaining}"
+}
+
+# ---------------------------------------------------------------------------
+# Per-command completion functions
+# ---------------------------------------------------------------------------
+
+_complete_run() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --log-level)
+            COMPREPLY=($(compgen -W "normal verbose debug verbose-debug" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --log-level --help)
+    COMPREPLY=($(compgen -W "${remaining}" -f -- "${cur}"))
+    compopt -o filenames
+}
+
+_complete_log_view() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+    local all_flags="--stream --grep --since --until --format --color --no-color --count --head --tail --follow --raw"
+
+    case "${prev}" in
+        --stream)
+            COMPREPLY=($(compgen -W "stdout stderr" -- "${cur}"))
+            return
+            ;;
+        --format)
+            COMPREPLY=($(compgen -W "plain json" -- "${cur}"))
+            return
+            ;;
+        --grep|--since|--until|--head|--tail)
+            return
+            ;;
+    esac
+
+    if [ "${num_words}" -eq 4 ]; then
+        local remaining
+        remaining=$(_crucible_filter_used_flags 3 ${all_flags})
+        COMPREPLY=($(compgen -W "first last sessionid ${remaining}" -- "${cur}"))
+        return
+    fi
+
+    if [ "${num_words}" -eq 5 ] && [ "${COMP_WORDS[3]}" == "sessionid" ]; then
+        local session_ids
+        session_ids=$(_crucible_get_session_ids)
+        COMPREPLY=($(compgen -W "${session_ids}" -- "${cur}"))
+        return
+    fi
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 3 ${all_flags})
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_log_sessions() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --format)
+            COMPREPLY=($(compgen -W "plain json" -- "${cur}"))
+            return
+            ;;
+        --sort)
+            COMPREPLY=($(compgen -W "timestamp command" -- "${cur}"))
+            return
+            ;;
+        --order)
+            COMPREPLY=($(compgen -W "asc desc" -- "${cur}"))
+            return
+            ;;
+        --grep)
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 3 --grep --format --color --no-color --sort --order)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_log_info() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local remaining
+    remaining=$(_crucible_filter_used_flags 3 --json)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_get_result() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --run)
+            COMPREPLY=($(compgen -W "$(_crucible_get_run_ids)" -- "${cur}"))
+            return
+            ;;
+        --output-format)
+            COMPREPLY=($(compgen -W "txt json yaml" -- "${cur}"))
+            return
+            ;;
+        --user|--email|--harness|--output-dir)
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 3 --run --user --email --harness --debug --output-dir --output-format)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_get_metric() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --run)
+            COMPREPLY=($(compgen -W "$(_crucible_get_run_ids)" -- "${cur}"))
+            return
+            ;;
+        --output-format)
+            COMPREPLY=($(compgen -W "json table csv" -- "${cur}"))
+            return
+            ;;
+        --date-format)
+            COMPREPLY=($(compgen -W "default epoch_ms" -- "${cur}"))
+            return
+            ;;
+        --output-content)
+            COMPREPLY=($(compgen -W "all values headers" -- "${cur}"))
+            return
+            ;;
+        --horizontal-break)
+            COMPREPLY=($(compgen -W "yes no" -- "${cur}"))
+            return
+            ;;
+        --period|--source|--type|--begin|--end|--resolution|--breakout|--filter|--decimal-places|--timestamp-rows)
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 3 --run --period --source --type --begin --end --resolution --breakout --filter --output-format --date-format --decimal-places --output-content --horizontal-break --timestamp-rows)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_ls() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --type)
+            COMPREPLY=($(compgen -W "archive tags run-id short" -- "${cur}"))
+            return
+            ;;
+        --result-dir)
+            COMPREPLY=($(compgen -W "$(_crucible_get_run_dirs)" -- "${cur}"))
+            return
+            ;;
+        --filter-type)
+            COMPREPLY=($(compgen -W "name tags" -- "${cur}"))
+            return
+            ;;
+        --remote)
+            COMPREPLY=($(compgen -W "$(_crucible_get_remote_names) all" -- "${cur}"))
+            return
+            ;;
+        --filters)
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --type --result-dir --filter-type --filters --remote)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_tags() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --action)
+            COMPREPLY=($(compgen -W "add remove ls" -- "${cur}"))
+            return
+            ;;
+        --result-dir)
+            COMPREPLY=($(compgen -W "$(_crucible_get_run_dirs)" -- "${cur}"))
+            return
+            ;;
+        --tags)
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --action --result-dir --tags)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_archive() {
+    local cur="${COMP_WORDS[${num_index}]}"
+
+    if [ "${COMP_WORDS[2]}" == "config" ]; then
+        _complete_archive_config
+        return
+    fi
+
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --remote)
+            COMPREPLY=($(compgen -W "$(_crucible_get_remote_names) all" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --local --remote --delete-local)
+    COMPREPLY=($(compgen -W "${remaining} $(_crucible_get_run_dirs)" -- "${cur}"))
+}
+
+_complete_archive_config() {
+    local cur="${COMP_WORDS[${num_index}]}"
+
+    if [ "${num_words}" -eq 4 ]; then
+        COMPREPLY=($(compgen -W "add remove info default" -- "${cur}"))
+        return
+    fi
+
+    case "${COMP_WORDS[3]}" in
+        add)
+            if [ "${num_words}" -eq 5 ]; then
+                return
+            fi
+            local prev="${COMP_WORDS[$((num_index - 1))]}"
+            case "${prev}" in
+                --type)
+                    COMPREPLY=($(compgen -W "s3" -- "${cur}"))
+                    return
+                    ;;
+                --credentials)
+                    COMPREPLY=($(compgen -f -- "${cur}"))
+                    compopt -o filenames
+                    return
+                    ;;
+                --tls-verify)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
+                    return
+                    ;;
+                --bucket|--setting)
+                    return
+                    ;;
+            esac
+            local remaining
+            remaining=$(_crucible_filter_used_flags 4 --type --credentials --bucket --tls-verify --setting)
+            # --setting is repeatable, always offer it
+            if ! echo "${remaining}" | grep -q -- "--setting"; then
+                remaining+="--setting "
+            fi
+            COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+            ;;
+        remove)
+            if [ "${num_words}" -eq 5 ]; then
+                COMPREPLY=($(compgen -W "$(_crucible_get_remote_names)" -- "${cur}"))
+            fi
+            ;;
+        default)
+            if [ "${num_words}" -eq 5 ]; then
+                COMPREPLY=($(compgen -W "$(_crucible_get_remote_names) --clear" -- "${cur}"))
+            fi
+            ;;
+    esac
+}
+
+_complete_unarchive() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --remote)
+            COMPREPLY=($(compgen -W "$(_crucible_get_remote_names)" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --local --remote --delete-remote)
+    COMPREPLY=($(compgen -W "${remaining} $(_crucible_get_archives)" -- "${cur}"))
+}
+
+_complete_postprocess() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --log-level)
+            COMPREPLY=($(compgen -W "normal verbose debug verbose-debug" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --log-level)
+    COMPREPLY=($(compgen -W "${remaining} $(_crucible_get_run_dirs)" -- "${cur}"))
+}
+
+_complete_index() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --log-level)
+            COMPREPLY=($(compgen -W "normal verbose debug verbose-debug" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --log-level)
+    COMPREPLY=($(compgen -W "${remaining} $(_crucible_get_run_dirs)" -- "${cur}"))
+}
+
+_complete_rm() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --run)
+            COMPREPLY=($(compgen -W "$(_crucible_get_run_ids)" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --run)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_extract() {
+    local cur="${COMP_WORDS[${num_index}]}"
+
+    if [ "${num_words}" -eq 4 ]; then
+        case "${COMP_WORDS[2]}" in
+            run-id|primary-periods)
+                COMPREPLY=($(compgen -W "$(_crucible_get_run_dirs)" -- "${cur}"))
+                ;;
+        esac
+    fi
+}
+
+_complete_opensearch() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${COMP_WORDS[2]}" in
+        add)
+            case "${prev}" in
+                --cdmver)
+                    COMPREPLY=($(compgen -W "v7dev v8dev v9dev" -- "${cur}"))
+                    return
+                    ;;
+                --name|--host|--userpass)
+                    return
+                    ;;
+            esac
+            local remaining
+            remaining=$(_crucible_filter_used_flags 3 --name --host --cdmver --userpass --query --index)
+            COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+            ;;
+        remove)
+            case "${prev}" in
+                --name)
+                    COMPREPLY=($(compgen -W "$(_crucible_get_opensearch_instances)" -- "${cur}"))
+                    return
+                    ;;
+            esac
+            local remaining
+            remaining=$(_crucible_filter_used_flags 3 --name)
+            COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+            ;;
+        update)
+            case "${prev}" in
+                --cdmver)
+                    COMPREPLY=($(compgen -W "v7dev v8dev v9dev" -- "${cur}"))
+                    return
+                    ;;
+                --name)
+                    COMPREPLY=($(compgen -W "$(_crucible_get_opensearch_instances)" -- "${cur}"))
+                    return
+                    ;;
+                --host|--userpass)
+                    return
+                    ;;
+            esac
+            local remaining
+            remaining=$(_crucible_filter_used_flags 3 --name --host --cdmver --userpass --remove-userpass --query --no-query --index)
+            COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+            ;;
+        instance-host-access-opt|instance-cdmver-opt)
+            case "${prev}" in
+                --name)
+                    COMPREPLY=($(compgen -W "$(_crucible_get_opensearch_instances)" -- "${cur}"))
+                    return
+                    ;;
+            esac
+            local remaining
+            remaining=$(_crucible_filter_used_flags 3 --name)
+            COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+            ;;
+    esac
+}
+
+_complete_repo() {
+    local cur="${COMP_WORDS[${num_index}]}"
+
+    case "${COMP_WORDS[2]}" in
+        info|details)
+            if [ "${num_words}" -eq 4 ]; then
+                COMPREPLY=($(compgen -W "all crucible $(_crucible_get_subproject_paths)" -- "${cur}"))
+            fi
+            ;;
+        config)
+            if [ "${num_words}" -eq 4 ]; then
+                COMPREPLY=($(compgen -W "add help remove show update" -- "${cur}"))
+            fi
+            ;;
+    esac
+}
+
+_complete_registries() {
+    local cur="${COMP_WORDS[${num_index}]}"
+
+    case "${COMP_WORDS[2]}" in
+        add)
+            if [ "${num_words}" -eq 4 ]; then
+                COMPREPLY=($(compgen -W "private-engine userenv" -- "${cur}"))
+            fi
+            ;;
+    esac
+}
+
+_complete_start_stop() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local i
+
+    for ((i = 2; i < num_index; i++)); do
+        if [ "${COMP_WORDS[$i]}" == "all" ]; then
+            return
+        fi
+    done
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 all cdm-server httpd image-sourcing opensearch valkey)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+_complete_userenvs_list() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local remaining
+    remaining=$(_crucible_filter_used_flags 3 --official --external --deprecated)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
+# ---------------------------------------------------------------------------
+# Main completion function
+# ---------------------------------------------------------------------------
+
 _crucible_completions() {
-    if [ -z "$CRUCIBLE_HOME" ]; then
+    if [ -z "${CRUCIBLE_HOME}" ]; then
         if [ -e /etc/sysconfig/crucible ]; then
             . /etc/sysconfig/crucible
-            if [ -z "$CRUCIBLE_HOME" ]; then
+            if [ -z "${CRUCIBLE_HOME}" ]; then
                 return
             fi
         else
             return
         fi
     fi
-    num_words=${#COMP_WORDS[@]} # Total number of words on the command
-    let num_index=$num_words-1
-    if [ $num_words -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo registries userenvs update run run-ci wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${COMP_WORDS[1]}"))
-    elif [ $num_words -eq 3 ]; then
+
+    local num_words=${#COMP_WORDS[@]}
+    local num_index=$((num_words - 1))
+    local cur="${COMP_WORDS[${num_index}]}"
+
+    # Position 2: top-level commands
+    if [ "${num_words}" -eq 2 ]; then
+        COMPREPLY=($(compgen -W "help log repo registries userenvs update run run-ci wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${cur}"))
+        return
+    fi
+
+    # Position 3: subcommands
+    if [ "${num_words}" -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "archive log repo unarchive userenvs update run" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "archive console extract get images index log ls opensearch postprocess ps registries repo reset rm run run-ci start stop tags unarchive update userenvs wrapper" -- "${cur}"))
                 ;;
             log)
-                COMPREPLY=($(compgen -W "clear info init sessions tidy view" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "clear info init sessions tidy view" -- "${cur}"))
                 ;;
             get)
-                COMPREPLY=($(compgen -W "result metric" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "result metric" -- "${cur}"))
                 ;;
             repo)
-                COMPREPLY=($(compgen -W "info details config" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "info details config" -- "${cur}"))
                 ;;
             registries)
-                COMPREPLY=($(compgen -W "add info" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "add info" -- "${cur}"))
                 ;;
             userenvs)
-                COMPREPLY=($(compgen -W "list help" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "list help" -- "${cur}"))
                 ;;
             update)
-                COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "all crucible controller-image $(_crucible_get_subproject_names)" -- "${cur}"))
                 ;;
             run)
-                COMPREPLY=($(compgen -W "--log-level --help" -f -- "${COMP_WORDS[2]}"))
+                _complete_run
                 ;;
             wrapper)
-                COMPREPLY=($(compgen -c -f -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -c -f -- "${cur}"))
+                compopt -o filenames
                 ;;
             start|stop)
-                COMPREPLY=($(compgen -W "all cdm-server httpd image-sourcing opensearch valkey" -- "${COMP_WORDS[2]}"))
+                _complete_start_stop
                 ;;
             rm)
-                COMPREPLY=($(compgen -W "--run" -- "${COMP_WORDS[2]}"))
+                _complete_rm
                 ;;
             extract)
-                COMPREPLY=($(compgen -W "run-id primary-periods" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "run-id primary-periods" -- "${cur}"))
                 ;;
             ls)
-                COMPREPLY=($(compgen -W "--type --result-dir --filter-type --filters --remote" -- "${COMP_WORDS[2]}"))
+                _complete_ls
                 ;;
             tags)
-                COMPREPLY=($(compgen -W "--action" -- "${COMP_WORDS[2]}"))
+                _complete_tags
                 ;;
             postprocess)
-                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
+                _complete_postprocess
                 ;;
             index)
-                COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
+                _complete_index
                 ;;
             archive)
-                COMPREPLY=($(compgen -W "config --local --remote --delete-local $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "config --local --remote --delete-local $(_crucible_get_run_dirs)" -- "${cur}"))
                 ;;
             unarchive)
-                COMPREPLY=($(compgen -W "--local --remote --delete-remote $(crucible result-completion --type archive 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[2]}"))
+                _complete_unarchive
                 ;;
             reset)
-                COMPREPLY=($(compgen -W "hard" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "hard" -- "${cur}"))
                 ;;
             opensearch)
-                COMPREPLY=($(compgen -W "info add remove update query-opt index-instance instance-host-access-opt instance-cdmver-opt list-instance-names repair" -- "${COMP_WORDS[2]}"))
+                COMPREPLY=($(compgen -W "info add remove update query-opt index-instance instance-host-access-opt instance-cdmver-opt list-instance-names repair" -- "${cur}"))
                 ;;
         esac
-    elif [ "${COMP_WORDS[$num_index-1]}" == "--log-level" ]; then
-        COMPREPLY=($(compgen -W "normal verbose debug verbose-debug" -- "${COMP_WORDS[$num_index]}"))
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "ls" ]; then
-        case "${COMP_WORDS[2]}" in
-            --type)
-                COMPREPLY=($(compgen -W "archive tags run-id short" -- "${COMP_WORDS[3]}"))
-                ;;
-            --result-dir)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[3]}"))
-                ;;
-            --filter-type)
-                COMPREPLY=($(compgen -W "name tags" -- "${COMP_WORDS[3]}"))
-                ;;
-        esac
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "tags" ]; then
-        case "${COMP_WORDS[2]}" in
-            --action)
-                COMPREPLY=($(compgen -W "add remove ls" -- "${COMP_WORDS[3]}"))
-                ;;
-        esac
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "extract" ]; then
-        case "${COMP_WORDS[2]}" in
-            run-id|primary-periods)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[3]}"))
-                ;;
-        esac
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "repo" ]; then
-        case "${COMP_WORDS[2]}" in
-            info|details)
-                COMPREPLY=($(compgen -W "all crucible $(cd $CRUCIBLE_HOME/subprojects/; find . -type l | sed 'sX./XX')" -- "${COMP_WORDS[3]}"))
-                ;;
-            config)
-                COMPREPLY=($(compgen -W "add help remove show update" -- "${COMP_WORDS[3]}"))
-                ;;
-        esac
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "archive" ]; then
-        case "${COMP_WORDS[2]}" in
-            config)
-                COMPREPLY=($(compgen -W "add remove info default" -- "${COMP_WORDS[3]}"))
-                ;;
-        esac
-    elif [ ${COMP_WORDS[1]} == "userenvs" -a "${COMP_WORDS[2]}" == "list" ]; then
-        COMPREPLY=($(compgen -W "--official --external --deprecated" -- "${COMP_WORDS[$num_index]}"))
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "rm" ]; then
-        case "${COMP_WORDS[2]}" in
-            --run)
-                COMPREPLY=($(compgen -W "$(crucible result-completion --type run-id 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[3]}"))
-                ;;
-        esac
-    elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "sessions" ]; then
-        COMPREPLY=($(compgen -W "--grep --format --color --no-color --sort --order" -- "${COMP_WORDS[$num_index]}"))
-    elif [ ${COMP_WORDS[1]} == "log" -a "${COMP_WORDS[2]}" == "view" ]; then
-        local log_view_flags="--stream --grep --since --until --format --color --no-color --count --head --tail --follow --raw"
-        if [ $num_words -eq 4 ]; then
-            COMPREPLY=($(compgen -W "first last sessionid ${log_view_flags}" -- "${COMP_WORDS[3]}"))
-        elif [ $num_words -eq 5 -a "${COMP_WORDS[3]}" == "sessionid" ]; then
-            . ${CRUCIBLE_HOME}/bin/base
-            session_ids=$(crucible_log getsessionids ${LOG_DB})
-            COMPREPLY=($(compgen -W "${session_ids}" -- "${COMP_WORDS[4]}"))
-        else
-            COMPREPLY=($(compgen -W "${log_view_flags}" -- "${COMP_WORDS[$num_index]}"))
-        fi
-    elif [ "$(expr $num_words % 2)" -eq 0 -a ${COMP_WORDS[1]} == "log" ]; then
-        case "${COMP_WORDS[2]}" in
-            info)
-                COMPREPLY=($(compgen -W "--json" -- "${COMP_WORDS[3]}"))
-                ;;
-        esac
-    elif [ ${COMP_WORDS[1]} == "run" ]; then
-        COMPREPLY=($(compgen -W "--log-level --help" -f -- "${COMP_WORDS[$num_index]}"))
-    elif [ ${COMP_WORDS[1]} == "postprocess" ]; then
-        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[$num_index]}"))
-    elif [ ${COMP_WORDS[1]} == "index" ]; then
-        COMPREPLY=($(compgen -W "--log-level $(crucible result-completion --type run-dir 2>/dev/null | tr -d '\r')" -- "${COMP_WORDS[$num_index]}"))
+        return
     fi
+
+    # Position 4+: per-command deeper completion
+    case "${COMP_WORDS[1]}" in
+        run)
+            _complete_run
+            ;;
+        log)
+            case "${COMP_WORDS[2]}" in
+                view)     _complete_log_view ;;
+                sessions) _complete_log_sessions ;;
+                info)     _complete_log_info ;;
+            esac
+            ;;
+        get)
+            case "${COMP_WORDS[2]}" in
+                result) _complete_get_result ;;
+                metric) _complete_get_metric ;;
+            esac
+            ;;
+        ls)
+            _complete_ls
+            ;;
+        tags)
+            _complete_tags
+            ;;
+        archive)
+            _complete_archive
+            ;;
+        unarchive)
+            _complete_unarchive
+            ;;
+        postprocess)
+            _complete_postprocess
+            ;;
+        index)
+            _complete_index
+            ;;
+        rm)
+            _complete_rm
+            ;;
+        extract)
+            _complete_extract
+            ;;
+        opensearch)
+            _complete_opensearch
+            ;;
+        repo)
+            _complete_repo
+            ;;
+        registries)
+            _complete_registries
+            ;;
+        userenvs)
+            if [ "${COMP_WORDS[2]}" == "list" ]; then
+                _complete_userenvs_list
+            fi
+            ;;
+        start|stop)
+            _complete_start_stop
+            ;;
+        wrapper)
+            COMPREPLY=($(compgen -c -f -- "${cur}"))
+            ;;
+    esac
 }
 
-complete -o nosort -o filenames -F _crucible_completions crucible
+complete -o nosort -F _crucible_completions crucible
