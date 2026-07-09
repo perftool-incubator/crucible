@@ -162,7 +162,7 @@ function usage {
         --engine-registry <full registry url>
         Engine registry (required for install).
 
-        --quay-engine-expiration-refresh-token <authentication file>>
+        --quay-engine-expiration-refresh-token <authentication file>
         Quay OAuth authentication token file for refreshing engine image expiration timestamps.
 
         --quay-engine-expiration-refresh-api-url <api url>
@@ -676,7 +676,7 @@ function update_repos_config() {
                 fi
             fi
         fi
-        if echo "${BRANCH}" | grep -q "^\(20[0-9][0-9]\.[1234]\|version-test\|ci-verstion-test\)$"; then
+        if echo "${BRANCH}" | grep -q "^\(20[0-9][0-9]\.[1234]\|version-test\|ci-version-test\)$"; then
             # this is a version install so lock it down
             update_mode=1
             MODE="locked"
@@ -982,7 +982,7 @@ _SYSCFG_
     CRUCIBLE_HOME=${INSTALL_PATH} source ${INSTALL_PATH}/bin/base
 else
     SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY="\"${SYSCONFIG_CRUCIBLE_ENGINE_TLS_VERIFY}\""
-    if [ -n "${SYSCONFIG_CRUCIBLE_ENGINE_AUTH_FILE}" ]; then
+    if [ -n "${SYSCONFIG_CRUCIBLE_ENGINE_AUTH}" ]; then
         SYSCONFIG_CRUCIBLE_ENGINE_AUTH="\"${SYSCONFIG_CRUCIBLE_ENGINE_AUTH}\""
     fi
     if [ -n "${CRUCIBLE_ENGINE_TLS_VERIFY}" ]; then
