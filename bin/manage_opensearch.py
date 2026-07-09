@@ -284,6 +284,8 @@ def main():
 
     subparsers.add_parser('index-instance', help='Display the default instance to index to.')
 
+    subparsers.add_parser('gendocs-opt', help='Display the cmdline options to pass to doc generation utils.')
+
     parser_gethostaccess = subparsers.add_parser('instance-host-access-opt', help='Display the host access options for a specific instance.')
     parser_gethostaccess.add_argument('--name', type=str, required=True, help='Name of the instance.')
 
