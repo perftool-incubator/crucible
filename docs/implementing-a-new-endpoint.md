@@ -283,7 +283,8 @@ def main():
         "collect-sysinfo": collect_sysinfo,
         "test-start": test_start,
         "test-stop": test_stop,
-        "remote-cleanup": remote_cleanup
+        "remote-cleanup": remote_cleanup,
+        "rescue-engine-logs": rescue_engine_logs
     }
     return endpoints.process_roadblocks(
         callbacks=callbacks, ...
@@ -440,7 +441,8 @@ callbacks = {
     "collect-sysinfo": collect_sysinfo,
     "test-start": test_start,
     "test-stop": test_stop,
-    "remote-cleanup": remote_cleanup
+    "remote-cleanup": remote_cleanup,
+    "rescue-engine-logs": rescue_engine_logs
 }
 ```
 
@@ -453,6 +455,7 @@ callbacks = {
 | `test-start` | Before each benchmark iteration | Set up networking (services, firewall rules) for client-server communication |
 | `test-stop` | After each benchmark iteration | Tear down per-iteration networking |
 | `remote-cleanup` | After all tests complete | Collect logs, destroy engines, clean up resources |
+| `rescue-engine-logs` | On early roadblock failure | Collect engine logs without destroying engines or cleaning up — environment is left intact for debugging |
 
 ### Registering new followers
 
@@ -492,6 +495,25 @@ Your `remote-cleanup` callback must:
 4. **Clean up authentication** — remove auth files or secrets
 5. **Manage image cache** — optionally prune old images to
    conserve disk space
+
+Your `rescue-engine-logs` callback must:
+
+1. **Collect engine logs** — retrieve stdout/stderr from each
+   engine, compress, and store locally (same as step 1 above)
+2. **Preserve the environment** — do not destroy engines,
+   clean up resources, or remove log files from remotes
+
+This callback is invoked by `process_roadblocks()` when an
+init-phase roadblock fails and the function exits early. The
+normal `remote-cleanup` callback is never reached in this
+case, so `rescue-engine-logs` ensures engine logs are captured
+for debugging. The environment is intentionally left intact so
+operators can inspect the failed state. Use WARNING log level
+for operational messages within this callback to distinguish
+rescue activity from normal operations. Wrap all remote
+operations in `try/except` since the endpoint may be
+unreachable — the failure that triggered the rescue may have
+been caused by a connectivity loss.
 
 ## Schema definition
 
@@ -611,9 +633,12 @@ Python pattern instead.
 - [ ] Implement engine deployment (create + start)
 - [ ] Implement image pulling with auth support
 - [ ] Implement roadblock callbacks (engine-init,
-      collect-sysinfo, test-start, test-stop, remote-cleanup)
+      collect-sysinfo, test-start, test-stop, remote-cleanup,
+      rescue-engine-logs)
 - [ ] Implement service discovery in test-start callback
 - [ ] Implement cleanup: log collection, engine teardown,
       resource cleanup
+- [ ] Implement rescue: log-only collection for early failure
+      path (no engine teardown, no resource cleanup)
 - [ ] Test with a simple benchmark (e.g., `sleep`)
 - [ ] Add CI integration if a suitable test environment exists
