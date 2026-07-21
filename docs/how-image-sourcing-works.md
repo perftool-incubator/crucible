@@ -139,6 +139,34 @@ role — for example, trafficgen's client image includes TRex
 and extensive build tools, while its server image only needs
 dpdk-tools.
 
+### Multi-stage workshop files
+
+A workshop file can be split into ordered sub-stages using
+numbered filenames:
+
+```
+workshop-NN-name.json           (single workshop)
+{role}-workshop-NN-name.json    (split workshop)
+```
+
+For example, trafficgen splits its client workshop into:
+
+- `client-workshop-01-trex.json` — TRex, DPDK, dev tools
+- `client-workshop-02-ptp-latency.json` — ptp-latency compile
+
+Each numbered file becomes its own cached build stage. When
+only `ptp-latency.c` changes, only the `02-ptp-latency`
+stage rebuilds — the expensive TRex installation stage
+remains cached. This is the same principle as Docker layer
+ordering: put the stable, expensive components in early
+stages and the volatile, lightweight components in later
+stages.
+
+The numbered and unnumbered conventions are mutually
+exclusive — a benchmark cannot have both `workshop.json` and
+`workshop-NN-*.json` files (or both `client-workshop.json`
+and `client-workshop-NN-*.json`).
+
 ## Multi-stage incremental builds
 
 The most important efficiency mechanism in image sourcing is
@@ -161,16 +189,17 @@ Stages are ordered from most stable to most volatile:
 6. **Utilities** — optional utility workshop.json files
    (e.g., packrat)
 7. **Benchmark/tool** — the benchmark's own workshop.json
-   requirements (most likely to change)
+   requirements (most likely to change). If the benchmark
+   uses multi-stage workshop files, each numbered file
+   becomes its own stage (e.g., 7a, 7b).
 
 ### Why this ordering matters
 
 Each stage gets its own content hash. When you modify a
-benchmark script, only stage 7 changes — stages 1 through 6
-are reused from cache. Since the common infrastructure stages
-are shared across all benchmarks and tools, a benchmark change
-only triggers a rebuild of the final stage, typically taking
-seconds rather than minutes.
+benchmark script, only the benchmark stage(s) change —
+the common infrastructure stages are reused from cache.
+With multi-stage workshop files, even within the benchmark
+stages, only the affected sub-stage needs rebuilding.
 
 ### Stage reuse
 

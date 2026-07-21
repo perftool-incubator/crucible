@@ -308,8 +308,8 @@ merged, providing production-level validation.
 Post-merge CI fires on `pull_request_target` (closed +
 merged) when specific paths change:
 
-- Workshop files (`workshop.json`, `client-workshop.json`,
-  `server-workshop.json`)
+- Workshop files (`workshop*.json`, `client-workshop*.json`,
+  `server-workshop*.json`)
 - Source scripts (benchmark scripts, tool scripts)
 - Userenv definitions
 
