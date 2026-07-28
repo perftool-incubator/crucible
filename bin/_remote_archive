@@ -43,7 +43,7 @@ function _build_rclone_args() {
     cred_file=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name].credentials')
 
     local tls_verify
-    tls_verify=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name]."tls-verify" // true')
+    tls_verify=$(jq_query ${SERVICES_CFG} --arg name "${remote_name}" '."remote-archive".remotes[$name]."tls-verify" | if . == null then true else . end')
 
     _rclone_args=()
 
