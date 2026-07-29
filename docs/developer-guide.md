@@ -280,6 +280,57 @@ Changes that span multiple repos require coordination:
    CommonDataModel, multiplex) merges changes that affect the
    controller image, a rebuild is triggered automatically.
 
+## Creating a new repository
+
+Every repository in the perftool-incubator organization must be
+set up with the following standard configuration.
+
+### Required files
+
+| File | Purpose |
+|------|---------|
+| `LICENSE` | Apache 2.0 |
+| `README.md` | One-line description linking to the crucible repo |
+| `.github/workflows/fork-check.yaml` | Auto-closes PRs opened from forks (CI needs org secrets) |
+| `.github/workflows/run-crucible-tracking.yaml` | Adds new PRs and issues to the project tracking board |
+| `.gitignore` | At minimum, list editor swap files and `__pycache__/` |
+
+### Team permissions
+
+| Team | Permission |
+|------|------------|
+| Administrators | admin |
+| Developers | push |
+| Maintainers | maintain |
+
+### Branch rulesets
+
+Two rulesets are required:
+
+**default-branch** — protects the default branch (`main`):
+- No deletion, no force push
+- Require 1 approving review
+- Dismiss stale reviews on push
+- Require review thread resolution
+- Merge commits only (no squash, no rebase)
+
+**releases** — protects release branches (`20[2-9][0-9].[1234]`
+and `ci-version-test`):
+- Same rules as default-branch
+- Bypass actor: the crucible-ci GitHub App (Integration ID
+  962037)
+
+After creating rulesets, back them up in the repo under
+`.github/rulesets/branches/` as JSON files. These backups are
+documentation only — the live rulesets are managed via the
+GitHub web UI.
+
+### Automation
+
+The `/crucible-tools:new-repo` Claude Code skill automates this
+entire procedure. It can also be used as a reference for the
+exact workflow file contents and ruleset JSON.
+
 ## Pull request workflow
 
 - Always create a feature branch — never push directly to
