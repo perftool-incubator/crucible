@@ -763,6 +763,10 @@ not use it.
 
 ## Adding the benchmark to crucible
 
+Create a `bench-<name>` repository in the perftool-incubator
+organization following the standard setup procedure in
+[Creating a new repository](developer-guide.md#creating-a-new-repository).
+
 Once your benchmark repository is ready:
 
 1. Add an entry to `crucible/config/repos.json`:
@@ -783,7 +787,7 @@ Once your benchmark repository is ready:
 
 ## Checklist for a new benchmark
 
-- [ ] Create repo named `bench-<name>`
+- [ ] Create repo named `bench-<name>` (see [Creating a new repository](developer-guide.md#creating-a-new-repository))
 - [ ] `rickshaw.json` with correct schema version and required fields
 - [ ] `workshop.json` declaring all build dependencies
 - [ ] `<name>-client` script that runs the workload
