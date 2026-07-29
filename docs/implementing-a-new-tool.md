@@ -493,6 +493,10 @@ available depending on the deployment context.
 
 ## Adding the tool to crucible
 
+Create a `tool-<name>` repository in the perftool-incubator
+organization following the standard setup procedure in
+[Creating a new repository](developer-guide.md#creating-a-new-repository).
+
 Once your tool repository is ready:
 
 1. Add an entry to `crucible/config/repos.json`:
@@ -513,7 +517,7 @@ Once your tool repository is ready:
 
 ## Checklist for a new tool
 
-- [ ] Create repo named `tool-<name>`
+- [ ] Create repo named `tool-<name>` (see [Creating a new repository](developer-guide.md#creating-a-new-repository))
 - [ ] `rickshaw.json` with correct schema version and required fields
 - [ ] `workshop.json` declaring all build dependencies
 - [ ] `<name>-start` script that launches collection in the background
