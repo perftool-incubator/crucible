@@ -439,7 +439,8 @@ workload runs. Typical structure:
 
 The start and stop timestamp files are used by post-processing to
 determine the measurement period boundaries. Both client and server
-must produce them.
+must produce them. There is no filename collision because each role
+runs in its own sample directory (e.g., `client/1/` and `server/1/`).
 
 ### <name>-server-start (client-server only)
 
@@ -594,19 +595,22 @@ from toolbox.metrics import log_sample, finish_samples
   - `desc`: Dict with `source` (benchmark name), `class`
     (`"throughput"` or `"count"`), and `type` (metric name)
   - `names`: Dict of additional name-value pairs for metric
-    disambiguation. Only use CDM-defined keys such as `role` (from
-    `$RS_CS_LABEL`) and `cmd`. Do not add custom keys — they will
-    be silently dropped or cause indexing failures. To distinguish
+    disambiguation. Only use CDM-defined keys such as `cmd`, `tid`,
+    `job`, or `group`. Do not add custom keys — the OpenSearch
+    template uses `"dynamic": "strict"`, so undefined keys will be
+    rejected or silently dropped. Note that `engine-role` and
+    `engine-id` are set automatically by rickshaw infrastructure —
+    post-process scripts do not need to set those. To distinguish
     metric variants (e.g., different percentiles), encode the variant
     in the `type` string instead:
     ```python
-    # Correct: variant in the type string
+    # Correct: variant in the type string, names uses CDM-defined keys
     desc = {'source': 'mybench', 'class': 'throughput', 'type': 'latency-usec-p99'}
-    names = {'role': role}
+    names = {'cmd': 'read'}
 
     # Wrong: custom key in names dict
     desc = {'source': 'mybench', 'class': 'throughput', 'type': 'latency-usec'}
-    names = {'role': role, 'percentile': 'p99'}  # 'percentile' not in CDM schema
+    names = {'cmd': 'read', 'percentile': 'p99'}  # 'percentile' not in CDM schema
     ```
   - `sample`: Dict with `end` (timestamp in ms), `value` (numeric),
     and optionally `begin` (timestamp in ms)
@@ -964,13 +968,17 @@ feature branch:
 
 ```bash
 crucible repo config add \
-    --repo-url https://github.com/perftool-incubator/bench-mybench.git \
-    --repo-name mybench --primary-branch main \
-    --checkout-target my-feature-branch
+    name=mybench type=benchmark \
+    repository=https://github.com/perftool-incubator/bench-mybench.git \
+    primary-branch=main checkout-mode=follow \
+    checkout-target=my-feature-branch
 ```
 
-Note: `primary-branch` only accepts `HEAD`, `main`, or `master`.
-Use `checkout-target` to point at a feature branch.
+All six fields (`name`, `type`, `repository`, `primary-branch`,
+`checkout-mode`, `checkout-target`) are required. Use
+`checkout-mode=follow` for a dev branch (tracks the branch, pulls
+updates on `crucible update`) or `checkout-mode=locked` to stay at
+a fixed point.
 
 ### Checking results
 
@@ -1035,7 +1043,7 @@ Once your benchmark repository is ready:
 - [ ] Both client and server produce start/stop timestamp files
 - [ ] Client and server scripts skip the other role's params in getopt
 - [ ] Post-process handles zero-sample results gracefully (exit 0)
-- [ ] CDM `names` dict uses only schema-defined keys
+- [ ] CDM `names` dict uses only schema-defined keys (`cmd`, `tid`, `job`, `group`, etc.)
 - [ ] `LICENSE` (Apache 2.0)
 - [ ] `README.md`
 - [ ] Entry in `crucible/config/repos.json`
@@ -1139,4 +1147,4 @@ questions upfront avoids the most common sources of rework:
 | `uperf` | Medium-high | Multiple test types, CPU pinning, server IP resolution |
 | `fio` | Medium-high | Controller pre-script, param_regex, complex multiplex.json |
 | `cyclictest` | Medium | Source builds with patches, multiple userenvs |
-| `rant` | Medium-high | Client-server latency, stress-ng integration, NUMA-aware pinning |
+| `rant` | Medium-high | Client-server latency, stress-ng integration, NUMA-aware pinning (not yet in `config/repos.json`) |
