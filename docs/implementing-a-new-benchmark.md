@@ -261,6 +261,17 @@ When multiple values are given (e.g., `"vals": ["read", "randread"]`),
 multiplex generates separate test iterations for each value
 (cartesian product across all multi-valued args).
 
+**Important:** Every string in a `vals` array must be non-empty
+(`minLength: 1`). Using `""` as a default will fail schema
+validation. For optional parameters that may not be set, use a
+sentinel value like `"none"` and check for it in your scripts:
+
+```bash
+if [ "$optional_param" != "none" ] && [ -n "$optional_param" ]; then
+    # use the value
+fi
+```
+
 ### Validations
 
 Regex-based rules that validate user-provided parameter values:
@@ -288,6 +299,10 @@ Regex-based rules that validate user-provided parameter values:
 Each validation names the `args` it applies to and a regex pattern
 (`vals`) that valid values must match. The `description` is used in
 error messages.
+
+**Important:** Every parameter listed in a preset must have a
+matching validation rule. A param without a validation entry will
+cause errors during multiplex processing.
 
 ### Units (optional)
 
@@ -344,6 +359,15 @@ benchmark parameters as command-line arguments in `--key=value` format
   (`$id`) from the `RS_CS_LABEL` environment variable.
 - Use `validate_sw_prereqs` to check that required binaries exist.
 - Use `dump_runtime` at script start for debugging output.
+- **Handle cross-role parameters**: Rickshaw passes ALL parameters
+  to ALL roles. Client scripts must silently skip server-only params,
+  and server scripts must silently skip client-only params. Add
+  catch-all getopt cases for the other role's params:
+  ```bash
+  # In client script: skip server-only params
+  --server-only-param1|--server-only-param2)
+      shift; shift ;;
+  ```
 
 ### <name>-base
 
@@ -408,8 +432,14 @@ workload runs. Typical structure:
 5. Parse all `--key=value` arguments
 6. For client-server benchmarks, read server IP/port from messages
    (see "Messaging" below)
-7. Run the benchmark, capturing output to a results file
-8. Exit 0 on success, `exit_error` on failure
+7. Record start timestamp: `date +%s.%N > <name>-start.txt`
+8. Run the benchmark, capturing output to a results file
+9. Record stop timestamp: `date +%s.%N > <name>-stop.txt`
+10. Exit 0 on success, `exit_error` on failure
+
+The start and stop timestamp files are used by post-processing to
+determine the measurement period boundaries. Both client and server
+must produce them.
 
 ### <name>-server-start (client-server only)
 
@@ -427,18 +457,26 @@ Starts the server process, publishes service information, and exits:
    ```bash
    echo '{"svc":{"ip":"'$ip'","ports":['$port']}}' >msgs/tx/svc
    ```
-6. Start the server in the background:
+6. Record start timestamp: `date +%s.%N > <name>-start.txt`
+7. Start the server in the background:
    ```bash
    mybench --server --port $port &
    pid=$!
    echo $pid >mybench-server.pid
    ```
-7. Wait briefly and check for startup errors
-8. Exit 0
+8. Wait briefly and check for startup errors
+9. Exit 0
+
+**Important:** The server must NOT use a duration flag. It should
+run indefinitely until stopped by the server-stop script. The client
+controls how long the test runs.
 
 ### <name>-server-stop (client-server only)
 
-Reads the PID file and kills the server:
+Reads the PID file and stops the server. Use SIGTERM (`kill -15`)
+for the initial shutdown — many tools flush their output (histograms,
+statistics, final summaries) on SIGTERM. Using SIGINT may produce
+incomplete output or zero samples.
 
 ```bash
 #!/bin/bash
@@ -455,6 +493,8 @@ else
     echo "mybench-server.pid not found"
     exit 1
 fi
+
+date +%s.%N > mybench-stop.txt
 ```
 
 ---
@@ -545,8 +585,21 @@ from toolbox.metrics import log_sample, finish_samples
   - `file_id`: Groups samples into output files (typically `"0"`)
   - `desc`: Dict with `source` (benchmark name), `class`
     (`"throughput"` or `"count"`), and `type` (metric name)
-  - `names`: Dict of additional name-value pairs for the metric
-    (e.g., `{"cmd": "read"}`)
+  - `names`: Dict of additional name-value pairs for metric
+    disambiguation. Only use CDM-defined keys such as `role` (from
+    `$RS_CS_LABEL`) and `cmd`. Do not add custom keys — they will
+    be silently dropped or cause indexing failures. To distinguish
+    metric variants (e.g., different percentiles), encode the variant
+    in the `type` string instead:
+    ```python
+    # Correct: variant in the type string
+    desc = {'source': 'mybench', 'class': 'throughput', 'type': 'latency-usec-p99'}
+    names = {'role': role}
+
+    # Wrong: custom key in names dict
+    desc = {'source': 'mybench', 'class': 'throughput', 'type': 'latency-usec'}
+    names = {'role': role, 'percentile': 'p99'}  # 'percentile' not in CDM schema
+    ```
   - `sample`: Dict with `end` (timestamp in ms), `value` (numeric),
     and optionally `begin` (timestamp in ms)
 - **`finish_samples()`**: Finalizes all logged samples, writes
@@ -583,6 +636,12 @@ to find the metrics and what the primary metric is:
   single `"measurement"` period, but you could also define
   `"warm-up"`, `"prep"`, etc.
 - **`metric-files`**: The filenames returned by `finish_samples()`.
+
+**Error handling:** Post-process must handle empty or zero-sample
+results gracefully. If the benchmark produced no data for a
+particular role (e.g., server in some configurations), exit 0 with
+an empty metric file rather than returning a non-zero exit code.
+A non-zero exit marks the entire iteration as failed.
 
 ### Minimal Python post-process example
 
@@ -761,6 +820,168 @@ not use it.
 
 ---
 
+## Run files
+
+A run file is a JSON document that tells crucible which benchmarks to
+run, with what parameters, and on which endpoints. See
+[how-run-files-work.md](how-run-files-work.md) for the full
+reference. This section covers the essentials for testing a new
+benchmark.
+
+### Minimal run file structure
+
+```json
+{
+    "benchmarks": [
+        {
+            "name": "mybench",
+            "ids": "1",
+            "mv-params": {
+                "global-options": [
+                    {
+                        "name": "common-params",
+                        "params": [
+                            { "arg": "duration", "vals": ["60"], "role": "client" }
+                        ]
+                    }
+                ],
+                "sets": [
+                    {
+                        "include": ["common-params"],
+                        "params": []
+                    }
+                ]
+            }
+        }
+    ],
+    "tags": {},
+    "tool-params": [],
+    "endpoints": [
+        {
+            "type": "remotehosts",
+            "settings": { "osruntime": "chroot" },
+            "remotes": [
+                {
+                    "engines": [
+                        { "role": "client", "ids": "1" },
+                        { "role": "server", "ids": "1" }
+                    ],
+                    "config": {
+                        "host": "testhost.example.com",
+                        "settings": { "cpu-partitioning": false }
+                    }
+                }
+            ]
+        }
+    ]
+}
+```
+
+**Required sections:** `tags` (even if empty) and `tool-params`
+(even if empty array) must be present or the run file will fail
+validation.
+
+### Parameter role assignment
+
+Every parameter in a run file should have an explicit `role` field:
+
+- `"role": "client"` — sent only to client engines
+- `"role": "server"` — sent only to server engines
+- `"role": "all"` — sent to both
+
+**If `role` is omitted, it defaults to `"client"`.** This is the
+most common source of integration bugs — server engines silently
+receive none of the intended parameters and fall back to script
+defaults.
+
+Best practice: create separate global-options groups for each role
+with explicit `role` on every parameter:
+
+```json
+"global-options": [
+    {
+        "name": "client-params",
+        "params": [
+            { "arg": "duration", "vals": ["60"], "role": "client" },
+            { "arg": "protocol", "vals": ["tcp"], "role": "client" }
+        ]
+    },
+    {
+        "name": "server-params",
+        "params": [
+            { "arg": "protocol", "vals": ["tcp"], "role": "server" }
+        ]
+    }
+]
+```
+
+### Multi-iteration testing
+
+Multiple `sets` entries produce separate iterations, useful for A/B
+comparisons (e.g., baseline vs tuned, idle vs loaded):
+
+```json
+"sets": [
+    {
+        "include": ["client-params", "server-params"],
+        "params": []
+    },
+    {
+        "include": ["client-params", "server-params"],
+        "params": [
+            { "arg": "extra-option", "vals": ["enabled"], "role": "client" }
+        ]
+    }
+]
+```
+
+---
+
+## Testing the benchmark
+
+### Running a test
+
+Use the `crucible run` command with a run file:
+
+```bash
+crucible run my-run-file.json
+```
+
+Do not invoke `rickshaw-run.py` directly.
+
+### Registering a development branch
+
+To test before merging to main, register the benchmark with a
+feature branch:
+
+```bash
+crucible repo config add \
+    --repo-url https://github.com/perftool-incubator/bench-mybench.git \
+    --repo-name mybench --primary-branch main \
+    --checkout-target my-feature-branch
+```
+
+Note: `primary-branch` only accepts `HEAD`, `main`, or `master`.
+Use `checkout-target` to point at a feature branch.
+
+### Checking results
+
+After the run completes, inspect the output:
+
+```bash
+# Engine logs
+cat /var/lib/crucible/run/mybench--<timestamp>--<run-id>/\
+run/iterations/iteration-1/sample-1/client/1/mybench-client-stderrout.txt
+
+# Benchmark output
+cat .../client/1/mybench-client-result.txt
+
+# Post-process result
+cat .../client/1/postprocess/post-process-data.json
+```
+
+---
+
 ## Adding the benchmark to crucible
 
 Create a `bench-<name>` repository in the perftool-incubator
@@ -797,9 +1018,103 @@ Once your benchmark repository is ready:
 - [ ] `<name>-base` script sourcing toolbox bench-base (recommended)
 - [ ] For client-server: `<name>-server-start` and `<name>-server-stop`
 - [ ] For client-server: service info via `msgs/tx/svc` (server) and `msgs/rx/svc` (client)
+- [ ] No empty strings in multiplex `vals` (use `"none"` sentinel for optional params)
+- [ ] Every multiplex preset param has a matching validation rule
+- [ ] Every run file param has an explicit `role` field
+- [ ] Run file includes `tags` and `tool-params` sections
+- [ ] Server does not use a duration flag (runs until SIGTERM'd)
+- [ ] Server-stop sends SIGTERM (not SIGINT)
+- [ ] Both client and server produce start/stop timestamp files
+- [ ] Client and server scripts skip the other role's params in getopt
+- [ ] Post-process handles zero-sample results gracefully (exit 0)
+- [ ] CDM `names` dict uses only schema-defined keys
 - [ ] `LICENSE` (Apache 2.0)
 - [ ] `README.md`
 - [ ] Entry in `crucible/config/repos.json`
+
+---
+
+## Stress-ng integration (optional)
+
+Benchmarks that measure latency or jitter often need to run under
+controlled system load. stress-ng can be integrated as an optional
+feature activated by parameters in the run file.
+
+### Recommended parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stress-type` | `none` | Stressor type(s), comma-separated: `cache`, `cpu`, `memory`, `io`, `fork`, `sched` |
+| `stress-cpus` | `none` | CPU list for stress-ng's `--taskset` flag |
+| `stress-workers` | `0` | Number of workers per stressor |
+| `stress-membind` | `none` | NUMA node(s) for `numactl --membind` |
+
+Add `"stress-ng"` to the packages list in `workshop.json`.
+
+### CPU pinning
+
+Always use stress-ng's built-in `--taskset` flag for CPU pinning:
+
+```bash
+# Correct: --taskset pins all workers
+stress-ng --cache 4 --taskset 57-63 --timeout 0
+
+# Wrong: external taskset only pins the parent process
+taskset -c 57-63 stress-ng --cache 4 --timeout 0
+```
+
+External `taskset -c` only sets the affinity of the parent
+process. Worker child processes may migrate to other CPUs,
+including CPUs running the benchmark workload.
+
+### Lifecycle
+
+1. Start stress-ng **before** the benchmark with `--timeout 0`
+   (run indefinitely)
+2. Sleep briefly (e.g., 3 seconds) to let workers stabilize
+3. Run the benchmark
+4. Kill stress-ng **after** the benchmark finishes
+5. For server scripts: save stress PIDs to a file (e.g.,
+   `stress-ng.pids`) since start and stop are separate scripts
+
+See `bench-rant` for a complete implementation.
+
+---
+
+## Design questions
+
+When planning a new benchmark integration, answering these
+questions upfront avoids the most common sources of rework:
+
+1. **What is the benchmark's execution model?**
+   Client-only or client-server? If client-server, does the server
+   run for a fixed duration or until signaled?
+
+2. **What is the primary metric?**
+   What single number best represents the benchmark's result?
+   For latency benchmarks this is typically MAX (tail latency);
+   for throughput benchmarks it may be ops/sec or Gbps.
+
+3. **What parameters does the tool accept?**
+   Verify every flag against `--help`. Which are client-only,
+   server-only, or shared?
+
+4. **Which parameters are optional?**
+   Optional params need a sentinel default value (`"none"`) in
+   multiplex.json since empty strings are not allowed.
+
+5. **Does the benchmark need system-level stress testing?**
+   If yes, plan stress-ng parameters, CPU ranges, and NUMA
+   topology for the target system.
+
+6. **Does the benchmark need system pre-configuration?**
+   NIC tuning, CPU isolation, network namespaces, IRQ affinity,
+   and similar setup must happen before crucible runs. Consider
+   providing a `config.sh` script.
+
+7. **How does the tool output its results?**
+   Stdout, a file, JSON, CSV? This determines how post-process
+   will parse the data.
 
 ---
 
@@ -812,3 +1127,4 @@ Once your benchmark repository is ready:
 | `uperf` | Medium-high | Multiple test types, CPU pinning, server IP resolution |
 | `fio` | Medium-high | Controller pre-script, param_regex, complex multiplex.json |
 | `cyclictest` | Medium | Source builds with patches, multiple userenvs |
+| `rant` | Medium-high | Client-server latency, stress-ng integration, NUMA-aware pinning |
