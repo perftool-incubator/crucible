@@ -467,16 +467,22 @@ Starts the server process, publishes service information, and exits:
 8. Wait briefly and check for startup errors
 9. Exit 0
 
-**Important:** The server must NOT use a duration flag. It should
-run indefinitely until stopped by the server-stop script. The client
-controls how long the test runs.
+**Important:** Verify how the benchmark server manages its lifetime.
+In most client-server benchmarks, the client controls test duration
+and the server runs indefinitely until stopped by the server-stop
+script. However, some tools may support a server-side duration or
+a different shutdown mechanism. Check the tool's `--help` output
+and test both clean shutdown and forced kill to determine what
+signal produces complete output.
 
 ### <name>-server-stop (client-server only)
 
-Reads the PID file and stops the server. Use SIGTERM (`kill -15`)
-for the initial shutdown — many tools flush their output (histograms,
-statistics, final summaries) on SIGTERM. Using SIGINT may produce
-incomplete output or zero samples.
+Reads the PID file and stops the server. Verify which signal your
+tool expects for clean shutdown — some tools flush output (histograms,
+statistics, final summaries) on SIGTERM, others on SIGINT, and some
+handle both identically. Run the tool manually with each signal and
+check whether the output is complete. The stderrout log collected
+by crucible can help diagnose signal handling issues.
 
 ```bash
 #!/bin/bash
@@ -484,7 +490,9 @@ exec >mybench-server-stop-stderrout.txt 2>&1
 
 if [ -e mybench-server.pid ]; then
     pid=$(cat mybench-server.pid)
-    kill -15 $pid
+    # Use whichever signal produces complete output for your tool
+    # (SIGTERM for most tools; test both SIGTERM and SIGINT)
+    kill $pid
     sleep 3
     if [ -e /proc/$pid ]; then
         kill -9 $pid
@@ -1022,8 +1030,8 @@ Once your benchmark repository is ready:
 - [ ] Every multiplex preset param has a matching validation rule
 - [ ] Every run file param has an explicit `role` field
 - [ ] Run file includes `tags` and `tool-params` sections
-- [ ] Server does not use a duration flag (runs until SIGTERM'd)
-- [ ] Server-stop sends SIGTERM (not SIGINT)
+- [ ] Server lifetime verified (typically runs until signaled by stop script)
+- [ ] Server-stop signal verified (test which signal produces complete output)
 - [ ] Both client and server produce start/stop timestamp files
 - [ ] Client and server scripts skip the other role's params in getopt
 - [ ] Post-process handles zero-sample results gracefully (exit 0)
@@ -1087,13 +1095,17 @@ When planning a new benchmark integration, answering these
 questions upfront avoids the most common sources of rework:
 
 1. **What is the benchmark's execution model?**
-   Client-only or client-server? If client-server, does the server
-   run for a fixed duration or until signaled?
+   Client-only or client-server? If client-server: does the client
+   control duration, or does the server have its own? Does the server
+   exit on its own, or does it need a signal? Which signal (SIGTERM,
+   SIGINT) produces complete output? Test this by running the tool
+   manually and sending each signal — check the stdout/stderr.
 
 2. **What is the primary metric?**
    What single number best represents the benchmark's result?
-   For latency benchmarks this is typically MAX (tail latency);
-   for throughput benchmarks it may be ops/sec or Gbps.
+   Examples: latency (mean, p99, max), throughput (ops/sec, Gbps),
+   IOPS. The choice depends on the benchmark's purpose — discuss
+   with the benchmark owner or user to confirm.
 
 3. **What parameters does the tool accept?**
    Verify every flag against `--help`. Which are client-only,
