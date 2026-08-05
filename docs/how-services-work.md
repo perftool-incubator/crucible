@@ -223,13 +223,13 @@ confirm validity.
     "opensearch": {
         "instances": [
             {
-                "name": "local-v9",
+                "name": "local-v10",
                 "host": "localhost:9200",
-                "cdmver": "v9dev"
+                "cdmver": "v10dev"
             }
         ],
-        "index-to": "local-v9",
-        "query-from": ["local-v9"]
+        "index-to": "local-v10",
+        "query-from": ["local-v10"]
     },
     "image-sourcing": {
         "use": true,

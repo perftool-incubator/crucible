@@ -29,10 +29,16 @@
                 "name": "local-v9",
                 "host": "localhost:9200",
                 "cdmver": "v9dev"
+            },
+            {
+                "name": "local-v10",
+                "host": "localhost:9200",
+                "cdmver": "v10dev"
             }
         ],
-        "index-to": "local-v9",
+        "index-to": "local-v10",
         "query-from": [
+            "local-v10",
             "local-v9",
             "local-v8"
         ]

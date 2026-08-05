@@ -35,6 +35,8 @@ function help() {
     echo "                              |    - Other arguments are optional:"
     echo "                              |      --breakout <list of one or more breakouts>"
     echo "                              |        (found from initial metric query, like cstype or id)"
+    echo "                              |      --aggregation <sum|avg|max|min>"
+    echo "                              |        (override the metric's default-aggregation for this query)"
     echo "                              |      --filter <gt|lt:number>"
     echo "                              |        (gt = only show metrics greater-then value, lt = onlt show metrics less than value"
     echo "opensearch                    |  Manage OpenSearch instance configuration (add, remove, update, info, query-opt, index-instance, etc.)"

@@ -210,7 +210,7 @@
                                 "minLength": 1
                             },
                             "cdmver": {
-                                "description": "The Common Data Model version used by this instance (e.g., 'v8dev', 'v9dev')",
+                                "description": "The Common Data Model version used by this instance (e.g., 'v8dev', 'v9dev', 'v10dev')",
                                 "type": "string",
                                 "minLength": 1
                             },

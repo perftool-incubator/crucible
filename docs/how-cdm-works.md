@@ -47,7 +47,7 @@ run
 | **period** | A time window within a sample | period UUID, name, begin/end timestamps |
 | **param** | A benchmark parameter | arg name, value, role (client/server) |
 | **tag** | Run metadata | name, value (e.g., kernel version, test purpose) |
-| **metric_desc** | What a metric IS | source, type, class, breakout dimensions |
+| **metric_desc** | What a metric IS | source, type, class, default-aggregation, breakout dimensions |
 | **metric_data** | Actual values | begin, end, value, duration |
 
 Each level adds context. A metric_data document inherits its
@@ -67,8 +67,23 @@ Defines what a metric measures:
   `uperf`, `mpstat`, `procstat`)
 - **type**: The specific metric name (e.g., `Gbps`,
   `Busy-CPU`, `interrupts-sec`)
-- **class**: The metric category — `throughput` (rate-based)
-  or `count` (accumulative)
+- **class**: The metric category — `throughput` (rate-based),
+  `count` (accumulative), or `latency` (delay measurement)
+- **default-aggregation**: How this metric should be
+  aggregated across breakout dimensions when producing a
+  single result value. One of:
+
+  | Type | Behavior | Use case |
+  |------|----------|----------|
+  | `sum` | Duration-weighted sum (default) | Throughput, IOPS, CPU-units-busy |
+  | `avg` | Duration-weighted average ÷ metric count | Pre-aggregated latency (TRex avg, iostat avg-service-time) |
+  | `max` | Maximum value | RT worst-case latency (cyclictest, oslat, ptp-latency) |
+  | `min` | Minimum value | Idle floor measurements |
+
+  Post-processors set this in the metric descriptor dict.
+  If absent, CDM falls back to `sum` (preserving current
+  behavior for existing metrics). Users can override the
+  aggregation at query time with `--aggregation`.
 - **names**: Breakout dimensions that identify specific
   instances of this metric (e.g., `hostname=worker-01`,
   `cpu=3`, `device=sda`, `direction=rx`)
@@ -361,11 +376,15 @@ can be run manually to re-index or index imported results.
 ```bash
 crucible get result --run <run-id>
 crucible get metric --run <run-id> --source mpstat --type Busy-CPU
+crucible get metric --run <run-id> --source cyclictest --type wakeup-latency-usec --aggregation avg
 ```
 
 Query results from the command line. `get result` shows
 the primary metric summary; `get metric` retrieves specific
-metric data.
+metric data. The `--aggregation` flag overrides the
+metric's `default-aggregation` for that query — useful for
+viewing the same data with different aggregation semantics
+(e.g., `max` vs `avg` across engines).
 
 ### Managing results
 
@@ -394,7 +413,8 @@ CDM has evolved through several versions:
 |---------|------------|
 | v7dev | Original version, generic `id` fields |
 | v8dev | Document-specific UUID fields (`iteration-uuid`, `period-uuid`, etc.) |
-| v9dev | Per-month index naming (`cdm-v9dev-metric_data@2026.06`), additional document types |
+| v9dev | Per-month index naming (`cdm-v9dev-metric_data@2026.06`), `metric_def` document type |
+| v10dev | `default-aggregation` field on metric_desc, per-metric aggregation control (sum/avg/max/min) |
 
 Multiple CDM versions can coexist in the same OpenSearch
 instance. The `services.json` OpenSearch configuration
@@ -403,4 +423,5 @@ specifies which CDM version each instance uses, and the
 go and which versions are searchable.
 
 This enables gradual migration — new results can be indexed
-in v9dev while older v8dev results remain queryable.
+in v10dev while older v9dev and v8dev results remain
+queryable.
