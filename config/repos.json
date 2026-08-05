@@ -381,6 +381,16 @@
             }
         },
         {
+            "name": "bpf",
+            "type": "tool",
+            "repository": "https://github.com/perftool-incubator/tool-bpf",
+            "primary-branch": "master",
+            "checkout": {
+                "mode": "follow",
+                "target": "master"
+            }
+        },
+        {
             "name": "dpdk",
             "type": "tool",
             "repository": "https://github.com/perftool-incubator/tool-dpdk",
