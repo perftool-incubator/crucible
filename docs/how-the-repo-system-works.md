@@ -300,3 +300,11 @@ All configuration changes are validated against the
 schema enforces valid repo types, checkout modes, branch
 names, and URL formats, preventing misconfiguration that
 could break the update or install process.
+
+`repos.json` is also validated against this schema at the
+start of every `crucible` command invocation, alongside
+`services.json` and `registries.json`. This catches manual
+edits (e.g., swapping in an SSH URL for local development)
+that bypass `crucible repo config` and would otherwise only
+surface as a cryptic `jq` error deep inside `bin/repo` or
+`bin/update`.

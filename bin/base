@@ -1694,3 +1694,6 @@ if [ -e ${REGISTRIES_CFG} ]; then
 else
     exit_error "Could not locate ${REGISTRIES_CFG}"
 fi
+
+REPOS_CFG=${CRUCIBLE_HOME}/config/repos.json
+REPOS_CFG_SCHEMA=${CRUCIBLE_HOME}/schema/repos.json
