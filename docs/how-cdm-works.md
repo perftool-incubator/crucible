@@ -41,7 +41,7 @@ run
 
 | Type | Purpose | Key fields |
 |------|---------|-----------|
-| **run** | A single benchmark execution | run UUID, begin/end times, benchmark name, user, host |
+| **run** | A single benchmark execution | run UUID, begin/end times, benchmark name, user, host, partial, dropped-engines |
 | **iteration** | One parameter combination | iteration UUID, primary metric, primary period, status |
 | **sample** | One execution of an iteration | sample UUID, status (pass/fail) |
 | **period** | A time window within a sample | period UUID, name, begin/end timestamps |
