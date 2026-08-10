@@ -413,7 +413,7 @@ CDM has evolved through several versions:
 |---------|------------|
 | v7dev | Original version, generic `id` fields |
 | v8dev | Document-specific UUID fields (`iteration-uuid`, `period-uuid`, etc.) |
-| v9dev | Per-month index naming (`cdm-v9dev-metric_data@2026.06`), `metric_def` document type |
+| v9dev | Per-month index naming (`cdm-v9dev-metric_data@2026.06`), `metric_def` document type, `partial`/`dropped-engines` fields on the run doc |
 | v10dev | `default-aggregation` field on metric_desc, per-metric aggregation control (sum/avg/max/min) |
 
 Multiple CDM versions can coexist in the same OpenSearch
