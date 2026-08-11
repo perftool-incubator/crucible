@@ -480,6 +480,37 @@ no failures is considered passing.
 An iteration is considered failed if it doesn't have enough
 passing samples to meet the `num-samples` requirement.
 
+### Partial runs and dropped engines
+
+A roadblock timeout anywhere in the run — during the per-sample
+benchmark execution phases (`infra-start`, `server-start`,
+`endpoint-start`, `client-start`, `client-stop`, `endpoint-stop`,
+`server-stop`, `infra-stop`) or the post-benchmark phases
+(stopping tools, sending data, endpoint cleanup) — causes
+rickshaw to drop the missing engine(s) from the active follower
+list, e.g. because one crashed (OOM kill) or lost its SSH
+connection. What happens next depends on where the drop occurs:
+a timeout during the per-sample phases aborts all remaining
+samples and iterations for the rest of the run, while a timeout
+during the post-benchmark phases only removes the missing
+engine(s) and lets the run finish normally with the remaining
+engines. Either way, the run can complete with fewer engines
+than it started with, and without this feature that fact would
+otherwise go unrecorded.
+
+When this happens, rickshaw logs a warning for each dropped
+engine (naming the engine and the roadblock it missed) and an
+end-of-run participation summary. The run's `rickshaw-run.json`
+records `partial: true` and a `dropped-engines` list (each entry
+has the engine ID and the roadblock it was dropped at); `crucible
+ls`/`crucible get result` surface this as a `partial: yes (N
+engine(s) dropped)` line alongside the normal `status` line. CDM
+run documents (v9dev+) carry the same `partial`/`dropped-engines`
+fields, so query results can be filtered or flagged accordingly.
+Treat results from a partial run with caution — data from the
+dropped engine(s) is missing or incomplete for the affected
+phases.
+
 ## Re-processing
 
 ### crucible postprocess

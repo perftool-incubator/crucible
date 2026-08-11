@@ -41,7 +41,7 @@ run
 
 | Type | Purpose | Key fields |
 |------|---------|-----------|
-| **run** | A single benchmark execution | run UUID, begin/end times, benchmark name, user, host |
+| **run** | A single benchmark execution | run UUID, begin/end times, benchmark name, user, host, partial, dropped-engines |
 | **iteration** | One parameter combination | iteration UUID, primary metric, primary period, status |
 | **sample** | One execution of an iteration | sample UUID, status (pass/fail) |
 | **period** | A time window within a sample | period UUID, name, begin/end timestamps |
@@ -413,7 +413,7 @@ CDM has evolved through several versions:
 |---------|------------|
 | v7dev | Original version, generic `id` fields |
 | v8dev | Document-specific UUID fields (`iteration-uuid`, `period-uuid`, etc.) |
-| v9dev | Per-month index naming (`cdm-v9dev-metric_data@2026.06`), `metric_def` document type |
+| v9dev | Per-month index naming (`cdm-v9dev-metric_data@2026.06`), `metric_def` document type, `partial`/`dropped-engines` fields on the run doc |
 | v10dev | `default-aggregation` field on metric_desc, per-metric aggregation control (sum/avg/max/min) |
 
 Multiple CDM versions can coexist in the same OpenSearch

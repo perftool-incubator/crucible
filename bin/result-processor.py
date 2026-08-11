@@ -284,7 +284,7 @@ def validate_archive(archive):
     return 0
 
 
-def log_result_directory(result_directory, result_status):
+def log_result_directory(result_directory, result_status, data=None):
     if myglobal.args.mode == "completion":
         # completion mode uses a very terse output data to feed into a
         # bash tab completion engine
@@ -302,6 +302,10 @@ def log_result_directory(result_directory, result_status):
             myglobal.log.info("result: %s -> %s" % (result_directory.name, symlink_target.name))
 
         myglobal.log.info("status: %s" % (result_status))
+
+        if data is not None and data.get('partial'):
+            dropped_engines = data.get('dropped-engines', [])
+            myglobal.log.info("partial: yes (%d engine(s) dropped)" % (len(dropped_engines)))
 
     return 0
 
@@ -420,7 +424,7 @@ def ls_result_directory(result_directory):
             myglobal.log.debug("result directory '%s' has no rickshaw-run" % (result_directory))
             return 0
 
-    log_result_directory(result_directory, status)
+    log_result_directory(result_directory, status, data)
 
     if myglobal.args.type == "short":
         pass
@@ -691,7 +695,7 @@ def run_results_tag_mode():
 
     data, status = load_rickshaw_run(run_dir)
 
-    log_result_directory(run_dir, status)
+    log_result_directory(run_dir, status, data)
 
     if data is not None:
         if myglobal.args.action == "ls":
