@@ -84,6 +84,44 @@ class TestListSubprojects(unittest.TestCase):
         schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
         self.assertIsNone(list_subprojects.build_entry(subproject_dir, self.tool_config, schema))
 
+    def test_build_entry_non_dict_rickshaw_json_falls_back(self):
+        subproject_dir = os.path.join(self.tools_dir, "listrickshaw")
+        os.makedirs(subproject_dir)
+        with open(os.path.join(subproject_dir, "rickshaw.json"), "w") as f:
+            json.dump(["not", "an", "object"], f)
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema)
+        self.assertIsNone(entry)
+        self.assertIn("expected a JSON object", stderr.getvalue())
+
+    def test_build_entry_non_dict_multiplex_json_falls_back(self):
+        subproject_dir = self.make_subproject(self.tools_dir, "listmultiplex", "tool")
+        with open(os.path.join(subproject_dir, "multiplex.json"), "w") as f:
+            json.dump(["not", "an", "object"], f)
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema)
+        self.assertIsNotNone(entry)
+        self.assertIsNone(entry["params"])
+        self.assertIn("expected a JSON object", stderr.getvalue())
+
+    def test_one_bad_subproject_does_not_break_the_whole_listing(self):
+        # a single malformed multiplex.json (valid JSON, wrong shape) must not
+        # prevent collect_entries() from returning every other subproject
+        self.make_subproject(self.tools_dir, "goodtool", "tool")
+        bad_dir = self.make_subproject(self.tools_dir, "badtool", "tool")
+        with open(os.path.join(bad_dir, "multiplex.json"), "w") as f:
+            json.dump(["not", "an", "object"], f)
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            entries = list_subprojects.collect_entries(self.tool_config, None)
+        names = sorted(e["name"] for e in entries)
+        self.assertEqual(names, ["badtool", "goodtool"])
+
     def test_build_entry_no_metadata_file_falls_back(self):
         subproject_dir = self.make_subproject(self.tools_dir, "notool", "tool")
         schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))

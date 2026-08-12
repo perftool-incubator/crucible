@@ -61,8 +61,10 @@ def build_entry(subproject_dir, config, schema):
 
     try:
         rickshaw_data = load_json(rickshaw_json_path)
+        if not isinstance(rickshaw_data, dict):
+            raise TypeError(f"expected a JSON object, got {type(rickshaw_data).__name__}")
         name = rickshaw_data[config["rickshaw_field"]]
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
         print(f"WARNING: could not read '{config['rickshaw_field']}' from {rickshaw_json_path}: {e}", file=sys.stderr)
         return None
 
@@ -98,11 +100,13 @@ def build_entry(subproject_dir, config, schema):
     if os.path.isfile(multiplex_path):
         try:
             multiplex = load_json(multiplex_path)
+            if not isinstance(multiplex, dict):
+                raise TypeError(f"expected a JSON object, got {type(multiplex).__name__}")
             entry["params"] = {
                 "presets": multiplex.get("presets", {}),
                 "validations": multiplex.get("validations", {}),
             }
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, TypeError) as e:
             print(f"WARNING: could not parse {multiplex_path}: {e}", file=sys.stderr)
 
     return entry
