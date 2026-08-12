@@ -318,17 +318,26 @@ class TestRealBenchmarkMetadataSchema(unittest.TestCase):
     def test_flat_shape_cdm_indexed_true_with_sources_is_valid(self):
         self.assertValid(self.base(cdm_indexed=True, cdm_sources=[{"source": "s", "types": ["t"]}]))
 
+    def test_flat_shape_cdm_indexed_false_is_valid(self):
+        self.assertValid(self.base(cdm_indexed=False))
+
     def test_both_sub_benchmarks_and_cdm_indexed_is_invalid(self):
         self.assertInvalid(self.base(**{
             "sub-benchmarks": [{"name": "a", "description": "d", "cdm_indexed": False}],
             "cdm_indexed": True,
         }))
 
+    def test_neither_sub_benchmarks_nor_cdm_indexed_is_invalid(self):
+        self.assertInvalid(self.base())
+
     def test_cdm_indexed_true_without_sources_is_invalid(self):
         self.assertInvalid(self.base(cdm_indexed=True))
 
     def test_cdm_indexed_false_with_sources_is_invalid(self):
         self.assertInvalid(self.base(cdm_indexed=False, cdm_sources=[{"source": "s", "types": ["t"]}]))
+
+    def test_sub_benchmark_cdm_indexed_true_without_sources_is_invalid(self):
+        self.assertInvalid(self.base(**{"sub-benchmarks": [{"name": "a", "description": "d", "cdm_indexed": True}]}))
 
 
 if __name__ == "__main__":
