@@ -159,7 +159,11 @@ def print_table(entries, config):
         else:
             cdm_display = "yes" if entry["cdm_indexed"] else "no"
 
-        description = truncate(entry["description"], MAX_DESCRIPTION_WIDTH) if entry["description"] else "-"
+        if entry["description"]:
+            single_line_description = " ".join(entry["description"].split())
+            description = truncate(single_line_description, MAX_DESCRIPTION_WIDTH)
+        else:
+            description = "-"
         rows.append([entry["name"], description, subgroup_display, cdm_display])
 
     all_rows = [headers] + rows

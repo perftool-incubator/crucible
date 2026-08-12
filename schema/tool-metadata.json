@@ -91,7 +91,13 @@
                     }
                 },
                 "required": ["name", "description", "cdm_indexed"],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "if": {
+                    "properties": { "cdm_indexed": { "const": true } },
+                    "required": ["cdm_indexed"]
+                },
+                "then": { "required": ["cdm_sources"] },
+                "else": { "not": { "required": ["cdm_sources"] } }
             }
         },
         "cdm_indexed": {
@@ -127,6 +133,12 @@
     },
     "required": ["rickshaw-tool-metadata", "tool", "description"],
     "additionalProperties": false,
+    "if": {
+        "properties": { "cdm_indexed": { "const": true } },
+        "required": ["cdm_indexed"]
+    },
+    "then": { "required": ["cdm_sources"] },
+    "else": { "not": { "required": ["cdm_sources"] } },
     "oneOf": [
         {
             "description": "Tools with independently-selectable subtools: CDM info lives per-subtool, not at the top level.",

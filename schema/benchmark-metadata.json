@@ -85,7 +85,13 @@
                     }
                 },
                 "required": ["name", "description", "cdm_indexed"],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "if": {
+                    "properties": { "cdm_indexed": { "const": true } },
+                    "required": ["cdm_indexed"]
+                },
+                "then": { "required": ["cdm_sources"] },
+                "else": { "not": { "required": ["cdm_sources"] } }
             }
         },
         "cdm_indexed": {
@@ -121,6 +127,12 @@
     },
     "required": ["rickshaw-benchmark-metadata", "benchmark", "description"],
     "additionalProperties": false,
+    "if": {
+        "properties": { "cdm_indexed": { "const": true } },
+        "required": ["cdm_indexed"]
+    },
+    "then": { "required": ["cdm_sources"] },
+    "else": { "not": { "required": ["cdm_sources"] } },
     "oneOf": [
         {
             "description": "Benchmarks with independently-selectable sub-benchmarks: CDM info lives per-sub-benchmark, not at the top level.",
