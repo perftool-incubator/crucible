@@ -64,6 +64,21 @@ elif [ "${1}" == "userenvs" ]; then
         ${CRUCIBLE_HOME}/bin/userenvs "$@"
         EXIT_VAL=$?
     fi
+elif [ "${1}" == "tools" -o "${1}" == "benchmarks" ]; then
+    subproject_kind="${1%s}"
+    shift
+    if [ -z "${1}" ]; then
+        set -- list
+    fi
+    if [ "${1}" == "list" ]; then
+        shift
+        list_cmd="${CRUCIBLE_HOME}/bin/list-subprojects.py --kind ${subproject_kind} $@"
+        ${podman_run} --name crucible-${subproject_kind}s-list-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${list_cmd}
+        EXIT_VAL=$?
+    else
+        echo "ERROR: unsupported '${subproject_kind}s' argument [${1}]"
+        EXIT_VAL=1
+    fi
 elif [ "${1}" == "repo" ]; then
     shift
     if [ -z "${1}" ]; then

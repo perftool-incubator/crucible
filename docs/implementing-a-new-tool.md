@@ -34,6 +34,8 @@ Every tool must contain at minimum:
 | File | When needed |
 |------|-------------|
 | `<name>-collect` | Separate collection loop (e.g., procstat periodically reads /proc files) |
+| `tool-metadata.json` | Machine-readable description, subtools, and CDM-output manifest (consumed by `crucible tools list`) |
+| `multiplex.json` | Parameter defaults and validation rules, reused from the benchmark mechanism (see below) |
 | `LICENSE` | Apache 2.0 (standard across all tools) |
 | `README.md` | Project documentation |
 
@@ -193,6 +195,117 @@ case `requirements` is an empty array).
 For the full `workshop.json` reference see the
 [workshop.json documentation](../subprojects/core/workshop/docs/workshop-json.md)
 in the workshop subproject.
+
+---
+
+## tool-metadata.json (optional but recommended)
+
+A machine-readable description of the tool, validated against
+`crucible/schema/tool-metadata.json`. It exists purely to convey
+information about the tool to consumers such as `crucible tools
+list` (and, in turn, humans and AI agents using it for discovery) —
+rickshaw does not read this file at run time.
+
+Two mutually exclusive shapes are allowed, enforced by the schema's
+`oneOf`:
+
+**Tools with independently-selectable subtools** (e.g. `kernel`
+wraps turbostat/perf/intel-speed-select/trace-cmd/sysfs-trace):
+
+```json
+{
+    "rickshaw-tool-metadata": { "schema": { "version": "2026.08.11" } },
+    "tool": "mytool",
+    "description": "One-to-few sentences describing what this tool collects.",
+    "subtools": [
+        {
+            "name": "subtool-a",
+            "description": "What this subtool collects.",
+            "cdm_indexed": true,
+            "cdm_sources": [
+                { "source": "subtool-a", "types": ["some-metric"] }
+            ],
+            "output_files": ["subtool-a-stdout.txt"]
+        }
+    ]
+}
+```
+
+**Tools without subtools** (a single, undivided collection
+process):
+
+```json
+{
+    "rickshaw-tool-metadata": { "schema": { "version": "2026.08.11" } },
+    "tool": "mytool",
+    "description": "One-to-few sentences describing what this tool collects.",
+    "cdm_indexed": true,
+    "cdm_sources": [
+        { "source": "mytool", "types": ["some-metric"] }
+    ],
+    "output_files": ["mytool-stdout.txt"]
+}
+```
+
+- Do not put `subtools` and `cdm_indexed`/`cdm_sources`/`output_files`
+  in the same file — the schema rejects that combination.
+- `cdm_sources[].types` is descriptive metadata for humans/tooling,
+  not enforced against what the post-process script actually emits.
+  The vocabulary for CDM's `class`/`default-aggregation` fields lives
+  in `toolbox/python/toolbox/cdm_metrics.py` (`VALID_CLASSES`,
+  `VALID_AGGREGATIONS`) — this file does not duplicate it.
+
+---
+
+## multiplex.json (optional)
+
+Tools have no parameter-iteration concept the way benchmarks do — a
+tool starts once with a single, static parameter set for the
+duration of the whole run, unlike a benchmark's per-iteration
+parameter sweep. Despite that, a tool's `multiplex.json` uses the
+**exact same file format** as a benchmark's (see
+[implementing-a-new-benchmark.md](implementing-a-new-benchmark.md#multiplexjson)
+for the full `presets`/`validations`/`units` reference), validated
+against the same `multiplex/JSON/req-schema.json`.
+
+If a tool has no `multiplex.json`, its `tool-params` are used as-is
+(today's behavior, unchanged). If it has one, rickshaw wraps every
+`tool-params` value into a single-element `vals` array before
+handing it to `multiplex.py`, and unwraps the result back into
+`tool-params.json`'s flat `{"arg", "val"}` shape afterward. Because
+every `vals` array has exactly one element, `multiplex.py`'s
+cartesian-product expansion can only ever produce one combination —
+this is what makes it safe to reuse the benchmark mechanism
+unmodified for a use case (a static, non-iterating parameter set)
+that's fundamentally different from what it was built for.
+
+**Backward compatibility (read this before adding a `multiplex.json`
+to an existing tool):** `tool-params.json` only requires a `tool`
+key, not `params` — a tool entry with zero params is legal today and
+means "let the `<name>-start` script use its own bash-level
+defaults." Once a tool has a `multiplex.json`, an empty parameter set
+with no `defaults` preset to backfill it is a fatal error
+(`EC_EMPTY_SET_FAIL`) instead of falling through to script defaults.
+**Your `multiplex.json`'s `defaults` preset must reproduce the
+`<name>-start` script's own bash-level defaults exactly**, or
+existing run files that omit some or all params will start failing.
+
+The minimum legal tool `multiplex.json` (opts in without changing
+behavior — every param still needs a validation rule the moment it's
+referenced anywhere) is:
+
+```json
+{ "validations": {} }
+```
+
+A couple of things that differ from the benchmark case:
+- `id`/`ids` (per-engine restriction) have no tool analog and are
+  silently dropped when the multiplexed result is unwrapped back
+  into `tool-params.json`'s shape.
+- `role` is not meaningful for tools (there's no client/server
+  concept); rickshaw sets it internally so multiplex's own dedup
+  logic behaves consistently — you don't need to (and shouldn't) set
+  it yourself in a tool's `multiplex.json`.
 
 ---
 
@@ -443,7 +556,10 @@ coordinated by roadblock synchronization:
 ## Tool parameters
 
 Tool parameters are specified in the `tool-params` section of the
-run file (not in a separate `multiplex.json` like benchmarks):
+run file. Unlike benchmarks, this is always a flat, single-valued
+list — a tool has no per-iteration parameter sweep. If the tool has
+a `multiplex.json` (see above), these values are still validated and
+defaulted through it; if not, they're used exactly as given:
 
 ```json
 "tool-params": [
@@ -524,6 +640,8 @@ Once your tool repository is ready:
 - [ ] `<name>-stop` script that terminates collection and compresses output
 - [ ] `<name>-post-process` script that produces `post-process-data.json`
 - [ ] Whitelist and blacklist for appropriate collector types
+- [ ] `tool-metadata.json` describing the tool for `crucible tools list` (recommended)
+- [ ] If using `multiplex.json`: `defaults` preset reproduces the start script's own bash-level defaults exactly
 - [ ] `LICENSE` (Apache 2.0)
 - [ ] `README.md`
 - [ ] Entry in `crucible/config/repos.json`

@@ -98,6 +98,10 @@ crucible update [all|crucible|controller-image|<subproject>]
 # Manage repos
 crucible repo [info|details|config]
 
+# Discover installed tools and benchmarks
+crucible tools list [--name <name>] [--format table|json]
+crucible benchmarks list [--name <name>] [--format table|json]
+
 # View/manage results
 crucible ls
 crucible get result [--run <id>]

@@ -1,0 +1,142 @@
+{
+    "title": "Benchmark Metadata Schema",
+    "description": "Schema for benchmark-metadata.json files inside benchmark subprojects. Provides a machine-readable description and CDM-output-manifest for a benchmark, information not captured by rickshaw.json (deployment/lifecycle) or bench-metric.json (primary-metric/period wiring). Benchmarks are a single workload -- unlike tools, they have no 'subtools' concept; client/server is a deployment-role concept already modeled in rickshaw.json and is orthogonal to this file.",
+    "type": "object",
+    "properties": {
+        "rickshaw-benchmark-metadata": {
+            "description": "Metadata block containing the schema version for this benchmark-metadata.json file format.",
+            "type": "object",
+            "properties": {
+                "schema": {
+                    "description": "Schema version information.",
+                    "type": "object",
+                    "properties": {
+                        "version": {
+                            "description": "The schema version this file conforms to. Currently must be '2026.08.11'.",
+                            "type": "string",
+                            "pattern": "^2026\\.08\\.11$"
+                        }
+                    },
+                    "required": ["version"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["schema"],
+            "additionalProperties": false
+        },
+        "benchmark": {
+            "description": "The benchmark name. Must match the 'benchmark' field in this subproject's rickshaw.json.",
+            "type": "string",
+            "pattern": "^.+$"
+        },
+        "description": {
+            "description": "A human-readable, one-to-few-sentence description of the workload this benchmark generates and what it measures.",
+            "type": "string",
+            "minLength": 1
+        },
+        "sub-benchmarks": {
+            "description": "Declare for benchmarks that are really a suite of distinct, independently-selectable sub-benchmarks run under one name (e.g. a mixed-workload suite). No current benchmark subproject uses this -- it exists so a future suite-style benchmark isn't blocked by this schema. When present, omit the top-level 'cdm_indexed'/'cdm_sources'/'output_files' properties; put that information on each sub-benchmark entry instead.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "description": "One independently-selectable sub-benchmark.",
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "description": "The sub-benchmark's name.",
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "description": {
+                        "description": "A human-readable, one-to-few-sentence description of what this sub-benchmark measures.",
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "cdm_indexed": {
+                        "description": "Whether this sub-benchmark's results are indexed into the Common Data Model (CDM). If false, results are only available via 'output_files'.",
+                        "type": "boolean"
+                    },
+                    "cdm_sources": {
+                        "description": "Present when 'cdm_indexed' is true. Same shape and vocabulary note as the top-level 'cdm_sources' below.",
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source": { "type": "string", "minLength": 1, "description": "The CDM metric_desc 'source' value." },
+                                "types": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "uniqueItems": true,
+                                    "items": { "type": "string", "minLength": 1, "description": "A CDM metric_desc 'type' value emitted under this source." }
+                                }
+                            },
+                            "required": ["source", "types"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "output_files": {
+                        "description": "Raw (non-CDM, or supplementary-to-CDM) output file names this sub-benchmark leaves in the engine's working directory.",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1 }
+                    }
+                },
+                "required": ["name", "description", "cdm_indexed"],
+                "additionalProperties": false
+            }
+        },
+        "cdm_indexed": {
+            "description": "For benchmarks without 'sub-benchmarks' only. Whether this benchmark's results are indexed into the Common Data Model (CDM) by its post-processing script.",
+            "type": "boolean"
+        },
+        "cdm_sources": {
+            "description": "Present when 'cdm_indexed' is true. The CDM metric_desc 'source' value(s) this benchmark's data is filed under, and the metric 'type' name(s) emitted under each source. Descriptive metadata only -- not enforced at runtime against the post-processing script. The vocabulary for metric_desc's 'class'/'default-aggregation' fields is defined authoritatively in subprojects/core/toolbox/python/toolbox/cdm_metrics.py (VALID_CLASSES / VALID_AGGREGATIONS) and is intentionally not duplicated here.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "minLength": 1, "description": "The CDM metric_desc 'source' value (e.g. 'fio', 'uperf')." },
+                    "types": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1, "description": "A CDM metric_desc 'type' value emitted under this source." }
+                    }
+                },
+                "required": ["source", "types"],
+                "additionalProperties": false
+            }
+        },
+        "output_files": {
+            "description": "For benchmarks without 'sub-benchmarks' only. Raw (non-CDM, or supplementary-to-CDM) output file names this benchmark leaves in the engine's working directory, for output not captured by 'cdm_sources'.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+        }
+    },
+    "required": ["rickshaw-benchmark-metadata", "benchmark", "description"],
+    "additionalProperties": false,
+    "oneOf": [
+        {
+            "description": "Benchmarks with independently-selectable sub-benchmarks: CDM info lives per-sub-benchmark, not at the top level.",
+            "required": ["sub-benchmarks"],
+            "not": {
+                "anyOf": [
+                    { "required": ["cdm_indexed"] },
+                    { "required": ["cdm_sources"] },
+                    { "required": ["output_files"] }
+                ]
+            }
+        },
+        {
+            "description": "Benchmarks without sub-benchmarks (the common case today): a single workload. 'cdm_indexed' is required so every benchmark has a definite answer either way.",
+            "not": { "required": ["sub-benchmarks"] },
+            "required": ["cdm_indexed"]
+        }
+    ]
+}

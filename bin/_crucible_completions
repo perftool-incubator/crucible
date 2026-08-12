@@ -18,6 +18,11 @@ _crucible_get_remote_names() {
     jq -r '."remote-archive".remotes // {} | keys[]' "${CRUCIBLE_HOME}/config/services.json" 2>/dev/null
 }
 
+_crucible_get_subprojects_list_names() {
+    local kind="${1}"
+    find "${CRUCIBLE_HOME}/subprojects/${kind}s/" -maxdepth 1 -type l -printf '%f\n' 2>/dev/null
+}
+
 _crucible_get_run_dirs() {
     crucible result-completion --type run-dir 2>/dev/null | tr -d '\r'
 }
@@ -536,6 +541,27 @@ _complete_userenvs_list() {
     COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
 }
 
+_complete_subprojects_list() {
+    local kind="${1}"
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --name)
+            COMPREPLY=($(compgen -W "$(_crucible_get_subprojects_list_names "${kind}")" -- "${cur}"))
+            return
+            ;;
+        --format)
+            COMPREPLY=($(compgen -W "table json" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 3 --name --format)
+    COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
+}
+
 # ---------------------------------------------------------------------------
 # Main completion function
 # ---------------------------------------------------------------------------
@@ -558,7 +584,7 @@ _crucible_completions() {
 
     # Position 2: top-level commands
     if [ "${num_words}" -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo registries userenvs update run run-ci wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${cur}"))
+        COMPREPLY=($(compgen -W "help log repo registries userenvs tools benchmarks update run run-ci wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${cur}"))
         return
     fi
 
@@ -566,7 +592,10 @@ _crucible_completions() {
     if [ "${num_words}" -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "archive console extract get images index log ls opensearch postprocess ps registries repo reset rm run run-ci start stop tags unarchive update userenvs wrapper" -- "${cur}"))
+                COMPREPLY=($(compgen -W "archive benchmarks console extract get images index log ls opensearch postprocess ps registries repo reset rm run run-ci start stop tags tools unarchive update userenvs wrapper" -- "${cur}"))
+                ;;
+            tools|benchmarks)
+                COMPREPLY=($(compgen -W "list" -- "${cur}"))
                 ;;
             log)
                 COMPREPLY=($(compgen -W "clear info init sessions tidy view" -- "${cur}"))
@@ -632,6 +661,16 @@ _crucible_completions() {
 
     # Position 4+: per-command deeper completion
     case "${COMP_WORDS[1]}" in
+        tools)
+            if [ "${COMP_WORDS[2]}" == "list" ]; then
+                _complete_subprojects_list tool
+            fi
+            ;;
+        benchmarks)
+            if [ "${COMP_WORDS[2]}" == "list" ]; then
+                _complete_subprojects_list benchmark
+            fi
+            ;;
         run)
             _complete_run
             ;;

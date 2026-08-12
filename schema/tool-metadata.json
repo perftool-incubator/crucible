@@ -1,0 +1,148 @@
+{
+    "title": "Tool Metadata Schema",
+    "description": "Schema for tool-metadata.json files inside tool subprojects. Provides a machine-readable description and CDM-output-manifest for a tool, information not captured by rickshaw.json (deployment/lifecycle only). Two shapes exist: tools that decompose into independently-selectable subtools (declare 'subtools'; put CDM info on each subtool entry) and tools that do not (declare 'cdm_indexed'/'cdm_sources'/'output_files' directly).",
+    "type": "object",
+    "properties": {
+        "rickshaw-tool-metadata": {
+            "description": "Metadata block containing the schema version for this tool-metadata.json file format.",
+            "type": "object",
+            "properties": {
+                "schema": {
+                    "description": "Schema version information.",
+                    "type": "object",
+                    "properties": {
+                        "version": {
+                            "description": "The schema version this file conforms to. Currently must be '2026.08.11'.",
+                            "type": "string",
+                            "pattern": "^2026\\.08\\.11$"
+                        }
+                    },
+                    "required": ["version"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["schema"],
+            "additionalProperties": false
+        },
+        "tool": {
+            "description": "The tool name. Must match the 'tool' field in this subproject's rickshaw.json.",
+            "type": "string",
+            "pattern": "^.+$"
+        },
+        "description": {
+            "description": "A human-readable, one-to-few-sentence description of what this tool collects and why someone would enable it.",
+            "type": "string",
+            "minLength": 1
+        },
+        "subtools": {
+            "description": "Declare for tools that decompose into independently-selectable subtools (e.g. 'kernel' wraps turbostat/perf/intel-speed-select/trace-cmd/sysfs-trace; 'sysstat' wraps mpstat/sar/iostat/pidstat), typically chosen via a comma-separated '--subtools' parameter. When present, omit the top-level 'cdm_indexed'/'cdm_sources'/'output_files' properties; put that information on each subtool entry instead. Omit this property entirely for tools with a single, undivided collection process.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "description": "One independently-selectable subtool.",
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "description": "The subtool's name, exactly as it appears as a value in the tool's comma-separated subtool-selection parameter (e.g. 'turbostat', 'mpstat'). Keep in sync with any subtool-name validation regex in this tool's multiplex.json.",
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "description": {
+                        "description": "A human-readable, one-to-few-sentence description of what this subtool collects.",
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "cdm_indexed": {
+                        "description": "Whether this subtool's data is indexed into the Common Data Model (CDM) by the tool's post-processing script. If false, the subtool's output is only available via 'output_files'.",
+                        "type": "boolean"
+                    },
+                    "cdm_sources": {
+                        "description": "Present when 'cdm_indexed' is true. The CDM metric_desc 'source' value(s) this subtool's data is filed under, and the metric 'type' name(s) emitted under each source. Descriptive metadata only -- not enforced at runtime against the post-processing script. The vocabulary for metric_desc's 'class'/'default-aggregation' fields is defined authoritatively in subprojects/core/toolbox/python/toolbox/cdm_metrics.py (VALID_CLASSES / VALID_AGGREGATIONS) and is intentionally not duplicated here.",
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": true,
+                        "items": {
+                            "description": "One CDM source produced by this subtool.",
+                            "type": "object",
+                            "properties": {
+                                "source": {
+                                    "description": "The CDM metric_desc 'source' value (e.g. 'procstat', 'sar-net', 'mpstat'). Note a single subtool can emit multiple distinct sources (e.g. sysstat's 'sar' subtool emits 'sar-mem', 'sar-io', 'sar-tasks', 'sar-scheduler', 'sar-net').",
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "types": {
+                                    "description": "The CDM metric_desc 'type' value(s) emitted under this source.",
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "uniqueItems": true,
+                                    "items": { "type": "string", "minLength": 1 }
+                                }
+                            },
+                            "required": ["source", "types"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "output_files": {
+                        "description": "Raw (non-CDM, or supplementary-to-CDM) output file names this subtool leaves in the collector's working directory (e.g. 'turbostat-stdout.txt').",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1 }
+                    }
+                },
+                "required": ["name", "description", "cdm_indexed"],
+                "additionalProperties": false
+            }
+        },
+        "cdm_indexed": {
+            "description": "For tools without 'subtools' only. Whether this tool's data is indexed into the Common Data Model (CDM) by its post-processing script.",
+            "type": "boolean"
+        },
+        "cdm_sources": {
+            "description": "For tools without 'subtools' only. Present when 'cdm_indexed' is true. Same shape and vocabulary note as 'subtools[].cdm_sources' above.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "minLength": 1, "description": "The CDM metric_desc 'source' value." },
+                    "types": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1, "description": "A CDM metric_desc 'type' value emitted under this source." }
+                    }
+                },
+                "required": ["source", "types"],
+                "additionalProperties": false
+            }
+        },
+        "output_files": {
+            "description": "For tools without 'subtools' only. Raw output file names this tool leaves in the collector's working directory, for output not captured by 'cdm_sources'.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+        }
+    },
+    "required": ["rickshaw-tool-metadata", "tool", "description"],
+    "additionalProperties": false,
+    "oneOf": [
+        {
+            "description": "Tools with independently-selectable subtools: CDM info lives per-subtool, not at the top level.",
+            "required": ["subtools"],
+            "not": {
+                "anyOf": [
+                    { "required": ["cdm_indexed"] },
+                    { "required": ["cdm_sources"] },
+                    { "required": ["output_files"] }
+                ]
+            }
+        },
+        {
+            "description": "Tools without subtools: a single, undivided collection process. 'cdm_indexed' is required so every tool has a definite answer either way.",
+            "not": { "required": ["subtools"] },
+            "required": ["cdm_indexed"]
+        }
+    ]
+}
