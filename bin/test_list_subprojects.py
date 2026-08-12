@@ -65,7 +65,8 @@ class TestListSubprojects(unittest.TestCase):
             with open(os.path.join(subproject_dir, "rickshaw.json"), "w") as f:
                 json.dump({rickshaw_field: name}, f)
         if metadata is not None:
-            with open(os.path.join(subproject_dir, self.tool_config["metadata_filename"] if base_dir == self.tools_dir else self.benchmark_config["metadata_filename"]), "w") as f:
+            config = self.tool_config if base_dir == self.tools_dir else self.benchmark_config
+            with open(os.path.join(subproject_dir, config["metadata_filename"]), "w") as f:
                 if isinstance(metadata, str):
                     f.write(metadata)
                 else:
@@ -225,6 +226,109 @@ class TestListSubprojects(unittest.TestCase):
         # must not have produced an extra line
         self.assertEqual(len(lines), 3)
         self.assertIn("Line one Line two continues here", lines[2])
+
+
+REAL_SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "schema")
+
+
+class TestRealToolMetadataSchema(unittest.TestCase):
+    """Validates the actual shipped schema/tool-metadata.json -- the synthetic
+    TOOL_SCHEMA stub used above doesn't exercise oneOf/if-then-else at all."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REAL_SCHEMA_DIR, "tool-metadata.json")) as f:
+            cls.schema = json.load(f)
+
+    def base(self, **overrides):
+        doc = {
+            "rickshaw-tool-metadata": {"schema": {"version": "2026.08.11"}},
+            "tool": "mytool",
+            "description": "does things",
+        }
+        doc.update(overrides)
+        return doc
+
+    def assertValid(self, doc):
+        list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def assertInvalid(self, doc):
+        with self.assertRaises(list_subprojects.ValidationError):
+            list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def test_subtools_shape_is_valid(self):
+        self.assertValid(self.base(subtools=[
+            {"name": "a", "description": "d", "cdm_indexed": True, "cdm_sources": [{"source": "a", "types": ["t"]}]},
+        ]))
+
+    def test_flat_shape_cdm_indexed_true_with_sources_is_valid(self):
+        self.assertValid(self.base(cdm_indexed=True, cdm_sources=[{"source": "s", "types": ["t"]}]))
+
+    def test_flat_shape_cdm_indexed_false_is_valid(self):
+        self.assertValid(self.base(cdm_indexed=False))
+
+    def test_both_subtools_and_cdm_indexed_is_invalid(self):
+        self.assertInvalid(self.base(
+            subtools=[{"name": "a", "description": "d", "cdm_indexed": False}],
+            cdm_indexed=True,
+        ))
+
+    def test_neither_subtools_nor_cdm_indexed_is_invalid(self):
+        self.assertInvalid(self.base())
+
+    def test_cdm_indexed_true_without_sources_is_invalid(self):
+        self.assertInvalid(self.base(cdm_indexed=True))
+
+    def test_cdm_indexed_false_with_sources_is_invalid(self):
+        self.assertInvalid(self.base(cdm_indexed=False, cdm_sources=[{"source": "s", "types": ["t"]}]))
+
+    def test_subtool_cdm_indexed_true_without_sources_is_invalid(self):
+        self.assertInvalid(self.base(subtools=[{"name": "a", "description": "d", "cdm_indexed": True}]))
+
+
+class TestRealBenchmarkMetadataSchema(unittest.TestCase):
+    """Same coverage as above, for schema/benchmark-metadata.json."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REAL_SCHEMA_DIR, "benchmark-metadata.json")) as f:
+            cls.schema = json.load(f)
+
+    def base(self, **overrides):
+        doc = {
+            "rickshaw-benchmark-metadata": {"schema": {"version": "2026.08.11"}},
+            "benchmark": "mybench",
+            "description": "does things",
+        }
+        doc.update(overrides)
+        return doc
+
+    def assertValid(self, doc):
+        list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def assertInvalid(self, doc):
+        with self.assertRaises(list_subprojects.ValidationError):
+            list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def test_sub_benchmarks_shape_is_valid(self):
+        self.assertValid(self.base(**{"sub-benchmarks": [
+            {"name": "a", "description": "d", "cdm_indexed": True, "cdm_sources": [{"source": "a", "types": ["t"]}]},
+        ]}))
+
+    def test_flat_shape_cdm_indexed_true_with_sources_is_valid(self):
+        self.assertValid(self.base(cdm_indexed=True, cdm_sources=[{"source": "s", "types": ["t"]}]))
+
+    def test_both_sub_benchmarks_and_cdm_indexed_is_invalid(self):
+        self.assertInvalid(self.base(**{
+            "sub-benchmarks": [{"name": "a", "description": "d", "cdm_indexed": False}],
+            "cdm_indexed": True,
+        }))
+
+    def test_cdm_indexed_true_without_sources_is_invalid(self):
+        self.assertInvalid(self.base(cdm_indexed=True))
+
+    def test_cdm_indexed_false_with_sources_is_invalid(self):
+        self.assertInvalid(self.base(cdm_indexed=False, cdm_sources=[{"source": "s", "types": ["t"]}]))
 
 
 if __name__ == "__main__":

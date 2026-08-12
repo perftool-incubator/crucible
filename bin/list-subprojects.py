@@ -57,6 +57,7 @@ def build_entry(subproject_dir, config, schema):
     """
     rickshaw_json_path = os.path.join(subproject_dir, "rickshaw.json")
     if not os.path.isfile(rickshaw_json_path):
+        print(f"WARNING: {rickshaw_json_path} not found, skipping '{os.path.basename(subproject_dir)}'", file=sys.stderr)
         return None
 
     try:
@@ -148,7 +149,7 @@ def truncate(text, max_width):
 def print_table(entries, config):
     subgroup_field = config["subgroup_field"]
     subgroup_label = subgroup_field.replace("-", " ").title()
-    subgroup_singular = subgroup_field.rstrip("s")
+    subgroup_singular = subgroup_field[:-1]
     headers = ["Name", "Description", subgroup_label, "CDM Indexed"]
 
     rows = []
