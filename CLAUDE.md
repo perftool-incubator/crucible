@@ -213,6 +213,8 @@ Claude Code will prompt you to install the crucible-tools plugin — accept it.
 
 Available skills:
 - `/crucible-tools:activity-summary` — generate an activity summary for the GitHub organization
+- `/crucible-tools:architecture-review` — top-down architecture and design review across crucible subsystems
+- `/crucible-tools:codebase-audit` — comprehensive multi-pass codebase audit across all crucible repos
 - `/crucible-tools:debug-log` — analyze crucible logs to debug failed runs or commands
 - `/crucible-tools:dev-activity` — generate development activity charts (commits, PRs, workflow runs)
 - `/crucible-tools:image-cleanup` — clean up local podman images (engine images, dangling images, local builds)
