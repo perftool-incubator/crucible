@@ -32,6 +32,7 @@ Every benchmark must contain at minimum:
 | `<name>-server-start` | Client-server benchmarks: starts the server process |
 | `<name>-server-stop` | Client-server benchmarks: stops the server process |
 | `multiplex.json` | Parameter defaults, validation rules, and unit conversions |
+| `benchmark-metadata.json` | Machine-readable description and CDM-output manifest (consumed by `crucible benchmarks list`) |
 | `LICENSE` | Apache 2.0 (standard across all benchmarks) |
 | `README.md` | Project documentation |
 
@@ -319,6 +320,43 @@ satisfies benchmarks that require a specific unit format:
     }
 }
 ```
+
+---
+
+## benchmark-metadata.json (optional but recommended)
+
+A machine-readable description of the benchmark, validated against
+`crucible/schema/benchmark-metadata.json`. It exists purely to convey
+information to consumers such as `crucible benchmarks list` (and, in
+turn, humans and AI agents using it for discovery) — rickshaw does
+not read this file at run time.
+
+```json
+{
+    "rickshaw-benchmark-metadata": { "schema": { "version": "2026.08.11" } },
+    "benchmark": "mybench",
+    "description": "One-to-few sentences describing the workload this benchmark generates and what it measures.",
+    "cdm_indexed": true,
+    "cdm_sources": [
+        { "source": "mybench", "types": ["ops-sec", "latency-usec"] }
+    ],
+    "output_files": ["mybench-result.json"]
+}
+```
+
+- `cdm_sources[].types` is descriptive metadata for humans/tooling,
+  not enforced against what the post-process script actually emits.
+  The vocabulary for CDM's `class`/`default-aggregation` fields lives
+  in `toolbox/python/toolbox/cdm_metrics.py` (`VALID_CLASSES`,
+  `VALID_AGGREGATIONS`) — this file does not duplicate it.
+- A `sub-benchmarks` array (mirroring tools' `subtools` shape) is
+  also supported for benchmarks that are really a suite of
+  independently-selectable sub-workloads run under one name — see the
+  schema for details. No current benchmark uses it; client/server is
+  a separate, already-modeled deployment-role concept and is
+  orthogonal to this field. When `sub-benchmarks` is present, omit
+  the top-level `cdm_indexed`/`cdm_sources`/`output_files` — the
+  schema's `oneOf` rejects mixing the two shapes.
 
 ---
 
@@ -1031,6 +1069,7 @@ Once your benchmark repository is ready:
 - [ ] `<name>-get-runtime` script that outputs duration in seconds
 - [ ] `<name>-post-process` script that produces `post-process-data.json`
 - [ ] `multiplex.json` with parameter defaults and validations (recommended)
+- [ ] `benchmark-metadata.json` describing the benchmark for `crucible benchmarks list` (recommended)
 - [ ] `<name>-base` script sourcing toolbox bench-base (recommended)
 - [ ] For client-server: `<name>-server-start` and `<name>-server-stop`
 - [ ] For client-server: service info via `msgs/tx/svc` (server) and `msgs/rx/svc` (client)
