@@ -24,6 +24,9 @@ Key CI capabilities:
 
 - **Docs-only filtering**: PRs that only change documentation
   skip full integration tests
+- **Local test gating**: Repos with their own fast test suite
+  can gate the expensive integration run behind it (adopted
+  per repo, not universal)
 - **Capability-based runner matching**: Scenarios declare
   requirements, runner pools declare capabilities, and the
   system matches them
@@ -38,6 +41,10 @@ CI uses a multi-level calling structure:
 
 ```
 Repo trigger workflow (e.g., crucible-ci.yaml)
+  │
+  ├── (optional) local test gate — unittest.yaml
+  │     Must pass before the reusable workflow below runs
+  │
   └── crucible-ci reusable workflow
         (e.g., core-release-crucible-ci.yaml)
       └── Per-release workflow
@@ -51,8 +58,10 @@ Repo trigger workflow (e.g., crucible-ci.yaml)
 ### Level 1: Repo trigger
 
 Each repo has a `crucible-ci.yaml` in `.github/workflows/`
-that fires on pull requests. It performs the docs-only check
-and calls the appropriate crucible-ci reusable workflow.
+that fires on pull requests. It performs the docs-only check,
+optionally gates on the repo's own local test suite (see
+"Local test gating" below), and calls the appropriate
+crucible-ci reusable workflow.
 
 ### Level 2: Reusable workflows
 
@@ -145,6 +154,46 @@ runner resources.
 When non-docs files changed (or on manual `workflow_dispatch`
 triggers), the **real workflow** runs with full integration
 testing.
+
+## Local test gating
+
+Some repos wire their own fast test suite in as a gate in
+front of the expensive crucible-ci reusable workflow call, so
+a regression a local test would catch never reaches the
+(much slower) integration test matrix.
+
+### How it works
+
+The repo's trigger workflow (`crucible-ci.yaml`) adds a
+`call-unittest` job that calls a local, `workflow_call`-only
+`unittest.yaml` in the same repo. That job is:
+
+- Given the same `if:` condition as the real integration-test
+  call, so it runs (or is skipped for docs-only PRs / forks)
+  under identical conditions
+- Added to the real integration-test job's `needs:`, so a
+  failing gate prevents the expensive job from starting at all
+- Added directly to the trigger workflow's `*-complete` job's
+  `needs:` as well, not just relied on transitively. GitHub
+  Actions reports a job skipped because a dependency failed as
+  `skipped`, not `failure`, and `*-complete`'s own check only
+  looks for `failure`/`cancelled`. Without this direct
+  dependency, a failing gate would still produce a passing
+  `*-complete` check.
+
+`unittest.yaml` itself has no `pull_request` trigger — only
+`workflow_call`/`workflow_dispatch` — so its tests don't run a
+second, redundant time outside of `crucible-ci.yaml`.
+
+### Adoption is per repo, not universal
+
+Test tooling varies by repo (stdlib `unittest`, `pytest`,
+language-specific runners), so there's no single shared
+reusable workflow for this gate — each repo's `unittest.yaml`
+contains its own test-invocation logic; only the gating
+*shape* described above is shared. Not every repo has adopted
+this pattern, and repos without a fast local test suite have
+no reason to.
 
 ## Capability-based runner matching
 
