@@ -71,7 +71,7 @@ tools listed in the run file will run:
 ```
 
 Each tool entry specifies the tool name and optional parameters.
-Parameters become `--key value` arguments passed to the tool's
+Parameters become `--key=value` arguments passed to the tool's
 start script. When no parameters are specified (as in the
 defaults), the tool uses its own built-in defaults.
 

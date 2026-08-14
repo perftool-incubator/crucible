@@ -409,7 +409,7 @@ only knows after the engine is created (e.g., which Kubernetes
 node the pod was scheduled to) and that scripts need during
 execution or post-processing.
 
-**Command files** (the ARGS array mechanism) deliver
+**Command files** (the JSON argv list mechanism) deliver
 benchmark and tool parameters. These are fetched from the
 controller during the get-data phase and contain the actual
 workload configuration — what to run, with what parameters,
