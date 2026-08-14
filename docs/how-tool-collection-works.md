@@ -71,7 +71,7 @@ tools listed in the run file will run:
 ```
 
 Each tool entry specifies the tool name and optional parameters.
-Parameters become `--key value` arguments passed to the tool's
+Parameters become `--key=value` arguments passed to the tool's
 start script. When no parameters are specified (as in the
 defaults), the tool uses its own built-in defaults.
 
@@ -407,17 +407,19 @@ this path:
 
 1. **Run file**: User specifies `tool-params` with `arg`/`val`
    pairs
-2. **rickshaw-run.py**: Builds a Bash command with a declared
-   `ARGS` array:
-   ```bash
-   declare -a ARGS=('--interval' '3' '--subtools' 'mpstat,sar')
-   && sysstat-start "${ARGS[@]}"
+2. **rickshaw-run.py**: Renders each pair as a `--arg=value` token
+   (quoted only if the value needs it) and splits the result into
+   a plain argv list:
+   ```json
+   ["sysstat-start", "--interval=3", "--subtools=mpstat,sar"]
    ```
 3. **Serialization**: Commands are written to compressed JSON files
    (`tool-cmds/<collector-type>/start.json.xz`) in the run config
-   directory
-4. **Engine execution**: The engine deserializes the JSON and
-   evaluates the command string
+   directory, one `argv` list per tool entry
+4. **Engine execution**: The engine deserializes the JSON and joins
+   `argv` back into a shell command (`shlex.join()`) immediately
+   before executing it -- this is the only point where shell
+   quoting is introduced
 
 This indirection allows the controller to build tool commands once
 and distribute them to multiple engines, with each engine's start

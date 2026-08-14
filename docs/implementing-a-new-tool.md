@@ -313,7 +313,7 @@ A couple of things that differ from the benchmark case:
 
 All tool scripts run inside engine containers on collection nodes.
 They receive tool parameters as command-line arguments in
-`--key value` format.
+`--key=value` format.
 
 ### Script conventions
 
@@ -349,7 +349,7 @@ later shutdown. Typical structure:
 
 1. Redirect output: `exec >mytool-start-stderrout.txt 2>&1`
 2. Log arguments and environment for debugging
-3. Parse `--key value` arguments with defaults
+3. Parse `--key=value` arguments with defaults
 4. Capture any baseline system state needed for post-processing
 5. Launch the collection process in the background:
    ```bash
@@ -573,7 +573,7 @@ defaulted through it; if not, they're used exactly as given:
 ]
 ```
 
-Each parameter becomes a `--key value` argument pair passed to the
+Each parameter becomes a `--key=value` argument pair passed to the
 start script. Parameters are optional — tools should define sensible
 defaults.
 
