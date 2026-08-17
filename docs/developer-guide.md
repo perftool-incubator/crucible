@@ -60,6 +60,10 @@ claude plugin marketplace add \
     ${CRUCIBLE_HOME}/subprojects/core/crucible-dev-tools
 ```
 
+Antigravity users don't need this manual step: `.agents/plugins.json` at the
+repo root points Antigravity at the same plugin directory for automatic
+discovery.
+
 Available skills:
 
 - `/crucible-tools:activity-summary` — generate an activity summary for the GitHub organization

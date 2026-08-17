@@ -141,6 +141,7 @@ to check if all modified files match the docs-only list:
 - Most workflow files (CI, release, tracking, fork-check)
 - `.gitignore`
 - `.claude/**`
+- `.agents/**`
 - `docs/**`, `spec/**`
 
 ### Faux workflows
