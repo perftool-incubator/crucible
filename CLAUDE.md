@@ -211,6 +211,10 @@ claude plugin marketplace add ${CRUCIBLE_HOME}/subprojects/core/crucible-dev-too
 
 Claude Code will prompt you to install the crucible-tools plugin — accept it.
 
+Antigravity users don't need this manual step: `.agents/plugins.json` at the
+repo root points Antigravity at the same plugin directory for automatic
+discovery.
+
 Available skills:
 - `/crucible-tools:activity-summary` — generate an activity summary for the GitHub organization
 - `/crucible-tools:architecture-review` — top-down architecture and design review across crucible subsystems
