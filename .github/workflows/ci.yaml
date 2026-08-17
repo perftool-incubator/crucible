@@ -38,6 +38,7 @@ jobs:
             .github/workflows/fork-check.yaml
             .gitignore
             .claude/**
+            .agents/**
             docs/**
             spec/**
       - name: Display changes
