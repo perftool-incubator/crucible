@@ -512,6 +512,18 @@ function start_opensearch() {
                 fi
             fi
         fi
+    else
+        # OpenSearch was already running -- still need to check the CDM
+        # server companion service, since it's tracked as a separate
+        # container and may have been stopped (or never started)
+        # independently of OpenSearch. start_cdm_server() is a no-op if
+        # it's already running.
+        start_cdm_server
+        local CDM_RC=$?
+        if [ ${CDM_RC} != 0 ]; then
+            echo "WARNING: OpenSearch already running but CDM server failed to start"
+            RC=${CDM_RC}
+        fi
     fi
     return ${RC}
 }
