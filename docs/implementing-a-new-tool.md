@@ -269,15 +269,13 @@ for the full `presets`/`validations`/`units` reference), validated
 against the same `multiplex/JSON/req-schema.json`.
 
 If a tool has no `multiplex.json`, its `tool-params` are used as-is
-(today's behavior, unchanged). If it has one, rickshaw wraps every
-`tool-params` value into a single-element `vals` array before
-handing it to `multiplex.py`, and unwraps the result back into
-`tool-params.json`'s flat `{"arg", "val"}` shape afterward. Because
-every `vals` array has exactly one element, `multiplex.py`'s
-cartesian-product expansion can only ever produce one combination —
-this is what makes it safe to reuse the benchmark mechanism
-unmodified for a use case (a static, non-iterating parameter set)
-that's fundamentally different from what it was built for.
+(today's behavior, unchanged). If it has one, rickshaw hands
+`tool-params`'s flat `{"arg", "val"}` list directly to `multiplex.py
+--flat` and gets the same shape back, validated/converted/transformed
+and with `defaults`/`essentials` applied. `--flat` mode has no
+sets/include/cartesian-product concept, since tools never need any of
+that — they always have exactly one implicit parameter set and, per
+`tool-params.json`'s own schema, never more than one value per param.
 
 **Backward compatibility (read this before adding a `multiplex.json`
 to an existing tool):** `tool-params.json` only requires a `tool`
@@ -299,13 +297,14 @@ referenced anywhere) is:
 ```
 
 A couple of things that differ from the benchmark case:
-- `id`/`ids` (per-engine restriction) have no tool analog and are
-  silently dropped when the multiplexed result is unwrapped back
-  into `tool-params.json`'s shape.
-- `role` is not meaningful for tools (there's no client/server
-  concept); rickshaw sets it internally so multiplex's own dedup
-  logic behaves consistently — you don't need to (and shouldn't) set
-  it yourself in a tool's `multiplex.json`.
+- `id`/`ids` (per-engine restriction) and `role` (client/server) have
+  no tool analog; `--flat` mode handles this internally (every param
+  defaults to role `all`) — you don't need to (and shouldn't) set
+  `role` yourself in a tool's `multiplex.json`.
+- A `repeatable` arg's individual occurrences must each be single-
+  valued (this restriction applies to benchmarks too) — multiplex
+  rejects an occurrence with more than one value outright, since a
+  tool never sweeps.
 
 ---
 
