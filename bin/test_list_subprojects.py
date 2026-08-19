@@ -33,6 +33,13 @@ BENCHMARK_SCHEMA = {
     "required": ["benchmark", "description"],
 }
 
+REAL_MULTIPLEX_SCHEMA_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "subprojects", "core", "multiplex", "JSON", "req-schema.json",
+)
+with open(REAL_MULTIPLEX_SCHEMA_PATH) as f:
+    REAL_MULTIPLEX_SCHEMA = json.load(f)
+
 
 class TestListSubprojects(unittest.TestCase):
 
@@ -46,6 +53,12 @@ class TestListSubprojects(unittest.TestCase):
             json.dump(TOOL_SCHEMA, f)
         with open(os.path.join(schema_dir, "benchmark-metadata.json"), "w") as f:
             json.dump(BENCHMARK_SCHEMA, f)
+
+        multiplex_schema_dir = os.path.join(self.crucible_home, "subprojects", "core", "multiplex", "JSON")
+        os.makedirs(multiplex_schema_dir)
+        with open(os.path.join(multiplex_schema_dir, "req-schema.json"), "w") as f:
+            json.dump(REAL_MULTIPLEX_SCHEMA, f)
+        self.multiplex_schema = REAL_MULTIPLEX_SCHEMA
 
         self.tools_dir = os.path.join(self.crucible_home, "subprojects", "tools")
         self.benchmarks_dir = os.path.join(self.crucible_home, "subprojects", "benchmarks")
@@ -190,6 +203,42 @@ class TestListSubprojects(unittest.TestCase):
             entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema)
         self.assertIsNone(entry["params"])
         self.assertIn("could not parse", stderr.getvalue())
+
+    def test_build_entry_valid_multiplex_json_passes_schema_validation(self):
+        subproject_dir = self.make_subproject(
+            self.tools_dir, "schemavalid", "tool",
+            multiplex={
+                "presets": {"defaults": [{"arg": "interval", "vals": ["3"]}]},
+                "validations": {"positive_integer": {"args": ["interval"], "vals": "^[1-9][0-9]*$"}},
+            },
+        )
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema, self.multiplex_schema)
+        self.assertIsNotNone(entry["params"])
+        self.assertEqual(entry["params_count"], 1)
+
+    def test_build_entry_malformed_multiplex_shape_rejected_by_schema(self):
+        # 'validations' mapped to a list instead of an object -- valid JSON,
+        # passes the plain isinstance(dict) check, but violates req-schema.json.
+        # This is the exact shape that used to crash count_params() outright
+        # (AttributeError: 'list' object has no attribute ...) before schema
+        # validation was added to reject it at parse time instead.
+        subproject_dir = self.make_subproject(
+            self.tools_dir, "schemainvalid", "tool",
+            multiplex={"validations": ["not", "a", "dict"]},
+        )
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema, self.multiplex_schema)
+        self.assertIsNone(entry["params"])
+        self.assertIsNone(entry["params_count"])
+        self.assertIn("failed schema validation", stderr.getvalue())
+        # confirm the whole listing survives -- table rendering must not crash either
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table([entry], self.tool_config, terminal_width=100)
+        self.assertIn("-", stdout.getvalue().splitlines()[2].split())
 
     def test_collect_entries_name_filter(self):
         self.make_subproject(self.tools_dir, "toolone", "tool")

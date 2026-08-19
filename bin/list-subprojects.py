@@ -51,7 +51,7 @@ def load_json(filepath):
         return json.load(f)
 
 
-def build_entry(subproject_dir, config, schema):
+def build_entry(subproject_dir, config, schema, multiplex_schema=None):
     """Aggregate one subproject's rickshaw.json/{tool,benchmark}-metadata.json/multiplex.json
     into a single normalized entry. Falls back to name-only if the metadata file is
     missing or fails schema validation -- a malformed file for one subproject should
@@ -105,12 +105,16 @@ def build_entry(subproject_dir, config, schema):
             multiplex = load_json(multiplex_path)
             if not isinstance(multiplex, dict):
                 raise TypeError(f"expected a JSON object, got {type(multiplex).__name__}")
+            if multiplex_schema is not None:
+                validate(instance=multiplex, schema=multiplex_schema)
             entry["params"] = {
                 "presets": multiplex.get("presets", {}),
                 "validations": multiplex.get("validations", {}),
             }
         except (json.JSONDecodeError, TypeError) as e:
             print(f"WARNING: could not parse {multiplex_path}: {e}", file=sys.stderr)
+        except ValidationError as e:
+            print(f"WARNING: {multiplex_path} failed schema validation, ignoring params for '{name}': {e.message}", file=sys.stderr)
 
     entry["metrics_count"] = count_metrics(entry, subgroup_field)
     entry["params_count"] = count_params(entry)
@@ -162,6 +166,9 @@ def collect_entries(config, name_filter):
     schema_path = os.path.join(CRUCIBLE_HOME, "schema", config["metadata_filename"])
     schema = load_json(schema_path)
 
+    multiplex_schema_path = os.path.join(CRUCIBLE_HOME, "subprojects", "core", "multiplex", "JSON", "req-schema.json")
+    multiplex_schema = load_json(multiplex_schema_path) if os.path.isfile(multiplex_schema_path) else None
+
     entries = []
     if not os.path.isdir(subprojects_root):
         return entries
@@ -171,7 +178,7 @@ def collect_entries(config, name_filter):
         if not os.path.isdir(subproject_dir):
             continue
 
-        entry = build_entry(subproject_dir, config, schema)
+        entry = build_entry(subproject_dir, config, schema, multiplex_schema)
         if entry is None:
             continue
         if name_filter and entry["name"] != name_filter:
