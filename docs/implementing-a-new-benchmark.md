@@ -305,6 +305,25 @@ error messages.
 matching validation rule. A param without a validation entry will
 cause errors during multiplex processing.
 
+A validation group can also set `"repeatable": true` to declare that
+its args may legitimately be specified more than once within a
+single set — e.g. a benchmark/tool that accepts multiple independent
+setup commands. By default (no `repeatable` key), a second occurrence
+of the same arg in one set collapses to the last one, and an
+`essentials` preset for that arg replaces whatever's already there.
+A repeatable arg is always unioned instead: duplicate occurrences all
+survive, and an `essentials` entry is added only if that exact value
+isn't already present rather than replacing anything.
+
+Each occurrence of a repeatable arg must still be single-valued —
+`"vals"` sweeping multiple values within one occurrence has no
+defined interaction with a repeatable arg's other occurrences yet
+(would it union all the values together, or multiply them?) and
+multiplex rejects it outright rather than silently producing a
+confusing cross-multiplied result. If you need a repeatable arg's
+values to vary across test iterations, define separate `sets` instead
+of trying to sweep one occurrence's values.
+
 ### Units (optional)
 
 Conversion tables for parameters with units. Users can specify
