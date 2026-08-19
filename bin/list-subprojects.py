@@ -3,7 +3,9 @@
 import argparse
 import json
 import os
+import shutil
 import sys
+import textwrap
 
 from jsonschema import validate, ValidationError
 
@@ -110,7 +112,49 @@ def build_entry(subproject_dir, config, schema):
         except (json.JSONDecodeError, TypeError) as e:
             print(f"WARNING: could not parse {multiplex_path}: {e}", file=sys.stderr)
 
+    entry["metrics_count"] = count_metrics(entry, subgroup_field)
+    entry["params_count"] = count_params(entry)
+
     return entry
+
+
+def count_metrics(entry, subgroup_field):
+    """Total distinct CDM metric types this subproject reports, summed across
+    cdm_indexed subtools/sub-benchmarks (or the top-level cdm_sources if it
+    has no subgroup). None if there's no metadata file to derive this from.
+    """
+    if not entry["has_metadata"]:
+        return None
+
+    subgroup = entry.get(subgroup_field, [])
+    if subgroup:
+        return sum(
+            len(source.get("types", []))
+            for item in subgroup if item.get("cdm_indexed")
+            for source in item.get("cdm_sources", [])
+        )
+    if entry.get("cdm_indexed"):
+        return sum(len(source.get("types", [])) for source in entry.get("cdm_sources", []))
+    return 0
+
+
+def count_params(entry):
+    """Total distinct arg names covered by multiplex.json's presets and
+    validations -- the full recognized/validated parameter surface, not just
+    the ones with a default. None if there's no multiplex.json file at all.
+    """
+    params = entry.get("params")
+    if params is None:
+        return None
+
+    args = set()
+    for group in params.get("presets", {}).values():
+        for param in group:
+            if "arg" in param:
+                args.add(param["arg"])
+    for validation in params.get("validations", {}).values():
+        args.update(validation.get("args", []))
+    return len(args)
 
 
 def collect_entries(config, name_filter):
@@ -137,45 +181,66 @@ def collect_entries(config, name_filter):
     return entries
 
 
-MAX_DESCRIPTION_WIDTH = 70
+MIN_DESCRIPTION_WIDTH = 20
+COLUMN_SEPARATOR = "  "
 
 
-def truncate(text, max_width):
-    if len(text) <= max_width:
-        return text
-    return text[:max_width - 3].rstrip() + "..."
+def print_table(entries, config, terminal_width=None):
+    if terminal_width is None:
+        terminal_width = shutil.get_terminal_size(fallback=(100, 24)).columns
 
-
-def print_table(entries, config):
     subgroup_field = config["subgroup_field"]
     subgroup_label = subgroup_field.replace("-", " ").title()
-    subgroup_singular = subgroup_field[:-1]
-    headers = ["Name", "Description", subgroup_label, "CDM Indexed"]
+    headers = ["Name", "Description", subgroup_label, "Metrics", "Params"]
 
-    rows = []
+    fixed_cells = []
     for entry in entries:
-        subgroup = entry[subgroup_field]
+        subgroup = entry.get(subgroup_field, [])
         subgroup_display = str(len(subgroup)) if subgroup else "-"
 
-        if not entry["has_metadata"]:
-            cdm_display = "-"
-        elif subgroup:
-            cdm_display = f"per-{subgroup_singular}"
-        else:
-            cdm_display = "yes" if entry["cdm_indexed"] else "no"
+        metrics = count_metrics(entry, subgroup_field)
+        metrics_display = str(metrics) if metrics is not None else "-"
 
+        params = count_params(entry)
+        params_display = str(params) if params is not None else "-"
+
+        fixed_cells.append([entry["name"], subgroup_display, metrics_display, params_display])
+
+    # Name/subgroup/metrics/params widths are fixed by content; whatever's
+    # left of the terminal width goes to Description, which wraps instead of
+    # truncating -- unlike the other columns, its content is prose and can
+    # run arbitrarily long.
+    def column_width(header, cell_index):
+        return max([len(header)] + [len(c[cell_index]) for c in fixed_cells])
+
+    name_width = column_width(headers[0], 0)
+    subgroup_width = column_width(headers[2], 1)
+    metrics_width = column_width(headers[3], 2)
+    params_width = column_width(headers[4], 3)
+
+    reserved = name_width + subgroup_width + metrics_width + params_width + len(COLUMN_SEPARATOR) * 4
+    description_wrap_width = max(MIN_DESCRIPTION_WIDTH, terminal_width - reserved)
+
+    rows = []
+    for entry, cells in zip(entries, fixed_cells):
+        name, subgroup_display, metrics_display, params_display = cells
         if entry["description"]:
             single_line_description = " ".join(entry["description"].split())
-            description = truncate(single_line_description, MAX_DESCRIPTION_WIDTH)
+            desc_lines = textwrap.wrap(single_line_description, width=description_wrap_width) or ["-"]
         else:
-            description = "-"
-        rows.append([entry["name"], description, subgroup_display, cdm_display])
+            desc_lines = ["-"]
 
-    all_rows = [headers] + rows
-    widths = [max(len(str(row[i])) for row in all_rows) for i in range(len(headers))]
+        for i, desc_line in enumerate(desc_lines):
+            if i == 0:
+                rows.append([name, desc_line, subgroup_display, metrics_display, params_display])
+            else:
+                rows.append(["", desc_line, "", "", ""])
+
+    description_width = max([len(headers[1])] + [len(row[1]) for row in rows])
+    widths = [name_width, description_width, subgroup_width, metrics_width, params_width]
 
     def fmt_row(row):
-        return "  ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row))
+        return COLUMN_SEPARATOR.join(str(cell).ljust(widths[i]) for i, cell in enumerate(row))
 
     print(fmt_row(headers))
     print(fmt_row(["-" * w for w in widths]))

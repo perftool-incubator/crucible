@@ -220,12 +220,116 @@ class TestListSubprojects(unittest.TestCase):
         }]
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            list_subprojects.print_table(entries, self.tool_config)
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=100)
         lines = stdout.getvalue().splitlines()
         # header + separator + exactly one data row -- the embedded newline
         # must not have produced an extra line
         self.assertEqual(len(lines), 3)
         self.assertIn("Line one Line two continues here", lines[2])
+
+    def test_print_table_wraps_long_description_at_terminal_width(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": True,
+            "description": "one two three four five six seven eight nine ten",
+            "subtools": [],
+            "cdm_indexed": False,
+            "cdm_sources": [],
+            "output_files": [],
+            "params": None,
+        }]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=40)
+        lines = stdout.getvalue().splitlines()
+        # narrow terminal forces the description across multiple lines,
+        # each one indented under the Description column with blank cells
+        # for Name/Subtools/Metrics/Params
+        self.assertGreater(len(lines), 3)
+        self.assertTrue(lines[2].startswith("mytool"))
+        self.assertFalse(lines[3].startswith("mytool"))
+
+    def test_print_table_metrics_column_counts_cdm_types(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": True,
+            "description": "does things",
+            "subtools": [],
+            "cdm_indexed": True,
+            "cdm_sources": [{"source": "s", "types": ["a", "b", "c"]}],
+            "output_files": [],
+            "params": None,
+        }]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=100)
+        lines = stdout.getvalue().splitlines()
+        self.assertIn("3", lines[2].split())
+
+    def test_print_table_metrics_column_sums_across_subtools(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": True,
+            "description": "does things",
+            "subtools": [
+                {"name": "a", "cdm_indexed": True, "cdm_sources": [{"source": "a", "types": ["x", "y"]}]},
+                {"name": "b", "cdm_indexed": True, "cdm_sources": [{"source": "b", "types": ["z"]}]},
+                {"name": "c", "cdm_indexed": False, "cdm_sources": []},
+            ],
+            "cdm_indexed": None,
+            "cdm_sources": [],
+            "output_files": [],
+            "params": None,
+        }]
+        self.assertEqual(list_subprojects.count_metrics(entries[0], "subtools"), 3)
+
+    def test_print_table_no_metadata_shows_dashes(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": False,
+            "description": None,
+            "subtools": [],
+            "cdm_indexed": None,
+            "cdm_sources": [],
+            "output_files": [],
+            "params": None,
+        }]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=100)
+        lines = stdout.getvalue().splitlines()
+        self.assertEqual(lines[2].split(), ["mytool", "-", "-", "-", "-"])
+
+    def test_count_metrics_no_metadata_returns_none(self):
+        entry = {"has_metadata": False, "subtools": [], "cdm_indexed": None, "cdm_sources": []}
+        self.assertIsNone(list_subprojects.count_metrics(entry, "subtools"))
+
+    def test_count_metrics_metadata_but_not_indexed_returns_zero(self):
+        entry = {"has_metadata": True, "subtools": [], "cdm_indexed": False, "cdm_sources": []}
+        self.assertEqual(list_subprojects.count_metrics(entry, "subtools"), 0)
+
+    def test_count_params_no_multiplex_returns_none(self):
+        self.assertIsNone(list_subprojects.count_params({"params": None}))
+
+    def test_count_params_counts_distinct_args_across_presets_and_validations(self):
+        entry = {"params": {
+            "presets": {"defaults": [{"arg": "a", "vals": ["1"]}], "essentials": [{"arg": "b", "vals": ["2"]}]},
+            "validations": {"rule": {"args": ["a", "c"], "vals": ".+"}},
+        }}
+        # a, b, c -- 'a' appears in both a preset and a validation but counts once
+        self.assertEqual(list_subprojects.count_params(entry), 3)
+
+    def test_build_entry_includes_metrics_and_params_counts(self):
+        subproject_dir = self.make_subproject(
+            self.tools_dir, "counted", "tool",
+            metadata={"tool": "counted", "description": "d", "cdm_indexed": True,
+                      "cdm_sources": [{"source": "s", "types": ["a", "b"]}]},
+            multiplex={"presets": {"defaults": [{"arg": "x", "vals": ["1"]}]}, "validations": {}},
+        )
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema)
+        self.assertEqual(entry["metrics_count"], 2)
+        self.assertEqual(entry["params_count"], 1)
 
 
 REAL_SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "schema")
