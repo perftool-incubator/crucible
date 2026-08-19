@@ -33,12 +33,43 @@ BENCHMARK_SCHEMA = {
     "required": ["benchmark", "description"],
 }
 
+# A simplified stand-in for multiplex's real req-schema.json, used by
+# TestListSubprojects below. multiplex is a separate subproject repo
+# (subprojects/core/multiplex/) that isn't checked out in crucible-ci's
+# unittest job -- unlike schema/tool-metadata.json and
+# schema/benchmark-metadata.json, which live in this repo and are always
+# present. TestRealMultiplexSchema further down validates against the
+# actual file, but only when it's available locally.
+MULTIPLEX_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "presets": {
+            "type": "object",
+            "patternProperties": {".*": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"arg": {"type": "string"}, "vals": {"type": "array"}},
+                    "required": ["arg", "vals"],
+                },
+            }},
+        },
+        "validations": {
+            "type": "object",
+            "patternProperties": {".*": {
+                "type": "object",
+                "properties": {"args": {"type": "array", "items": {"type": "string"}}},
+                "required": ["args"],
+            }},
+        },
+    },
+    "required": ["validations"],
+}
+
 REAL_MULTIPLEX_SCHEMA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "subprojects", "core", "multiplex", "JSON", "req-schema.json",
 )
-with open(REAL_MULTIPLEX_SCHEMA_PATH) as f:
-    REAL_MULTIPLEX_SCHEMA = json.load(f)
 
 
 class TestListSubprojects(unittest.TestCase):
@@ -57,8 +88,8 @@ class TestListSubprojects(unittest.TestCase):
         multiplex_schema_dir = os.path.join(self.crucible_home, "subprojects", "core", "multiplex", "JSON")
         os.makedirs(multiplex_schema_dir)
         with open(os.path.join(multiplex_schema_dir, "req-schema.json"), "w") as f:
-            json.dump(REAL_MULTIPLEX_SCHEMA, f)
-        self.multiplex_schema = REAL_MULTIPLEX_SCHEMA
+            json.dump(MULTIPLEX_SCHEMA, f)
+        self.multiplex_schema = MULTIPLEX_SCHEMA
 
         self.tools_dir = os.path.join(self.crucible_home, "subprojects", "tools")
         self.benchmarks_dir = os.path.join(self.crucible_home, "subprojects", "benchmarks")
@@ -491,6 +522,45 @@ class TestRealBenchmarkMetadataSchema(unittest.TestCase):
 
     def test_sub_benchmark_cdm_indexed_true_without_sources_is_invalid(self):
         self.assertInvalid(self.base(**{"sub-benchmarks": [{"name": "a", "description": "d", "cdm_indexed": True}]}))
+
+
+@unittest.skipUnless(
+    os.path.isfile(REAL_MULTIPLEX_SCHEMA_PATH),
+    "multiplex subproject not checked out (expected in a full crucible install, not in crucible-ci's bare checkout)",
+)
+class TestRealMultiplexSchema(unittest.TestCase):
+    """Validates the actual shipped subprojects/core/multiplex/JSON/req-schema.json --
+    the synthetic MULTIPLEX_SCHEMA stub used above is a simplification and could drift."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(REAL_MULTIPLEX_SCHEMA_PATH) as f:
+            cls.schema = json.load(f)
+
+    def assertValid(self, doc):
+        list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def assertInvalid(self, doc):
+        with self.assertRaises(list_subprojects.ValidationError):
+            list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def test_minimal_valid_document(self):
+        self.assertValid({"validations": {}})
+
+    def test_valid_presets_and_validations(self):
+        self.assertValid({
+            "presets": {"defaults": [{"arg": "interval", "vals": ["3"]}]},
+            "validations": {"positive_integer": {"args": ["interval"], "vals": "^[1-9][0-9]*$"}},
+        })
+
+    def test_validations_as_list_is_invalid(self):
+        self.assertInvalid({"validations": ["not", "a", "dict"]})
+
+    def test_presets_as_string_is_invalid(self):
+        self.assertInvalid({"presets": "not-a-dict", "validations": {}})
+
+    def test_missing_validations_is_invalid(self):
+        self.assertInvalid({"presets": {}})
 
 
 if __name__ == "__main__":
