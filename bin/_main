@@ -73,7 +73,11 @@ elif [ "${1}" == "tools" -o "${1}" == "benchmarks" ]; then
     if [ "${1}" == "list" ]; then
         shift
         list_cmd="${CRUCIBLE_HOME}/bin/list-subprojects.py --kind ${subproject_kind} $@"
-        ${podman_run} --name crucible-${subproject_kind}s-list-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${list_cmd}
+        # no tty is allocated for this container, so the table formatter
+        # can't detect the real terminal width on its own -- forward it
+        # explicitly via COLUMNS instead
+        terminal_columns=$(tput cols 2>/dev/null || echo 100)
+        ${podman_run} --name crucible-${subproject_kind}s-list-${SESSION_ID} "${container_common_args[@]}" "${container_non_service_args[@]}" -e "COLUMNS=${terminal_columns}" ${CRUCIBLE_CONTROLLER_IMAGE} ${list_cmd}
         EXIT_VAL=$?
     else
         echo "ERROR: unsupported '${subproject_kind}s' argument [${1}]"
