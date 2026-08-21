@@ -33,6 +33,44 @@ BENCHMARK_SCHEMA = {
     "required": ["benchmark", "description"],
 }
 
+# A simplified stand-in for multiplex's real req-schema.json, used by
+# TestListSubprojects below. multiplex is a separate subproject repo
+# (subprojects/core/multiplex/) that isn't checked out in crucible-ci's
+# unittest job -- unlike schema/tool-metadata.json and
+# schema/benchmark-metadata.json, which live in this repo and are always
+# present. TestRealMultiplexSchema further down validates against the
+# actual file, but only when it's available locally.
+MULTIPLEX_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "presets": {
+            "type": "object",
+            "patternProperties": {".*": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"arg": {"type": "string"}, "vals": {"type": "array"}},
+                    "required": ["arg", "vals"],
+                },
+            }},
+        },
+        "validations": {
+            "type": "object",
+            "patternProperties": {".*": {
+                "type": "object",
+                "properties": {"args": {"type": "array", "items": {"type": "string"}}},
+                "required": ["args"],
+            }},
+        },
+    },
+    "required": ["validations"],
+}
+
+REAL_MULTIPLEX_SCHEMA_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "subprojects", "core", "multiplex", "JSON", "req-schema.json",
+)
+
 
 class TestListSubprojects(unittest.TestCase):
 
@@ -46,6 +84,12 @@ class TestListSubprojects(unittest.TestCase):
             json.dump(TOOL_SCHEMA, f)
         with open(os.path.join(schema_dir, "benchmark-metadata.json"), "w") as f:
             json.dump(BENCHMARK_SCHEMA, f)
+
+        multiplex_schema_dir = os.path.join(self.crucible_home, "subprojects", "core", "multiplex", "JSON")
+        os.makedirs(multiplex_schema_dir)
+        with open(os.path.join(multiplex_schema_dir, "req-schema.json"), "w") as f:
+            json.dump(MULTIPLEX_SCHEMA, f)
+        self.multiplex_schema = MULTIPLEX_SCHEMA
 
         self.tools_dir = os.path.join(self.crucible_home, "subprojects", "tools")
         self.benchmarks_dir = os.path.join(self.crucible_home, "subprojects", "benchmarks")
@@ -191,6 +235,42 @@ class TestListSubprojects(unittest.TestCase):
         self.assertIsNone(entry["params"])
         self.assertIn("could not parse", stderr.getvalue())
 
+    def test_build_entry_valid_multiplex_json_passes_schema_validation(self):
+        subproject_dir = self.make_subproject(
+            self.tools_dir, "schemavalid", "tool",
+            multiplex={
+                "presets": {"defaults": [{"arg": "interval", "vals": ["3"]}]},
+                "validations": {"positive_integer": {"args": ["interval"], "vals": "^[1-9][0-9]*$"}},
+            },
+        )
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema, self.multiplex_schema)
+        self.assertIsNotNone(entry["params"])
+        self.assertEqual(entry["params_count"], 1)
+
+    def test_build_entry_malformed_multiplex_shape_rejected_by_schema(self):
+        # 'validations' mapped to a list instead of an object -- valid JSON,
+        # passes the plain isinstance(dict) check, but violates req-schema.json.
+        # This is the exact shape that used to crash count_params() outright
+        # (AttributeError: 'list' object has no attribute ...) before schema
+        # validation was added to reject it at parse time instead.
+        subproject_dir = self.make_subproject(
+            self.tools_dir, "schemainvalid", "tool",
+            multiplex={"validations": ["not", "a", "dict"]},
+        )
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema, self.multiplex_schema)
+        self.assertIsNone(entry["params"])
+        self.assertIsNone(entry["params_count"])
+        self.assertIn("failed schema validation", stderr.getvalue())
+        # confirm the whole listing survives -- table rendering must not crash either
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table([entry], self.tool_config, terminal_width=100)
+        self.assertIn("-", stdout.getvalue().splitlines()[2].split())
+
     def test_collect_entries_name_filter(self):
         self.make_subproject(self.tools_dir, "toolone", "tool")
         self.make_subproject(self.tools_dir, "tooltwo", "tool")
@@ -220,12 +300,116 @@ class TestListSubprojects(unittest.TestCase):
         }]
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            list_subprojects.print_table(entries, self.tool_config)
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=100)
         lines = stdout.getvalue().splitlines()
         # header + separator + exactly one data row -- the embedded newline
         # must not have produced an extra line
         self.assertEqual(len(lines), 3)
         self.assertIn("Line one Line two continues here", lines[2])
+
+    def test_print_table_wraps_long_description_at_terminal_width(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": True,
+            "description": "one two three four five six seven eight nine ten",
+            "subtools": [],
+            "cdm_indexed": False,
+            "cdm_sources": [],
+            "output_files": [],
+            "params": None,
+        }]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=40)
+        lines = stdout.getvalue().splitlines()
+        # narrow terminal forces the description across multiple lines,
+        # each one indented under the Description column with blank cells
+        # for Name/Subtools/Metrics/Params
+        self.assertGreater(len(lines), 3)
+        self.assertTrue(lines[2].startswith("mytool"))
+        self.assertFalse(lines[3].startswith("mytool"))
+
+    def test_print_table_metrics_column_counts_cdm_types(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": True,
+            "description": "does things",
+            "subtools": [],
+            "cdm_indexed": True,
+            "cdm_sources": [{"source": "s", "types": ["a", "b", "c"]}],
+            "output_files": [],
+            "params": None,
+        }]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=100)
+        lines = stdout.getvalue().splitlines()
+        self.assertIn("3", lines[2].split())
+
+    def test_print_table_metrics_column_sums_across_subtools(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": True,
+            "description": "does things",
+            "subtools": [
+                {"name": "a", "cdm_indexed": True, "cdm_sources": [{"source": "a", "types": ["x", "y"]}]},
+                {"name": "b", "cdm_indexed": True, "cdm_sources": [{"source": "b", "types": ["z"]}]},
+                {"name": "c", "cdm_indexed": False, "cdm_sources": []},
+            ],
+            "cdm_indexed": None,
+            "cdm_sources": [],
+            "output_files": [],
+            "params": None,
+        }]
+        self.assertEqual(list_subprojects.count_metrics(entries[0], "subtools"), 3)
+
+    def test_print_table_no_metadata_shows_dashes(self):
+        entries = [{
+            "name": "mytool",
+            "has_metadata": False,
+            "description": None,
+            "subtools": [],
+            "cdm_indexed": None,
+            "cdm_sources": [],
+            "output_files": [],
+            "params": None,
+        }]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            list_subprojects.print_table(entries, self.tool_config, terminal_width=100)
+        lines = stdout.getvalue().splitlines()
+        self.assertEqual(lines[2].split(), ["mytool", "-", "-", "-", "-"])
+
+    def test_count_metrics_no_metadata_returns_none(self):
+        entry = {"has_metadata": False, "subtools": [], "cdm_indexed": None, "cdm_sources": []}
+        self.assertIsNone(list_subprojects.count_metrics(entry, "subtools"))
+
+    def test_count_metrics_metadata_but_not_indexed_returns_zero(self):
+        entry = {"has_metadata": True, "subtools": [], "cdm_indexed": False, "cdm_sources": []}
+        self.assertEqual(list_subprojects.count_metrics(entry, "subtools"), 0)
+
+    def test_count_params_no_multiplex_returns_none(self):
+        self.assertIsNone(list_subprojects.count_params({"params": None}))
+
+    def test_count_params_counts_distinct_args_across_presets_and_validations(self):
+        entry = {"params": {
+            "presets": {"defaults": [{"arg": "a", "vals": ["1"]}], "essentials": [{"arg": "b", "vals": ["2"]}]},
+            "validations": {"rule": {"args": ["a", "c"], "vals": ".+"}},
+        }}
+        # a, b, c -- 'a' appears in both a preset and a validation but counts once
+        self.assertEqual(list_subprojects.count_params(entry), 3)
+
+    def test_build_entry_includes_metrics_and_params_counts(self):
+        subproject_dir = self.make_subproject(
+            self.tools_dir, "counted", "tool",
+            metadata={"tool": "counted", "description": "d", "cdm_indexed": True,
+                      "cdm_sources": [{"source": "s", "types": ["a", "b"]}]},
+            multiplex={"presets": {"defaults": [{"arg": "x", "vals": ["1"]}]}, "validations": {}},
+        )
+        schema = json.load(open(os.path.join(self.crucible_home, "schema", "tool-metadata.json")))
+        entry = list_subprojects.build_entry(subproject_dir, self.tool_config, schema)
+        self.assertEqual(entry["metrics_count"], 2)
+        self.assertEqual(entry["params_count"], 1)
 
 
 REAL_SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "schema")
@@ -338,6 +522,45 @@ class TestRealBenchmarkMetadataSchema(unittest.TestCase):
 
     def test_sub_benchmark_cdm_indexed_true_without_sources_is_invalid(self):
         self.assertInvalid(self.base(**{"sub-benchmarks": [{"name": "a", "description": "d", "cdm_indexed": True}]}))
+
+
+@unittest.skipUnless(
+    os.path.isfile(REAL_MULTIPLEX_SCHEMA_PATH),
+    "multiplex subproject not checked out (expected in a full crucible install, not in crucible-ci's bare checkout)",
+)
+class TestRealMultiplexSchema(unittest.TestCase):
+    """Validates the actual shipped subprojects/core/multiplex/JSON/req-schema.json --
+    the synthetic MULTIPLEX_SCHEMA stub used above is a simplification and could drift."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(REAL_MULTIPLEX_SCHEMA_PATH) as f:
+            cls.schema = json.load(f)
+
+    def assertValid(self, doc):
+        list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def assertInvalid(self, doc):
+        with self.assertRaises(list_subprojects.ValidationError):
+            list_subprojects.validate(instance=doc, schema=self.schema)
+
+    def test_minimal_valid_document(self):
+        self.assertValid({"validations": {}})
+
+    def test_valid_presets_and_validations(self):
+        self.assertValid({
+            "presets": {"defaults": [{"arg": "interval", "vals": ["3"]}]},
+            "validations": {"positive_integer": {"args": ["interval"], "vals": "^[1-9][0-9]*$"}},
+        })
+
+    def test_validations_as_list_is_invalid(self):
+        self.assertInvalid({"validations": ["not", "a", "dict"]})
+
+    def test_presets_as_string_is_invalid(self):
+        self.assertInvalid({"presets": "not-a-dict", "validations": {}})
+
+    def test_missing_validations_is_invalid(self):
+        self.assertInvalid({"presets": {}})
 
 
 if __name__ == "__main__":
