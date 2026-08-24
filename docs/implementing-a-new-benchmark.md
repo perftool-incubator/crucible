@@ -452,8 +452,13 @@ shared functions from toolbox.
 ### <name>-get-runtime
 
 Extracts the expected benchmark runtime (in seconds) from the
-provided parameters and echoes it to stdout. Rickshaw uses this
-value (plus padding) to set roadblock timeouts. The complexity of
+provided parameters and echoes it to stdout. Rickshaw adds its own
+flat padding on top of this value before using it as the roadblock
+timeout — `RUNTIME_PADDING = 180` (seconds) in
+`rickshaw/engine/engine_lib.py`, added via `tmp_timeout =
+int(runtime_output) + RUNTIME_PADDING`. **Don't add your own safety
+margin on top of this** — echo the raw duration/runtime value
+unmodified, the way `sleep`, `uperf`, and `fio` do. The complexity of
 this script varies widely between benchmarks since each benchmark
 may express its duration differently. In the simplest case, there
 is a dedicated parameter whose value can be echoed directly:
@@ -632,7 +637,9 @@ Perl.
 
 ### Toolbox metrics API
 
-Post-process scripts use the toolbox metrics library:
+Post-process scripts use the toolbox CDM metrics library. The older
+`toolbox.metrics` free-function module is deprecated — new benchmarks
+should use `toolbox.cdm_metrics.CDMMetrics`:
 
 ```python
 import sys, os, json, math
@@ -641,16 +648,24 @@ from pathlib import Path
 TOOLBOX_HOME = os.environ.get('TOOLBOX_HOME')
 p = Path(TOOLBOX_HOME) / 'python'
 sys.path.append(str(p))
-from toolbox.metrics import log_sample, finish_samples
+from toolbox.cdm_metrics import CDMMetrics
+
+metrics = CDMMetrics()
 ```
 
-### Key functions
+### Key methods
 
-- **`log_sample(file_id, desc, names, sample)`**: Records a single
-  metric data point.
+- **`metrics.log_sample(file_id, desc, names, sample)`**: Records a
+  single metric data point.
   - `file_id`: Groups samples into output files (typically `"0"`)
-  - `desc`: Dict with `source` (benchmark name), `class`
-    (`"throughput"` or `"count"`), and `type` (metric name)
+  - `desc`: Dict with `source` (benchmark name), `class`, and `type`
+    (metric name). `class` must be one of the values in
+    `toolbox/python/toolbox/cdm_metrics.py`'s `VALID_CLASSES`
+    (`throughput`, `latency`, `count`, `pass/fail`, `boolean`,
+    `percentage`) — `log_sample` raises `ValueError` on an invalid
+    class. An optional `default-aggregation` key (one of
+    `VALID_AGGREGATIONS`: `sum`, `avg`, `max`, `min`) is validated the
+    same way if present.
   - `names`: Dict of additional name-value pairs for metric
     disambiguation. Only use CDM-defined keys such as `cmd`, `tid`,
     `job`, or `group`. Do not add custom keys — the OpenSearch
@@ -671,8 +686,14 @@ from toolbox.metrics import log_sample, finish_samples
     ```
   - `sample`: Dict with `end` (timestamp in ms), `value` (numeric),
     and optionally `begin` (timestamp in ms)
-- **`finish_samples()`**: Finalizes all logged samples, writes
-  compressed metric data files, and returns the metric data filename.
+- **`metrics.finish_samples(dont_delete=False)`**: Finalizes all
+  logged samples for the current `file_id`, writes compressed metric
+  data files, and returns the metric-data file prefix (e.g.
+  `"metric-data-0"`) to use in `metric-files`. By default, samples
+  whose value never changed from `0` across the whole run are purged;
+  pass `dont_delete=True` to keep them (most benchmarks that log one
+  sample per test, rather than an interval series, want this so a
+  legitimate all-zero result isn't silently dropped).
 
 ### Output format
 
@@ -692,7 +713,7 @@ to find the metrics and what the primary metric is:
     "periods": [
         {
             "name": "measurement",
-            "metric-files": ["metric-data-0.json.xz"]
+            "metric-files": ["metric-data-0"]
         }
     ]
 }
@@ -704,7 +725,9 @@ to find the metrics and what the primary metric is:
 - **`periods`**: Array of benchmark phases. Most benchmarks have a
   single `"measurement"` period, but you could also define
   `"warm-up"`, `"prep"`, etc.
-- **`metric-files`**: The filenames returned by `finish_samples()`.
+- **`metric-files`**: The prefixes returned by `finish_samples()`
+  (rickshaw resolves the associated `.json.xz`/`.csv.xz` pair itself —
+  don't append the extension).
 
 **Error handling:** Post-process must handle empty or zero-sample
 results gracefully. If the benchmark produced no data for a
@@ -725,7 +748,7 @@ if TOOLBOX_HOME is None:
     print("This script requires the toolbox project.")
     exit(1)
 sys.path.append(str(Path(TOOLBOX_HOME) / 'python'))
-from toolbox.metrics import log_sample, finish_samples
+from toolbox.cdm_metrics import CDMMetrics
 
 def main():
     # Read raw benchmark output
@@ -733,14 +756,15 @@ def main():
         results = parse_results(f)
 
     # Log each data point
+    metrics = CDMMetrics()
     desc = {'source': 'mybench', 'class': 'throughput', 'type': 'ops-sec'}
     names = {}
     for r in results:
         sample = {'end': r['timestamp_ms'], 'value': r['ops_per_sec']}
-        log_sample("0", desc, names, sample)
+        metrics.log_sample("0", desc, names, sample)
 
     # Finalize and write output
-    metric_file_name = finish_samples()
+    metric_data_name = metrics.finish_samples(dont_delete=True)
     output = {
         'rickshaw-bench-metric': {'schema': {'version': '2021.04.12'}},
         'benchmark': 'mybench',
@@ -748,7 +772,7 @@ def main():
         'primary-metric': 'ops-sec',
         'periods': [{
             'name': 'measurement',
-            'metric-files': [metric_file_name]
+            'metric-files': [metric_data_name]
         }]
     }
     os.makedirs('postprocess', exist_ok=True)
