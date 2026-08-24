@@ -339,10 +339,29 @@ resources:
 - Auth files cleaned up after image pulls
 
 ### Kubernetes
-- Delete all engine pods
-- Delete Services created for client-server communication
-- Delete image pull secrets
-- Clean up namespace labels (or delete the namespace entirely)
+
+Before anything is deleted, diagnostics are collected and archived so
+they survive the eventual namespace deletion. This happens both on
+normal cleanup and (best-effort, without deleting anything) when a
+run aborts early:
+
+- Namespace-wide status (`kubectl get all --output wide`) and events
+  (`kubectl get events --sort-by=.lastTimestamp`), written to the
+  endpoint's sysinfo directory as `get-all.txt.xz` and `events.txt.xz`
+- Per-pod `kubectl describe pod` output, written alongside each
+  engine's container log as `<pod-name>.describe.txt.xz` next to
+  `<engine>.txt.xz` in the run's engine-logs directory
+- A `kubectl describe node` for each node that hosted an engine pod,
+  written to the sysinfo directory as `node-<node-name>.describe.txt.xz`
+- A `kubectl describe` of all Jobs, Services, and Secrets in the
+  namespace (Secrets use `describe`, never `-o yaml`, so pull
+  credentials are never written to disk), written to the sysinfo
+  directory as `jobs.describe.txt.xz`, `services.describe.txt.xz`,
+  and `secrets.describe.txt.xz`
+
+Only then does cleanup proceed to delete all engine pods, Services
+created for client-server communication, and image pull secrets, and
+clean up namespace labels (or delete the namespace entirely).
 
 ### OSP
 - Terminate VM instances
