@@ -71,6 +71,7 @@ The `docs/` directory contains detailed guides for how each crucible subsystem o
 - **`docs/how-releases-work.md`** — Quarterly releases, follow vs locked mode, set-release.
 - **`docs/how-ci-works.md`** — Workflow hierarchy, capability-based runner matching, release matrix testing.
 - **`docs/how-the-logger-works.md`** — Pipe-based output capture, SQLite storage, log viewing commands.
+- **`docs/how-agent-instructions-work.md`** — The `AGENTS.md`/`CLAUDE.md` convention for instructing AI coding agents, and how to apply it to subprojects and new repos.
 
 ### Implementation guides
 
@@ -217,6 +218,6 @@ Run your AI coding agent from `/opt/crucible` for most work — all subproject c
 - **Branch strategy**: Always create a feature branch first (`git checkout -b <descriptive-branch-name>`). Never push directly to main. Submit PRs from branches on the upstream repository, not from forks. Fork PRs cannot access org secrets and variables needed for CI workflows. All repos have a `fork-check` workflow that automatically closes fork PRs.
 - **Review requests**: When opening PRs, request review from the **Developers** team and self-assign the PR.
 - **Commit messages**: Use conventional commits format (`feat:`, `fix:`, `docs:`, etc.). Be precise and descriptive — prefer nuanced descriptions over broad generalizations.
-- **Agent instruction file updates**: When making structural changes to a subproject, update that subproject's agent instruction file(s) (`AGENTS.md` and/or `CLAUDE.md`) in the same PR. The AI agent should author this content, not humans — the human role is review and approval.
+- **Agent instruction file updates**: When making structural changes to a subproject, update that subproject's agent instruction file(s) (`AGENTS.md` and/or `CLAUDE.md`) in the same PR, following the convention in `docs/how-agent-instructions-work.md`. The AI agent should author this content, not humans — the human role is review and approval.
 - **Documentation updates**: When making changes to any crucible repo that affect user-facing behavior, configuration, architecture, or workflows, check whether the `docs/` guides need corresponding updates. Consult the documentation index in the Documentation section above to identify which guides cover the affected area. Documentation must stay in sync with the code — treat stale docs as a bug. This applies to all repos in the organization, not just the crucible repo itself.
 - **Branch rulesets**: `.github/rulesets/` files are backups of configured rulesets, not authoritative. Do not read or modify them to determine required status checks.
