@@ -1,0 +1,223 @@
+# Crucible - Container-Based Performance Testing Framework
+
+## Git Workflow
+
+NEVER commit code unless explicitly asked to commit. Stage changes and show a summary, but wait for user approval before running `git commit`.
+
+## Tool Usage
+
+Before using any CLI flag or API, verify it actually exists by checking `--help` output or documentation. Never assume a flag exists based on what seems logical.
+
+## Debugging
+
+When fixing a bug, first identify and confirm which component is actually responsible before making changes. Read the error trace carefully and validate your diagnosis before editing code.
+
+## Project Overview
+
+Crucible is a container-based performance testing framework built primarily in Bash. It orchestrates benchmark execution, data collection, post-processing, and result indexing using Podman containers. The project is part of the `perftool-incubator` GitHub organization.
+
+## Architecture
+
+**Execution flow:** `bin/crucible` (CLI entry point) -> sources `bin/base` (shared functions/config) -> `bin/_main` (command router) -> subcommands
+
+**Key design patterns:**
+- All Bash scripts source `bin/base` for shared functions, variables, and configuration
+- Commands run inside Podman containers using a controller image (`quay.io/crucible/controller`)
+- JSON configuration files are validated against JSON schemas before use
+- Subprojects are independently versioned git repos; clones live in `repos/`, activated via symlinks in `subprojects/`
+
+## Key Directories
+
+| Path | Purpose |
+|------|---------|
+| `bin/` | CLI entry point (`crucible`), command router (`_main`), shared library (`base`), and helper scripts |
+| `config/` | JSON configuration: `repos.json`, `services.json`, `registries.json` |
+| `schema/` | JSON schemas for validating config files |
+| `spec/` | Markdown specifications for config file formats and release tags |
+| `subprojects/` | Symlinks to active repo versions, organized by category (see below) |
+| `repos/` | Git clones organized by remote URL (may contain multiple forks of the same repo) |
+| `workshop/` | Container image build scripts for the controller |
+| `tests/` | Test infrastructure (`test-installer`) |
+
+## Subproject System
+
+Defined in `config/repos.json` with categories:
+- **core**: `rickshaw` (run orchestration), `multiplex`, `roadblock`, `workshop`, `CommonDataModel`, `toolbox`, `packrat`, `crucible-ci`
+- **benchmarks**: `cyclictest`, `fio`, `flexran`, `hwlatdetect`, `hwnoise`, `ilab`, `iperf`, `oslat`, `osnoise`, `pytorch`, `sleep`, `timerlat`, `tracer`, `trafficgen`, `uperf` (in `subprojects/benchmarks/`)
+- **tools**: `sysstat`, `procstat`, `ftrace`, `kernel`, `ovs`, `nvidia`, `power`, `forkstat`, `rt-trace-bpf`, `mlxreg` (in `subprojects/tools/`)
+- **docs**: `examples`, `testing` (in `subprojects/docs/`)
+
+Each entry in `repos.json` has: `name`, `type`, `repository`, `primary-branch`, and `checkout` config.
+
+## Documentation
+
+The `docs/` directory contains detailed guides for how each crucible subsystem operates. Consult these when working on, debugging, or analyzing any part of the framework.
+
+### Architecture and subsystem guides
+
+- **`docs/crucible-architecture-overview.md`** — High-level overview of all components and how they fit together. Start here.
+- **`docs/how-the-installer-works.md`** — Installation, prerequisites, registry configuration, release installs.
+- **`docs/how-run-files-work.md`** — Run file structure: benchmarks, endpoints, parameters, tools, tags.
+- **`docs/how-benchmark-execution-works.md`** — Parameter expansion, engine deployment, synchronized execution, periods, and result generation.
+- **`docs/how-tool-collection-works.md`** — Tool lifecycle, collection models, deployment, and how CDM queries extract tool data by time range.
+- **`docs/how-engines-work.md`** — Bootstrap, execution phases, files-from-controller, CPU partitioning, data archival.
+- **`docs/how-endpoints-work.md`** — Remotehosts, kube, and osp endpoint types, validation, deployment, service discovery.
+- **`docs/how-image-sourcing-works.md`** — The multi-stage image build pipeline, content-based tagging, multi-architecture support.
+- **`docs/how-roadblock-works.md`** — Distributed synchronization, barrier protocol, messaging, wait-for mechanism.
+- **`docs/how-cdm-works.md`** — Document hierarchy, metric model, indexing pipeline, query system, web dashboard.
+- **`docs/how-services-work.md`** — Valkey, OpenSearch, httpd, CDM server, image-sourcing service management.
+- **`docs/how-the-controller-image-works.md`** — What the controller contains, how it's built, the automated build pipeline.
+- **`docs/how-the-repo-system-works.md`** — repos.json, cloning, symlink activation, updating, multi-fork support.
+- **`docs/how-releases-work.md`** — Quarterly releases, follow vs locked mode, set-release.
+- **`docs/how-ci-works.md`** — Workflow hierarchy, capability-based runner matching, release matrix testing.
+- **`docs/how-the-logger-works.md`** — Pipe-based output capture, SQLite storage, log viewing commands.
+- **`docs/how-agent-instructions-work.md`** — The `AGENTS.md`/`CLAUDE.md` convention for instructing AI coding agents, and how to apply it to subprojects and new repos.
+
+### Implementation guides
+
+When creating new benchmarks or tools, consult these before writing any code:
+
+- **`docs/implementing-a-new-benchmark.md`** — Required files, rickshaw.json schema, client-server messaging, post-processing, multiplex.json, and reference implementations.
+- **`docs/implementing-a-new-tool.md`** — Required files, collector whitelist/blacklist, tool parameters, and reference implementations.
+- **`docs/implementing-a-new-endpoint.md`** — Directory structure, validation protocol, base module, engine deployment, roadblock integration, and reference implementations.
+- **`docs/developer-guide.md`** — Development environment, repository structure, testing, cross-repo coordination, PR workflow, code conventions, and debugging.
+
+These guides define the required file structure, naming conventions, JSON schemas, script patterns, and integration points. Follow them rather than inferring structure from existing code alone.
+
+## Common Commands
+
+```bash
+# Install crucible
+./crucible-install.sh
+
+# Run a benchmark (requires JSON run-file)
+crucible run <run-file.json>
+
+# Update all subprojects and controller image
+crucible update [all|crucible|controller-image|<subproject>]
+
+# Manage repos
+crucible repo [info|details|config]
+
+# Discover installed tools and benchmarks
+crucible tools list [--name <name>] [--format table|json]
+crucible benchmarks list [--name <name>] [--format table|json]
+
+# View/manage results
+crucible ls
+crucible get result [--run <id>]
+crucible get metric --run <id> --source <name> --type <metric>
+crucible index <dir>
+crucible rm --run <id>
+
+# Service management
+crucible start <service>   # httpd, opensearch, valkey, image-sourcing
+crucible stop <service>
+
+# Run CI tests
+crucible run-ci
+
+# Full help
+crucible help [command]
+```
+
+## Code Style
+
+Follow existing code style conventions exactly — check surrounding code for patterns before writing new code. When in doubt, match the existing style rather than introducing new conventions.
+
+## Code Conventions
+
+- **Bash style**: 4-space indentation, tabs expanded to spaces
+- **Modelines**: All Bash files include both vim and emacs modelines:
+  ```
+  # -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+  # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+  ```
+- **Sourcing pattern**: Scripts source `/etc/sysconfig/crucible` for `$CRUCIBLE_HOME`, then `$CRUCIBLE_HOME/bin/base` for shared functions
+- **Error handling**: Use `exit_error "message"` from `bin/base`; exit codes defined as `EC_*` constants
+- **Podman usage**: Use `podman_wrapper()` and related functions from `bin/base`; never call podman directly
+- **JSON processing**: Use `jq_query()` helper from `bin/base`; validate configs against schemas in `schema/`
+- **Variable naming**: Lowercase with underscores for locals; uppercase for exported/environment variables (e.g., `CRUCIBLE_HOME`, `CRUCIBLE_CONTROLLER_IMAGE`)
+- **CLI parameters**: When adding, modifying, or removing a CLI parameter, option, or subcommand, update all three locations: `bin/_help` (main help output), `bin/_crucible_completions` (bash tab completions), and the relevant command's own help text. In `_crucible_completions`, each command with deeper completion has its own `_complete_<command>` function — update the flag inventory and value-completion cases in the appropriate function.
+- **Comments**: Write comments that explain the intent behind the code — why a decision was made, what constraint is being satisfied, or what behavior would surprise a future reader. Focus on the WHY rather than restating WHAT the code does.
+
+## Language Strategy
+- **New code**: Write new functionality in Python 3 by default
+- **Host-side exception**: Code in the crucible repo that runs outside the controller container (e.g., `bin/` scripts) should be Bash to minimize host OS dependencies
+- **Existing languages**: When extending an existing file, use that file's language. When adding new functionality to a subproject, prefer Python
+
+## Configuration
+
+- `CRUCIBLE_HOME`: Set in `/etc/sysconfig/crucible`, typically `/opt/crucible`
+- `~/.crucible/identity`: User identity (CRUCIBLE_NAME, CRUCIBLE_EMAIL)
+- Run data stored in `/var/lib/crucible/run/`
+
+## Multi-Architecture Image Sourcing
+
+Engine container images are built by the image sourcing service (SIS). `config/services.json` maps each CPU architecture to its own SIS instance under `image-sourcing.services`:
+
+```json
+{
+    "image-sourcing": {
+        "use": true,
+        "services": {
+            "x86_64": { "start": true, "location": { "address": "localhost", "port": 8888, "protocol": "http" } },
+            "aarch64": { "start": false, "location": { "address": "arm-builder.example.com", "port": 8888, "protocol": "http" } }
+        }
+    }
+}
+```
+
+- The repo ships with a `"default"` placeholder key; `bin/_migrate-services-config` resolves it to the host's native architecture (via `uname -m`) on install, update, and every command invocation
+- Only the native architecture can use `"start": true` (local service). Non-native architectures must use `"start": false` with a remote address pointing to a native builder — local cross-arch builds are not supported due to buildah/QEMU incompatibilities
+- `bin/_main` writes `image-sourcing-urls.json` to the run config directory mapping each architecture to its service URL; rickshaw reads this file to route image sourcing requests
+
+## Dependencies
+
+Runtime: `podman`, `git`, `jq`
+
+## Multi-Repo Structure
+
+### repos/ and subprojects/ — clone vs. activate
+- **`repos/`** is where git repositories are cloned to, organized by remote URL prefix (e.g., `repos/git@github.com:perftool-incubator/rickshaw.git`). The same repo can exist multiple times from different sources (upstream, user A's fork, user B's fork, etc.).
+- **`subprojects/`** is where the **active version** of each repo is set via symlinks. A symlink points to whichever clone in `repos/` the user wants active. For example:
+  ```
+  subprojects/core/rickshaw -> ../../repos/git@github.com:perftool-incubator/rickshaw.git
+  ```
+
+This means:
+- Each subproject has its own git history, branches, and commits
+- `git status` and `git diff` from `/opt/crucible` only show changes to the crucible repo itself
+- To see/commit subproject changes, `cd` into that subproject directory
+- Switching between forks/sources is done by changing which clone the symlink points to
+
+### Cross-repo integration patterns
+- **toolbox** (`subprojects/core/toolbox/`) is a shared library used by nearly everything. Code references it via the `TOOLBOX_HOME` environment variable. Changes here ripple across all benchmarks, tools, and core components.
+- **rickshaw.json** files in benchmarks/tools declare how they integrate with rickshaw (the orchestrator). They specify roles, parameters, and workshop requirements.
+- **workshop.json** files declare container image build requirements (packages, pip modules, CPAN modules). The target image depends on context: some go into the **controller image**, others into **engine images**. Benchmarks and tools always target engine images. Core subprojects vary — e.g., toolbox targets the controller image, but packrat and roadblock target engine images (or both, in roadblock's case).
+- **JSON schemas** in `rickshaw/schema/` validate run files, benchmark params, and tool params. Schemas in `schema/` (crucible root) validate crucible's own config files.
+
+### Recommended workflow
+Run your AI coding agent from `/opt/crucible` for most work — all subproject code is accessible, and cross-cutting changes have full visibility. Only run from a subproject root (e.g., `subprojects/core/rickshaw/`) for deep isolated work on that specific component.
+
+## Common Terminology
+
+| Abbreviation | Full Name |
+|---|---|
+| CDM | CommonDataModel — the data model and query engine subproject |
+| SIS | source-images-service — the engine image build service in rickshaw |
+
+## Testing and Validation
+
+- **Container-side scripts**: Scripts that run inside the controller container (e.g., `workshop/controller-image.py`, workshop scripts) must be tested using `crucible wrapper <command>`. Running them directly on the host will fail due to missing dependencies (Python packages like `invoke`, etc.) that are only installed inside the container image.
+- **Service restart**: When modifying source-images-service code, stop all services with `crucible stop valkey opensearch image-sourcing httpd` before testing so the service picks up the new code.
+- **Engine image builds**: Test with `crucible run <run-file.json>` — run from the directory containing any referenced files (e.g., job files).
+
+## Pull Requests and Contributions
+
+- **Branch strategy**: Always create a feature branch first (`git checkout -b <descriptive-branch-name>`). Never push directly to main. Submit PRs from branches on the upstream repository, not from forks. Fork PRs cannot access org secrets and variables needed for CI workflows. All repos have a `fork-check` workflow that automatically closes fork PRs.
+- **Review requests**: When opening PRs, request review from the **Developers** team and self-assign the PR.
+- **Commit messages**: Use conventional commits format (`feat:`, `fix:`, `docs:`, etc.). Be precise and descriptive — prefer nuanced descriptions over broad generalizations.
+- **Agent instruction file updates**: When making structural changes to a subproject, update that subproject's agent instruction file(s) (`AGENTS.md` and/or `CLAUDE.md`) in the same PR, following the convention in `docs/how-agent-instructions-work.md`. The AI agent should author this content, not humans — the human role is review and approval.
+- **Documentation updates**: When making changes to any crucible repo that affect user-facing behavior, configuration, architecture, or workflows, check whether the `docs/` guides need corresponding updates. Consult the documentation index in the Documentation section above to identify which guides cover the affected area. Documentation must stay in sync with the code — treat stale docs as a bug. This applies to all repos in the organization, not just the crucible repo itself.
+- **Branch rulesets**: `.github/rulesets/` files are backups of configured rulesets, not authoritative. Do not read or modify them to determine required status checks.

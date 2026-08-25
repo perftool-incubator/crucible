@@ -62,6 +62,7 @@ Through the use of containers built at runtime for software distribution (which 
 - [How Releases Work](docs/how-releases-work.md)
 - [How CI Works](docs/how-ci-works.md)
 - [How the Logger Works](docs/how-the-logger-works.md)
+- [How Agent Instructions Work](docs/how-agent-instructions-work.md)
 
 ### Implementation guides
 

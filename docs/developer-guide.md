@@ -393,7 +393,9 @@ all three locations:
 ### Documentation
 
 - When making structural changes to a subproject, update that
-  subproject's CLAUDE.md in the same PR
+  subproject's agent instruction file(s) (`AGENTS.md` and/or
+  `CLAUDE.md`) in the same PR, following the convention in
+  [how-agent-instructions-work.md](how-agent-instructions-work.md)
 - When changes affect user-facing behavior, configuration,
   architecture, or workflows, check whether the `docs/` guides
   need corresponding updates — treat stale docs as a bug
