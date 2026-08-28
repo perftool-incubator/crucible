@@ -655,6 +655,11 @@ metrics = CDMMetrics()
 
 ### Key methods
 
+Prefer calling `log_sample()` once per interval across the run (see
+"Design questions" above) rather than once at the end with a single
+final-result value — that produces a real time series instead of one
+number.
+
 - **`metrics.log_sample(file_id, desc, names, sample)`**: Records a
   single metric data point.
   - `file_id`: Groups samples into output files (typically `"0"`)
@@ -1197,24 +1202,43 @@ questions upfront avoids the most common sources of rework:
    IOPS. The choice depends on the benchmark's purpose — discuss
    with the benchmark owner or user to confirm.
 
-3. **What parameters does the tool accept?**
-   Verify every flag against `--help`. Which are client-only,
-   server-only, or shared?
+3. **Can the tool report results periodically instead of only at the
+   end?**
+   Prefer periodic/interval logging (one `log_sample()` call per
+   interval, ending with a single `finish_samples()`) over a single
+   final-result sample whenever the tool supports it — this produces
+   a log of the benchmark's behavior throughout the run instead of
+   just one final number, and is how most existing benchmarks work
+   (iperf3's `-i`, uperf's periodic `Txn2` lines, perftest's
+   `--run_infinitely`). Check `--help`/the man page for an
+   interval-reporting flag before assuming the tool only produces a
+   one-shot summary — some tools disable other features (e.g.
+   built-in peak tracking) once periodic mode is enabled, so also
+   check what periodic mode gives up. If no periodic mode exists, a
+   single final-result sample is fine.
 
-4. **Which parameters are optional?**
+4. **What parameters does the tool accept?**
+   Verify every flag against `--help`. Which are client-only,
+   server-only, or shared? Don't trust a man page or a prior plan's
+   claim that a flag exists (including your own) — confirm it against
+   the actual installed binary's `--help` output before relying on it,
+   especially for flags whose only exercise path is a non-default
+   value (e.g. CPU/NUMA pinning left at "none" in every test run).
+
+5. **Which parameters are optional?**
    Optional params need a sentinel default value (`"none"`) in
    multiplex.json since empty strings are not allowed.
 
-5. **Does the benchmark need system-level stress testing?**
+6. **Does the benchmark need system-level stress testing?**
    If yes, plan stress-ng parameters, CPU ranges, and NUMA
    topology for the target system.
 
-6. **Does the benchmark need system pre-configuration?**
+7. **Does the benchmark need system pre-configuration?**
    NIC tuning, CPU isolation, network namespaces, IRQ affinity,
    and similar setup must happen before crucible runs. Consider
    providing a `config.sh` script.
 
-7. **How does the tool output its results?**
+8. **How does the tool output its results?**
    Stdout, a file, JSON, CSV? This determines how post-process
    will parse the data.
 
