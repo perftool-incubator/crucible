@@ -89,6 +89,23 @@ _complete_run() {
     compopt -o filenames
 }
 
+_complete_validate() {
+    local cur="${COMP_WORDS[${num_index}]}"
+    local prev="${COMP_WORDS[$((num_index - 1))]}"
+
+    case "${prev}" in
+        --type)
+            COMPREPLY=($(compgen -W "run-file multiplex workshop tool-metadata benchmark-metadata repos services registries rickshaw rickshaw-benchmark rickshaw-tool" -- "${cur}"))
+            return
+            ;;
+    esac
+
+    local remaining
+    remaining=$(_crucible_filter_used_flags 2 --type --help)
+    COMPREPLY=($(compgen -W "${remaining}" -f -- "${cur}"))
+    compopt -o filenames
+}
+
 _complete_log_view() {
     local cur="${COMP_WORDS[${num_index}]}"
     local prev="${COMP_WORDS[$((num_index - 1))]}"
@@ -584,7 +601,7 @@ _crucible_completions() {
 
     # Position 2: top-level commands
     if [ "${num_words}" -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo registries userenvs tools benchmarks update run run-ci wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${cur}"))
+        COMPREPLY=($(compgen -W "help log repo registries validate userenvs tools benchmarks update run run-ci wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${cur}"))
         return
     fi
 
@@ -592,7 +609,7 @@ _crucible_completions() {
     if [ "${num_words}" -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             help)
-                COMPREPLY=($(compgen -W "archive benchmarks console extract get images index log ls opensearch postprocess ps registries repo reset rm run run-ci start stop tags tools unarchive update userenvs wrapper" -- "${cur}"))
+                COMPREPLY=($(compgen -W "archive benchmarks console extract get images index log ls opensearch postprocess ps registries repo reset rm run run-ci start stop tags tools unarchive update userenvs validate wrapper" -- "${cur}"))
                 ;;
             tools|benchmarks)
                 COMPREPLY=($(compgen -W "list" -- "${cur}"))
@@ -617,6 +634,9 @@ _crucible_completions() {
                 ;;
             run)
                 _complete_run
+                ;;
+            validate)
+                _complete_validate
                 ;;
             wrapper)
                 COMPREPLY=($(compgen -c -f -- "${cur}"))
@@ -673,6 +693,9 @@ _crucible_completions() {
             ;;
         run)
             _complete_run
+            ;;
+        validate)
+            _complete_validate
             ;;
         log)
             case "${COMP_WORDS[2]}" in

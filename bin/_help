@@ -11,6 +11,8 @@ function help() {
     echo "help                          |  Show this help message"
     echo "run <file>                    |  Run a benchmark"
     echo "  [--log-level <level>]       |    Optional: normal, verbose, debug, verbose-debug (default: normal)"
+    echo "validate <file>               |  Validate a JSON file against its schema"
+    echo "  [--type <type>]             |    Optional: document type (default: run-file)"
     echo "log                           |  Manage the crucible log"
     echo "  view [first|last|sessionid] |    - View log entries (supports --stream, --grep, --since, --until, --head, --tail, --follow, --raw, --color)"
     echo "  sessions                    |    - List all sessions (supports --grep, --sort, --order, --color)"
@@ -91,6 +93,8 @@ function help() {
         ${CRUCIBLE_HOME}/bin/_log.py help
     elif [ "${1}" == "repo" ]; then
         ${CRUCIBLE_HOME}/bin/repo help
+    elif [ "${1}" == "validate" ]; then
+        ${CRUCIBLE_HOME}/bin/validate help
     elif [ "${1}" == "userenvs" ]; then
         ${CRUCIBLE_HOME}/bin/userenvs help
     elif [ "${1}" == "update" ]; then

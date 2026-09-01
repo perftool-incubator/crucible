@@ -441,7 +441,8 @@ listing the supported algorithms.
 
 ## Tags
 
-The `tags` section adds free-form metadata for identifying
+The `tags` section is optional and can be omitted entirely.
+When specified, it adds free-form metadata for identifying
 and filtering runs:
 
 ```json
@@ -458,7 +459,8 @@ dashboard, enabling filtering and comparison across runs.
 They're especially useful for tracking what changed between
 runs (kernel version, tuning profile, hardware configuration).
 
-Values are always strings. Any key names can be used.
+Values are always strings. Any key names can be used. When
+omitted or set to `{}`, no tags are associated with the run.
 
 ## Complete annotated example
 
@@ -541,3 +543,28 @@ each executed 3 times (num-samples) in random order. Sysstat
 collects CPU and system metrics at 1-second intervals, and
 procstat captures /proc data with default settings. The run
 is tagged for later identification.
+
+## Validating run files
+
+You can validate a run file before starting execution using the `crucible validate` command:
+
+```bash
+crucible validate my-run-file.json
+```
+
+By default, `crucible validate` assumes `--type run-file` and performs **deep validation**:
+
+1. Validates the top-level structure against `rickshaw/schema/run-file.json`
+2. Validates each endpoint definition block against its specific endpoint schema (`remotehosts.json`, `kube.json`, `kvm.json`, `osp.json`)
+3. Validates benchmark parameter definitions and expands parameter sets via multiplex
+4. Validates controller environment settings
+5. Validates tool configurations and tool multiplex expansion
+6. Validates utility parameters
+
+Deep validation verifies the complete run configuration without connecting to or deploying on target endpoints, building container images, or modifying `/var/lib/crucible/run/`.
+
+You can also perform flat schema validation on other Crucible and subproject JSON files using `--type <type>` (e.g., `multiplex`, `workshop`, `tool-metadata`, `benchmark-metadata`, `repos`, `services`, `registries`, `rickshaw`, `rickshaw-benchmark`, `rickshaw-tool`):
+
+```bash
+crucible validate --type services config/services.json
+```
