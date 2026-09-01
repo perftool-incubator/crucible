@@ -144,7 +144,7 @@ if [ "${doc_type}" == "run-file" ]; then
     for this_benchmark in ${benchmark_names}; do
         this_benchmark_subproj_dir="${CRUCIBLE_HOME}/subprojects/benchmarks/${this_benchmark}"
         if [ ! -e "${this_benchmark_subproj_dir}" ]; then
-            echo "ERROR: Running benchmark ${this_benchmark} requires that the subproject be"
+            echo "ERROR: Validating benchmark ${this_benchmark} requires that the subproject be"
             echo "located in "${CRUCIBLE_HOME}"/subprojects/benchmarks/${this_benchmark}"
             echo "This directory could not be found.  Here are the benchmark"
             echo "subproject directories:"
@@ -197,6 +197,6 @@ else
         exit 0
     else
         echo "INVALID"
-        exit ${EC_FAIL_USER}
+        exit 1
     fi
 fi
