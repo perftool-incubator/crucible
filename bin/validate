@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+# validate JSON files against JSON schemas
+
+source /etc/sysconfig/crucible
+
+if [ ! -e "${CRUCIBLE_HOME}" ]; then
+    echo "Could not find \$CRUCIBLE_HOME, exiting."
+    exit 1
+fi
+
+source "${CRUCIBLE_HOME}/bin/base"
+
+function help() {
+    echo "Usage: crucible validate [OPTIONS] <json-file>"
+    echo ""
+    echo "Validate a JSON file against its corresponding schema."
+    echo ""
+    echo "Options:"
+    echo "  --type <type>        Document type to validate against (default: run-file)"
+    echo "                       Supported types: run-file, multiplex, workshop, tool-metadata,"
+    echo "                       benchmark-metadata, repos, services, registries, rickshaw,"
+    echo "                       rickshaw-benchmark, rickshaw-tool"
+    echo "  --help               Show this help and exit"
+}
+
+if [ "$1" == "help" ]; then
+    help
+    exit 0
+fi
+
+target_file=""
+doc_type="run-file"
+
+while [ $# -gt 0 ]; do
+    case "${1}" in
+        --type)
+            shift
+            if [ $# -eq 0 ]; then
+                exit_error "--type requires a value"
+            fi
+            doc_type="${1}"
+            shift
+            ;;
+        --type=*)
+            doc_type="${1#--type=}"
+            if [ -z "${doc_type}" ]; then
+                exit_error "--type requires a value"
+            fi
+            shift
+            ;;
+        --help)
+            help
+            exit 0
+            ;;
+        --*)
+            exit_error "Unknown option '${1}'. See 'crucible help validate' for usage."
+            ;;
+        *)
+            if [ -n "${target_file}" ]; then
+                exit_error "Only one JSON file can be specified."
+            fi
+            target_file="${1}"
+            shift
+            ;;
+    esac
+done
+
+if [ -z "${target_file}" ]; then
+    exit_error "You must specify a JSON file to validate."
+fi
+if [ ! -f "${target_file}" ]; then
+    exit_error "File not found: ${target_file}"
+fi
+
+function resolve_type_schema() {
+    local dtype="${1}"
+    local target="${2}"
+    schema=""
+
+    case "${dtype}" in
+        multiplex)
+            schema="${CRUCIBLE_HOME}/subprojects/core/multiplex/JSON/req-schema.json"
+            ;;
+        workshop)
+            schema="${CRUCIBLE_HOME}/subprojects/core/workshop/schema.json"
+            ;;
+        tool-metadata)
+            schema="${CRUCIBLE_HOME}/schema/tool-metadata.json"
+            ;;
+        benchmark-metadata)
+            schema="${CRUCIBLE_HOME}/schema/benchmark-metadata.json"
+            ;;
+        repos)
+            schema="${CRUCIBLE_HOME}/schema/repos.json"
+            ;;
+        services)
+            schema="${CRUCIBLE_HOME}/schema/services.json"
+            ;;
+        registries)
+            schema="${CRUCIBLE_HOME}/schema/registries.json"
+            ;;
+        rickshaw)
+            local has_benchmark
+            local has_tool
+            has_benchmark=$(jq_query "${target}" '.benchmark // empty')
+            has_tool=$(jq_query "${target}" '.tool // empty')
+            if [ -n "${has_benchmark}" ]; then
+                schema="${CRUCIBLE_HOME}/subprojects/core/rickshaw/schema/benchmark.json"
+            elif [ -n "${has_tool}" ]; then
+                schema="${CRUCIBLE_HOME}/subprojects/core/rickshaw/schema/tool.json"
+            else
+                exit_error "Could not determine rickshaw document type (neither 'benchmark' nor 'tool' key found in ${target})"
+            fi
+            ;;
+        rickshaw-benchmark)
+            schema="${CRUCIBLE_HOME}/subprojects/core/rickshaw/schema/benchmark.json"
+            ;;
+        rickshaw-tool)
+            schema="${CRUCIBLE_HOME}/subprojects/core/rickshaw/schema/tool.json"
+            ;;
+        *)
+            exit_error "Unknown document type '${dtype}'. See 'crucible help validate' for supported types."
+            ;;
+    esac
+
+    if [ ! -f "${schema}" ]; then
+        exit_error "Schema file not found: ${schema}. Is the required subproject installed?"
+    fi
+}
+
+if [ "${doc_type}" == "run-file" ]; then
+    if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" ]; then
+        exit_error "Exiting because CRUCIBLE_CONTROLLER_IMAGE is not defined"
+    fi
+
+    # extract the list of benchmarks from the run file
+    benchmark_names=$(jq_query "${target_file}" '.benchmarks[].name // empty' 2>/dev/null)
+
+    # validate the benchmarks and create the list of their directories
+    benchmark_subproj_dir=""
+    for this_benchmark in ${benchmark_names}; do
+        this_benchmark_subproj_dir="${CRUCIBLE_HOME}/subprojects/benchmarks/${this_benchmark}"
+        if [ ! -e "${this_benchmark_subproj_dir}" ]; then
+            echo "ERROR: Validating benchmark ${this_benchmark} requires that the subproject be"
+            echo "located in "${CRUCIBLE_HOME}"/subprojects/benchmarks/${this_benchmark}"
+            echo "This directory could not be found.  Here are the benchmark"
+            echo "subproject directories:"
+            /bin/ls "${CRUCIBLE_HOME}"/subprojects/benchmarks
+            exit 1
+        fi
+        benchmark_subproj_dir+=",${this_benchmark_subproj_dir}"
+    done
+    benchmark_subproj_dir=$(echo ${benchmark_subproj_dir} | sed -e 's/^,//')
+
+    tmp_dir=$(mktemp -d -p "${var_crucible}" validate-XXXXXX)
+    trap 'rm -rf "${tmp_dir}"' EXIT
+
+    mkdir -p "${tmp_dir}/config"
+    cp "${target_file}" "${tmp_dir}/config/run-file.json"
+
+    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run.py"
+    rs_run_cmd+=" --from-file=${tmp_dir}/config/run-file.json"
+    rs_run_cmd+=" --id ${SESSION_ID}"
+    if [ -n "${benchmark_subproj_dir}" ]; then
+        rs_run_cmd+=" --bench-dir ${benchmark_subproj_dir}"
+    fi
+    rs_run_cmd+=" --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine"
+    rs_run_cmd+=" --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock"
+    rs_run_cmd+=" --roadblock-password=validate-dummy"
+    rs_run_cmd+=" --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop"
+    rs_run_cmd+=" --workshop-script=workshop.py"
+    rs_run_cmd+=" --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat"
+    rs_run_cmd+=" --tools-dir=${CRUCIBLE_HOME}/subprojects/tools"
+    rs_run_cmd+=" --registries-json=${REGISTRIES_CFG}"
+    rs_run_cmd+=" --base-run-dir=${tmp_dir}"
+    rs_run_cmd+=" --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs"
+    rs_run_cmd+=" --log-level=normal"
+    rs_run_cmd+=" --validate-only"
+
+    ${podman_run} --name crucible-rickshaw-validate-${SESSION_ID} "${container_common_args[@]}" "${container_rs_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_run_cmd}
+    RC=$?
+    exit ${RC}
+else
+    resolve_type_schema "${doc_type}" "${target_file}"
+
+    tmp_dir=$(mktemp -d -p "${var_crucible}" validate-XXXXXX)
+    trap 'rm -rf "${tmp_dir}"' EXIT
+
+    target_basename=$(basename "${target_file}")
+    cp "${target_file}" "${tmp_dir}/${target_basename}"
+
+    if validate_json_schema "${tmp_dir}/${target_basename}" "${schema}"; then
+        echo "VALID"
+        exit 0
+    else
+        echo "INVALID"
+        exit 1
+    fi
+fi

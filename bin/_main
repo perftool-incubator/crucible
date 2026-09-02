@@ -92,6 +92,10 @@ elif [ "${1}" == "repo" ]; then
         ${CRUCIBLE_HOME}/bin/repo "$@"
         EXIT_VAL=$?
     fi
+elif [ "${1}" == "validate" ]; then
+    shift
+    ${CRUCIBLE_HOME}/bin/validate "$@"
+    EXIT_VAL=$?
 elif [ "${1}" == "update" ]; then
     shift
     if [ -z "${1}" ]; then

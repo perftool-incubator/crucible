@@ -93,6 +93,9 @@ These guides define the required file structure, naming conventions, JSON schema
 # Run a benchmark (requires JSON run-file)
 crucible run <run-file.json>
 
+# Validate a run-file or JSON document against schema
+crucible validate <json-file> [--type <type>]
+
 # Update all subprojects and controller image
 crucible update [all|crucible|controller-image|<subproject>]
 

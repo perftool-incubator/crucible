@@ -229,6 +229,19 @@ crucible stop valkey opensearch image-sourcing httpd
 Then start them again or run a benchmark to exercise the
 changes.
 
+### Schema and run-file validation
+
+Validate JSON configuration files and run files without deploying engines or executing runs:
+
+```bash
+# Deep validation of a run file (checks schemas, endpoint blocks, benchmark/tool multiplex expansion)
+crucible validate my-run-file.json
+
+# Flat schema validation of config or subproject files
+crucible validate --type services config/services.json
+crucible validate --type rickshaw subprojects/benchmarks/fio/rickshaw.json
+```
+
 ### Integration testing
 
 The most thorough test is running a benchmark:

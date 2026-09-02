@@ -51,6 +51,11 @@ to verify connectivity and discover its capabilities. The
 endpoint runs in validate mode and reports structured output
 that rickshaw parses.
 
+> **Note**: Static schema validation of endpoint definition blocks is performed
+> offline as part of `crucible validate` (deep run-file validation against
+> `kube.json`, `remotehosts.json`, `kvm.json`, or `osp.json`). Live connectivity checks,
+> SSH validation, and capability discovery described below occur only during `crucible run`.
+
 ### What validation reports
 
 Endpoints output specific keywords that rickshaw-run.py parses:
