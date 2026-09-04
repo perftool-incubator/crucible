@@ -47,7 +47,7 @@ run
 | **period** | A time window within a sample | period UUID, name, begin/end timestamps |
 | **param** | A benchmark parameter | arg name, value, role (client/server) |
 | **tag** | Run metadata | name, value (e.g., kernel version, test purpose) |
-| **metric_desc** | What a metric IS | source, type, class, default-aggregation, breakout dimensions |
+| **metric_desc** | What a metric IS | source, type, class, default-aggregation, disallowed aggregations, breakout dimensions |
 | **metric_data** | Actual values | begin, end, value, duration |
 
 Each level adds context. A metric_data document inherits its
@@ -84,6 +84,14 @@ Defines what a metric measures:
   If absent, CDM falls back to `sum` (preserving current
   behavior for existing metrics). Users can override the
   aggregation at query time with `--aggregation`.
+- **disallowed-aggregations**: An optional list of aggregation names that
+  have no meaningful interpretation for this specific metric descriptor.
+  CDM rejects a query-time `--aggregation` override listed here with an
+  `INCOMPATIBLE_AGGREGATION` error. This is intentionally descriptor-level
+  metadata rather than a universal class-based rule: some unusual operations
+  are meaningful for particular boolean, pass/fail, count, or percentage
+  metrics. Use `--allow-incompatible-aggregation` when an explicitly
+  disallowed combination is nevertheless intentional.
 - **names**: Breakout dimensions that identify specific
   instances of this metric (e.g., `hostname=worker-01`,
   `cpu=3`, `device=sda`, `direction=rx`)
