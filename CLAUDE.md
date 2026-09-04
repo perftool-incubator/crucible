@@ -27,6 +27,7 @@ Available skills:
 - `/crucible-tools:image-cleanup` — clean up local podman images (engine images, dangling images, local builds)
 - `/crucible-tools:new-repo` — create a new repository in the GitHub organization with standard config
 - `/crucible-tools:open-prs` — show all open PRs in the org (optionally filter by author)
+- `/crucible-tools:pending-work` — generate a comprehensive pending work report from Jira tickets and GitHub issues/PRs
 - `/crucible-tools:pr-review` — structured multi-dimension code review for a PR
 - `/crucible-tools:repo-status` — git status across all crucible repos
 - `/crucible-tools:workflow-status` — show active CI workflow runs across crucible repos
