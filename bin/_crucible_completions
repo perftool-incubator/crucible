@@ -236,7 +236,7 @@ _complete_get_metric() {
     esac
 
     local remaining
-    remaining=$(_crucible_filter_used_flags 3 --run --period --source --type --begin --end --resolution --breakout --filter --output-format --date-format --decimal-places --output-content --horizontal-break --timestamp-rows --aggregation)
+    remaining=$(_crucible_filter_used_flags 3 --run --period --source --type --begin --end --resolution --breakout --filter --output-format --date-format --decimal-places --output-content --horizontal-break --timestamp-rows --aggregation --allow-incompatible-aggregation)
     COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
 }
 
