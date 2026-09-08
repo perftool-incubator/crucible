@@ -161,6 +161,17 @@ class TestServer(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(payload["error"]["code"], -32602)
 
+    def test_missing_summary_job_id_returns_json_rpc_error(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {"name": "get_run_summary", "arguments": {}},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+
 
 if __name__ == "__main__":
     unittest.main()
