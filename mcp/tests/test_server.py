@@ -115,6 +115,19 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32004)
 
+        self.server.run_manager.refresh_result_status.side_effect = JobNotFoundError(
+            "unknown MCP job: missing"
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {"name": "get_run_status", "arguments": {"mcp_job_id": "missing"}},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32004)
+
         self.server.run_manager.submit.side_effect = JobConflictError("idempotency conflict")
         body = json.dumps({
             "jsonrpc": "2.0",

@@ -270,7 +270,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                     job = self.server.run_manager.refresh_result_status(arguments["mcp_job_id"])
                     value = _job_status(job)
                     value["results_ready"] = value["result_status"] == "available"
-                except (KeyError, JobNotFoundError) as exc:
+                except KeyError as exc:
                     return self._error(request_id, -32602, str(exc))
             elif name == "get_run_logs":
                 try:
