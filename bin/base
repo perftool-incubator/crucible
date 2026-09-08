@@ -726,7 +726,6 @@ function stop_mcp_server() {
     mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
     echo -n "Checking for MCP server"
     if podman_running crucible-mcp-server; then
-        close_firewall_port ${mcp_port} tcp
         ${podman_stop} crucible-mcp-server > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
