@@ -39,7 +39,7 @@ _TRANSITIONS = {
         JobState.FAILED,
         JobState.UNKNOWN_AFTER_CRASH,
     },
-    JobState.POSTPROCESSING: {JobState.INDEXING, JobState.FAILED},
+    JobState.POSTPROCESSING: {JobState.INDEXING, JobState.COMPLETED, JobState.FAILED},
     JobState.INDEXING: {JobState.COMPLETED, JobState.FAILED},
     JobState.RECOVERY_REQUIRED: {JobState.FAILED},
     JobState.UNKNOWN_AFTER_CRASH: {JobState.RECOVERY_REQUIRED, JobState.FAILED},

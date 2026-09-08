@@ -21,11 +21,17 @@ class TestRunManager(unittest.TestCase):
             '{"type":"object","required":["benchmarks"]}', encoding="utf-8"
         )
         self.store = JobStore(self.root / "jobs.db")
+        event_script = (
+            "import os; "
+            "open(os.environ['CRUCIBLE_MCP_EVENT_FILE'], 'a').write("
+            "'{\\\"state\\\":\\\"postprocessing\\\","
+            "\\\"run_directory\\\":\\\"/tmp/result\\\"}\\n')"
+        )
         self.manager = RunManager(
             self.store,
             CrucibleOperations(self.root),
             self.root / "runs",
-            [sys.executable, "-c", "import sys; sys.exit(0)"],
+            [sys.executable, "-c", event_script],
         )
 
     def tearDown(self):
@@ -43,6 +49,7 @@ class TestRunManager(unittest.TestCase):
         thread = self.manager._threads[job.mcp_job_id]
         thread.join(timeout=5)
         self.assertEqual(self.store.get(job.mcp_job_id).state.value, "completed")
+        self.assertEqual(self.store.get(job.mcp_job_id).run_directory, "/tmp/result")
         self.assertTrue((self.root / "runs" / job.mcp_job_id / "input" / "run-file.json").is_file())
 
     def test_failed_runner_is_persisted(self):

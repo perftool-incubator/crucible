@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Sequence
@@ -113,7 +114,9 @@ class RunManager:
         log_path = job_directory / "runner.log"
         log = log_path.open("ab")
         environment = os.environ.copy()
+        event_path = job_directory / "events.jsonl"
         environment["CRUCIBLE_MCP_SESSION_ID"] = session_id
+        environment["CRUCIBLE_MCP_EVENT_FILE"] = str(event_path)
         try:
             process = subprocess.Popen(
                 [*self.crucible_command, "run", str(run_file)],
@@ -139,16 +142,23 @@ class RunManager:
         self.store.transition(job_id, JobState.STARTING, runner_pid=process.pid)
         thread = threading.Thread(
             target=self._wait_for_completion,
-            args=(job_id, process, log),
+            args=(job_id, process, log, event_path),
             daemon=True,
             name=f"mcp-run-{job_id}",
         )
         self._threads[job_id] = thread
         thread.start()
 
-    def _wait_for_completion(self, job_id: str, process: subprocess.Popen, log: Any) -> None:
+    def _wait_for_completion(
+        self, job_id: str, process: subprocess.Popen, log: Any, event_path: Path
+    ) -> None:
         self.store.transition(job_id, JobState.RUNNING)
-        exit_code = process.wait()
+        event_position = 0
+        while process.poll() is None:
+            event_position = self._consume_events(job_id, event_path, event_position)
+            time.sleep(0.1)
+        event_position = self._consume_events(job_id, event_path, event_position)
+        exit_code = process.returncode
         log.close()
         self._threads.pop(job_id, None)
         if exit_code == 0:
@@ -167,6 +177,33 @@ class RunManager:
                 error_category="framework",
                 error_message=f"crucible run exited with status {exit_code}",
             )
+
+    def _consume_events(self, job_id: str, event_path: Path, position: int) -> int:
+        if not event_path.is_file():
+            return position
+        with event_path.open("r", encoding="utf-8") as events:
+            events.seek(position)
+            for line in events:
+                try:
+                    event = json.loads(line)
+                    state = JobState(event["state"])
+                except (json.JSONDecodeError, KeyError, ValueError):
+                    continue
+                updates = {}
+                if event.get("run_directory"):
+                    updates["run_directory"] = event["run_directory"]
+                if state in {
+                    JobState.STARTING,
+                    JobState.RUNNING,
+                    JobState.POSTPROCESSING,
+                    JobState.INDEXING,
+                }:
+                    try:
+                        self.store.transition(job_id, state, **updates)
+                    except RuntimeError:
+                        # A terminal process result may race with its final event.
+                        pass
+            return events.tell()
 
     @staticmethod
     def _process_exists(pid: int) -> bool:
