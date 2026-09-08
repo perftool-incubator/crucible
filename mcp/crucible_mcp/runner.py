@@ -12,6 +12,7 @@ from typing import Any, Sequence
 from .jobs import JobStore
 from .models import Job, JobState, ResultStatus
 from .operations import CrucibleOperations, OperationError
+from .policy import PolicyError
 
 
 class RunManager:
@@ -65,6 +66,8 @@ class RunManager:
             try:
                 canonical_path = self.operations.input_policy.canonical_input(path)
                 canonical_document = json.loads(canonical_path.read_text(encoding="utf-8"))
+            except PolicyError as exc:
+                raise OperationError("authorization", str(exc), "input_path_rejected") from exc
             except (OSError, json.JSONDecodeError) as exc:
                 raise OperationError("user", "run-file is not valid JSON", "invalid_json") from exc
             validation = self.operations.validate_run(canonical_document)

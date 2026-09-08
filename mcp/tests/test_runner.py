@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from crucible_mcp.jobs import JobStore
-from crucible_mcp.operations import CrucibleOperations
+from crucible_mcp.operations import CrucibleOperations, OperationError
 from crucible_mcp.runner import RunManager
 
 
@@ -73,6 +73,14 @@ class TestRunManager(unittest.TestCase):
         failed = self.store.get(job.mcp_job_id)
         self.assertEqual(failed.state.value, "failed")
         self.assertEqual(failed.exit_code, 7)
+
+    def test_input_path_outside_approved_root_returns_authorization_error(self):
+        path = self.root / "outside.json"
+        path.write_text('{"benchmarks":[{"name":"example"}]}', encoding="utf-8")
+        with self.assertRaises(OperationError) as raised:
+            self.manager.submit("key-outside", path=path)
+        self.assertEqual(raised.exception.category, "authorization")
+        self.assertEqual(raised.exception.code, "input_path_rejected")
 
 
 if __name__ == "__main__":
