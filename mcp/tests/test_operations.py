@@ -46,6 +46,20 @@ class TestCrucibleOperations(unittest.TestCase):
         with self.assertRaises(OperationError):
             self.operations.describe_benchmark("../example")
 
+    def test_validate_run_rejects_absolute_and_symlink_escape_names(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        escaped = self.root / "subprojects" / "benchmarks" / "escaped"
+        escaped.symlink_to(outside, target_is_directory=True)
+
+        result = self.operations.validate_run({"benchmarks": [{"name": "/tmp/evil"}]})
+        self.assertFalse(result["valid"])
+        self.assertIn("benchmark is not installed", result["errors"][-1])
+
+        result = self.operations.validate_run({"benchmarks": [{"name": "escaped"}]})
+        self.assertFalse(result["valid"])
+        self.assertIn("benchmark is not installed", result["errors"][-1])
+
 
 if __name__ == "__main__":
     unittest.main()

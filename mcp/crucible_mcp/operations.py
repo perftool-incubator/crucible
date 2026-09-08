@@ -59,18 +59,19 @@ class CrucibleOperations:
             return []
         entries = []
         for directory in sorted(root.iterdir(), key=lambda path: path.name):
-            if not directory.is_dir():
+            safe_directory = self._benchmark_directory(directory.name)
+            if safe_directory is None:
                 continue
-            metadata = self._benchmark_metadata(directory)
+            metadata = self._benchmark_metadata(safe_directory)
             if metadata is not None:
                 entries.append(metadata)
         return entries
 
     def describe_benchmark(self, name: str) -> dict[str, Any]:
-        if not name or Path(name).name != name:
+        directory = self._benchmark_directory(name)
+        if directory is None:
             raise OperationError("user", "benchmark name is invalid", "invalid_name")
-        directory = self.crucible_home / "subprojects" / "benchmarks" / name
-        if not directory.is_dir():
+        if not directory.exists():
             raise OperationError("user", f"unknown benchmark: {name}", "not_found")
         metadata = self._benchmark_metadata(directory)
         if metadata is None:
@@ -91,7 +92,7 @@ class CrucibleOperations:
         benchmark_errors = []
         for benchmark in document.get("benchmarks", []):
             name = benchmark.get("name") if isinstance(benchmark, dict) else None
-            if not isinstance(name, str) or not (self.crucible_home / "subprojects" / "benchmarks" / name).is_dir():
+            if not isinstance(name, str) or self._benchmark_directory(name) is None:
                 benchmark_errors.append(f"benchmark is not installed: {name!r}")
 
         messages = [self._format_validation_error(error) for error in errors]
@@ -107,6 +108,33 @@ class CrucibleOperations:
         except (OSError, json.JSONDecodeError) as exc:
             raise OperationError("user", "run-file is not valid JSON", "invalid_json") from exc
         return self.validate_run(document)
+
+    def _benchmark_directory(self, name: str) -> Path | None:
+        """Resolve a benchmark name without allowing filesystem escapes.
+
+        Active benchmark entries are symlinks into Crucible's managed
+        ``repos`` clones, so both the logical benchmark root and that clone
+        root are approved after resolution.  Arbitrary symlink targets are
+        rejected.
+        """
+
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            return None
+        benchmark_root = self.crucible_home / "subprojects" / "benchmarks"
+        candidate = benchmark_root / name
+        try:
+            resolved = candidate.resolve(strict=True)
+        except FileNotFoundError:
+            return None
+        approved_roots = (
+            benchmark_root.resolve(),
+            (self.crucible_home / "repos").resolve(),
+        )
+        if not any(root == resolved or root in resolved.parents for root in approved_roots):
+            return None
+        if not resolved.is_dir():
+            return None
+        return candidate
 
     def _benchmark_metadata(self, directory: Path) -> dict[str, Any] | None:
         rickshaw_path = directory / "rickshaw.json"
