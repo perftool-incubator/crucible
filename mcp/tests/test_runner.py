@@ -24,8 +24,7 @@ class TestRunManager(unittest.TestCase):
         event_script = (
             "import os; "
             "open(os.environ['CRUCIBLE_MCP_EVENT_FILE'], 'a').write("
-            "'{\\\"state\\\":\\\"postprocessing\\\","
-            "\\\"run_directory\\\":\\\"/tmp/result\\\"}\\n')"
+            "'{\\\"state\\\":\\\"postprocessing\\\"}\\n')"
         )
         self.manager = RunManager(
             self.store,
@@ -49,7 +48,14 @@ class TestRunManager(unittest.TestCase):
         thread = self.manager._threads[job.mcp_job_id]
         thread.join(timeout=5)
         self.assertEqual(self.store.get(job.mcp_job_id).state.value, "completed")
-        self.assertEqual(self.store.get(job.mcp_job_id).run_directory, "/tmp/result")
+        summary_path = self.root / "runs" / job.mcp_job_id / "run" / "result-summary.json"
+        summary_path.parent.mkdir()
+        summary_path.write_text('{"run":"complete"}', encoding="utf-8")
+        refreshed = self.manager.refresh_result_status(job.mcp_job_id)
+        self.assertEqual(refreshed.result_status.value, "available")
+        self.assertEqual(
+            self.manager.get_summary(job.mcp_job_id)["summary"], {"run": "complete"}
+        )
         logs = self.manager.get_logs(job.mcp_job_id)
         self.assertTrue(logs["complete"])
         self.assertEqual(logs["text"], "")

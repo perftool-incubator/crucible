@@ -131,7 +131,7 @@ class RunManager:
         }
 
     def get_summary(self, job_id: str, max_bytes: int = 1_048_576) -> dict[str, Any]:
-        job = self.store.get(job_id)
+        job = self.refresh_result_status(job_id)
         if job.state not in {JobState.COMPLETED, JobState.FAILED}:
             raise OperationError("user", "run has not completed", "result_not_ready")
         if not job.run_directory:
@@ -152,6 +152,21 @@ class RunManager:
                 result_status=ResultStatus.AVAILABLE.value,
             )
         return {"job_id": job_id, "result_status": ResultStatus.AVAILABLE.value, "summary": summary}
+
+    def refresh_result_status(self, job_id: str) -> Job:
+        """Refresh local result readiness after the runner has completed."""
+
+        job = self.store.get(job_id)
+        if job.state != JobState.COMPLETED or not job.run_directory:
+            return job
+        summary_path = Path(job.run_directory) / "run" / "result-summary.json"
+        if not summary_path.is_file() or job.result_status == ResultStatus.AVAILABLE:
+            return job
+        return self.store.transition(
+            job_id,
+            job.state,
+            result_status=ResultStatus.AVAILABLE.value,
+        )
 
     def _launch(self, job_id: str, session_id: str, run_file: Path, job_directory: Path) -> None:
         log_path = job_directory / "runner.log"

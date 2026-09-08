@@ -148,7 +148,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = {"created": created, "job": _job_status(job)}
             elif name == "get_run_status":
                 try:
-                    value = _job_status(self.server.jobs.get(arguments["mcp_job_id"]))
+                    job = self.server.run_manager.refresh_result_status(arguments["mcp_job_id"])
+                    value = _job_status(job)
                     value["results_ready"] = value["result_status"] == "available"
                 except (KeyError, JobNotFoundError) as exc:
                     return self._error(request_id, -32602, str(exc))
