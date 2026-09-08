@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from crucible_mcp.jobs import JobStore
+from crucible_mcp.models import JobState
 from crucible_mcp.operations import CrucibleOperations, OperationError
 from crucible_mcp.runner import RunManager
 
@@ -81,6 +82,16 @@ class TestRunManager(unittest.TestCase):
             self.manager.submit("key-outside", path=path)
         self.assertEqual(raised.exception.category, "authorization")
         self.assertEqual(raised.exception.code, "input_path_rejected")
+
+    def test_reconcile_is_idempotent_for_recovery_states(self):
+        job, _ = self.store.create_or_get("key-recovery", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.UNKNOWN_AFTER_CRASH)
+        self.assertEqual(self.manager.reconcile(), [])
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.UNKNOWN_AFTER_CRASH)
+
+        self.store.transition(job.mcp_job_id, JobState.RECOVERY_REQUIRED)
+        self.assertEqual(self.manager.reconcile(), [])
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.RECOVERY_REQUIRED)
 
 
 if __name__ == "__main__":
