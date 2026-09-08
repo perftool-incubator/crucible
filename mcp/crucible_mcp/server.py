@@ -31,6 +31,84 @@ TOOL_NAMES = (
     "get_run_summary",
 )
 
+_EMPTY_INPUT = {"type": "object", "properties": {}, "additionalProperties": False}
+TOOL_DEFINITIONS = (
+    {"name": "crucible_info", "description": "Describe Crucible MCP capabilities.", "inputSchema": _EMPTY_INPUT},
+    {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
+    {
+        "name": "describe_benchmark",
+        "description": "Describe an installed benchmark.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "minLength": 1}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "validate_run",
+        "description": "Validate an inline run document or approved run-file path.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document": {"type": "object"},
+                "path": {"type": "string", "minLength": 1},
+            },
+            "additionalProperties": False,
+            "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
+        },
+    },
+    {
+        "name": "start_run",
+        "description": "Start an idempotent asynchronous Crucible run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "idempotency_key": {"type": "string", "minLength": 1},
+                "document": {"type": "object"},
+                "path": {"type": "string", "minLength": 1},
+            },
+            "required": ["idempotency_key"],
+            "additionalProperties": False,
+            "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
+        },
+    },
+    {
+        "name": "get_run_status",
+        "description": "Get lifecycle and result readiness for an MCP run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"mcp_job_id": {"type": "string", "minLength": 1}},
+            "required": ["mcp_job_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_run_logs",
+        "description": "Retrieve bounded runner logs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mcp_job_id": {"type": "string", "minLength": 1},
+                "offset": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1048576},
+            },
+            "required": ["mcp_job_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_run_summary",
+        "description": "Retrieve a completed run summary when results are ready.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"mcp_job_id": {"type": "string", "minLength": 1}},
+            "required": ["mcp_job_id"],
+            "additionalProperties": False,
+        },
+    },
+)
+
 
 def _job_status(job: Job) -> dict[str, Any]:
     return job.as_dict()
@@ -131,7 +209,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {"tools": [{"name": name, "description": f"Crucible MCP operation: {name}"} for name in TOOL_NAMES]},
+                "result": {"tools": list(TOOL_DEFINITIONS)},
             }
         if method == "tools/call":
             return self._call_tool(request_id, params)

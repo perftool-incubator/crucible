@@ -63,7 +63,11 @@ class TestServer(unittest.TestCase):
 
         body = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         _, payload = self.request("POST", "/mcp", body, self.token)
-        self.assertIn("start_run", [tool["name"] for tool in payload["result"]["tools"]])
+        tools = {tool["name"]: tool for tool in payload["result"]["tools"]}
+        self.assertIn("start_run", tools)
+        self.assertIn("inputSchema", tools["start_run"])
+        self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
+        self.assertIn("inputSchema", tools["get_run_logs"])
 
     def test_crucible_info_is_structured(self):
         body = json.dumps({
