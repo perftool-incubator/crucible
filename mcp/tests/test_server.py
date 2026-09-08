@@ -7,7 +7,8 @@ from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
 
-from crucible_mcp.policy import rotate_token
+from crucible_mcp.operations import CrucibleOperations
+from crucible_mcp.policy import InputPolicy, rotate_token
 from crucible_mcp.server import MCPHandler
 from http.server import ThreadingHTTPServer
 
@@ -23,6 +24,8 @@ class TestServer(unittest.TestCase):
         from crucible_mcp.jobs import JobStore
 
         server.jobs = JobStore(root / "jobs.db")
+        crucible_home = Path(os.environ.get("CRUCIBLE_HOME", Path.cwd()))
+        server.operations = CrucibleOperations(crucible_home, InputPolicy([root / "inputs"]))
         server.max_request_bytes = 1024 * 1024
         self.server = server
         self.thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -61,6 +64,17 @@ class TestServer(unittest.TestCase):
         body = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         _, payload = self.request("POST", "/mcp", body, self.token)
         self.assertIn("start_run", [tool["name"] for tool in payload["result"]["tools"]])
+
+    def test_crucible_info_is_structured(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "crucible_info", "arguments": {}},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["structuredContent"]["mcp_contract_version"], "1")
 
 
 if __name__ == "__main__":

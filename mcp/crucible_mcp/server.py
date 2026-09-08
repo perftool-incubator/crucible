@@ -14,7 +14,8 @@ from typing import Any
 
 from .jobs import JobNotFoundError, JobStore
 from .models import Job
-from .policy import PolicyError, read_token, token_matches
+from .operations import CrucibleOperations, OperationError
+from .policy import InputPolicy, PolicyError, read_token, token_matches
 
 
 TOOL_NAMES = (
@@ -112,18 +113,38 @@ class MCPHandler(BaseHTTPRequestHandler):
     def _call_tool(self, request_id: Any, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
         arguments = params.get("arguments") or {}
-        if name == "crucible_info":
-            value = {"name": "crucible", "mcp_contract_version": "1", "capabilities": list(TOOL_NAMES)}
-        elif name == "get_run_status":
-            try:
-                value = _job_status(self.server.jobs.get(arguments["mcp_job_id"]))
-            except (KeyError, JobNotFoundError) as exc:
-                return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": str(exc)}}
-        elif name in TOOL_NAMES:
-            return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32001, "message": "operation not implemented"}}
-        else:
-            return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "unknown tool"}}
+        try:
+            if name == "crucible_info":
+                value = self.server.operations.crucible_info()
+            elif name == "list_benchmarks":
+                value = {"benchmarks": self.server.operations.list_benchmarks()}
+            elif name == "describe_benchmark":
+                value = self.server.operations.describe_benchmark(arguments.get("name", ""))
+            elif name == "validate_run":
+                if "document" in arguments and "path" in arguments:
+                    return self._error(request_id, -32602, "provide exactly one of document or path")
+                if "document" in arguments:
+                    value = self.server.operations.validate_run(arguments["document"])
+                elif "path" in arguments:
+                    value = self.server.operations.validate_run_file(Path(arguments["path"]))
+                else:
+                    return self._error(request_id, -32602, "validate_run requires document or path")
+            elif name == "get_run_status":
+                try:
+                    value = _job_status(self.server.jobs.get(arguments["mcp_job_id"]))
+                except (KeyError, JobNotFoundError) as exc:
+                    return self._error(request_id, -32602, str(exc))
+            elif name in TOOL_NAMES:
+                return self._error(request_id, -32001, "operation not implemented")
+            else:
+                return self._error(request_id, -32602, "unknown tool")
+        except OperationError as exc:
+            return self._error(request_id, -32000, json.dumps(exc.as_dict()))
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": json.dumps(value)}], "structuredContent": value}}
+
+    @staticmethod
+    def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
+        return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
     def log_message(self, *_: Any) -> None:
         return
@@ -136,11 +157,14 @@ def main() -> None:
     parser.add_argument("--token-file", required=True, type=Path)
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--max-request-bytes", type=int, default=1_048_576)
+    parser.add_argument("--crucible-home", type=Path, required=True)
+    parser.add_argument("--input-root", type=Path, required=True)
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.bind, args.port), MCPHandler)
     server.token_path = args.token_file
     server.jobs = JobStore(args.database)
+    server.operations = CrucibleOperations(args.crucible_home, InputPolicy([args.input_root]))
     server.max_request_bytes = args.max_request_bytes
     try:
         server.serve_forever()

@@ -2,6 +2,7 @@
 
 from .jobs import JobConflictError, JobNotFoundError, JobStore
 from .models import Job, JobState, ResultStatus
+from .operations import CrucibleOperations, OperationError
 
 __all__ = [
     "Job",
@@ -9,5 +10,7 @@ __all__ = [
     "JobNotFoundError",
     "JobState",
     "JobStore",
+    "CrucibleOperations",
+    "OperationError",
     "ResultStatus",
 ]

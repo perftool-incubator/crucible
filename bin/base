@@ -675,6 +675,8 @@ function start_mcp_server() {
         mcp_cmd+=" --token-file ${mcp_token_file}"
         mcp_cmd+=" --database ${mcp_database}"
         mcp_cmd+=" --max-request-bytes ${mcp_max_inline_bytes}"
+        mcp_cmd+=" --crucible-home ${CRUCIBLE_HOME}"
+        mcp_cmd+=" --input-root ${mcp_input_root}"
 
         ${podman_run} --name crucible-mcp-server \
             --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \
