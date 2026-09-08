@@ -632,7 +632,8 @@ function stop_cdm_server() {
 function start_mcp_server() {
     local RC=0 mcp_bind mcp_port mcp_token_file mcp_database
     local mcp_input_root mcp_max_inline_bytes mcp_max_run_file_bytes mcp_audit_log
-    local mcp_audit_max_bytes mcp_audit_retained_files actual_port mcp_cmd
+    local mcp_audit_max_bytes mcp_audit_retained_files actual_port
+    local -a mcp_cmd
     local mcp_health_host
 
     mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
@@ -679,24 +680,26 @@ function start_mcp_server() {
             mcp_port=${actual_port}
         fi
 
-        mcp_cmd="${CRUCIBLE_HOME}/bin/crucible-mcp"
-        mcp_cmd+=" --bind ${mcp_bind}"
-        mcp_cmd+=" --port ${mcp_port}"
-        mcp_cmd+=" --token-file ${mcp_token_file}"
-        mcp_cmd+=" --database ${mcp_database}"
-        mcp_cmd+=" --max-request-bytes ${mcp_max_inline_bytes}"
-        mcp_cmd+=" --crucible-home ${CRUCIBLE_HOME}"
-        mcp_cmd+=" --input-root ${mcp_input_root}"
-        mcp_cmd+=" --max-run-file-bytes ${mcp_max_run_file_bytes}"
-        mcp_cmd+=" --audit-log ${mcp_audit_log}"
-        mcp_cmd+=" --audit-max-bytes ${mcp_audit_max_bytes}"
-        mcp_cmd+=" --audit-retained-files ${mcp_audit_retained_files}"
+        mcp_cmd=(
+            "${CRUCIBLE_HOME}/bin/crucible-mcp"
+            --bind "${mcp_bind}"
+            --port "${mcp_port}"
+            --token-file "${mcp_token_file}"
+            --database "${mcp_database}"
+            --max-request-bytes "${mcp_max_inline_bytes}"
+            --crucible-home "${CRUCIBLE_HOME}"
+            --input-root "${mcp_input_root}"
+            --max-run-file-bytes "${mcp_max_run_file_bytes}"
+            --audit-log "${mcp_audit_log}"
+            --audit-max-bytes "${mcp_audit_max_bytes}"
+            --audit-retained-files "${mcp_audit_retained_files}"
+        )
 
         ${podman_run} --name crucible-mcp-server \
             --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \
-            --mount=type=bind,source=${mcp_token_file},destination=${mcp_token_file},readonly \
+            "--mount=type=bind,source=${mcp_token_file},destination=${mcp_token_file},readonly" \
             "${container_common_args[@]}" "${container_service_args[@]}" \
-            ${CRUCIBLE_CONTROLLER_IMAGE} ${mcp_cmd} > /dev/null
+            ${CRUCIBLE_CONTROLLER_IMAGE} "${mcp_cmd[@]}" > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
             echo "ERROR: Could not start MCP server"
