@@ -8,6 +8,7 @@ shell commands or exposing arbitrary filesystem access.
 
 import argparse
 import json
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,12 @@ TOOL_DEFINITIONS = (
         },
     },
 )
+
+
+class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+    """Threading HTTP server variant for IPv6 loopback bindings."""
+
+    address_family = socket.AF_INET6
 
 
 def _job_status(job: Job) -> dict[str, Any]:
@@ -320,7 +327,8 @@ def main() -> None:
     parser.add_argument("--audit-retained-files", type=int, default=5)
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer((args.bind, args.port), MCPHandler)
+    server_class = IPv6ThreadingHTTPServer if ":" in args.bind else ThreadingHTTPServer
+    server = server_class((args.bind, args.port), MCPHandler)
     server.token_path = args.token_file
     server.jobs = JobStore(args.database)
     server.operations = CrucibleOperations(

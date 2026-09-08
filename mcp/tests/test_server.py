@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import tempfile
 import threading
 import unittest
@@ -11,7 +12,7 @@ from socketserver import TCPServer
 from crucible_mcp.operations import CrucibleOperations
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.policy import InputPolicy, rotate_token
-from crucible_mcp.server import MCPHandler
+from crucible_mcp.server import IPv6ThreadingHTTPServer, MCPHandler
 from http.server import ThreadingHTTPServer
 
 
@@ -56,6 +57,9 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("GET", "/health", token=self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "ok")
+
+    def test_ipv6_server_uses_ipv6_address_family(self):
+        self.assertEqual(IPv6ThreadingHTTPServer.address_family, socket.AF_INET6)
 
     def test_initialize_and_tools_list(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
