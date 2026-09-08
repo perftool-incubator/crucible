@@ -110,6 +110,49 @@ class RunManager:
                 )
         return changed
 
+    def get_logs(self, job_id: str, offset: int = 0, limit: int = 65_536) -> dict[str, Any]:
+        if offset < 0 or limit <= 0 or limit > 1_048_576:
+            raise OperationError("user", "invalid log bounds", "invalid_bounds")
+        job = self.store.get(job_id)
+        log_path = self.run_root / job_id / "runner.log"
+        if not log_path.is_file():
+            return {"job_id": job_id, "offset": offset, "next_offset": offset, "complete": False, "text": ""}
+        with log_path.open("rb") as log:
+            log.seek(offset)
+            data = log.read(limit)
+            next_offset = log.tell()
+            complete = len(data) < limit
+        return {
+            "job_id": job_id,
+            "offset": offset,
+            "next_offset": next_offset,
+            "complete": complete and job.state in {JobState.COMPLETED, JobState.FAILED},
+            "text": data.decode("utf-8", errors="replace"),
+        }
+
+    def get_summary(self, job_id: str, max_bytes: int = 1_048_576) -> dict[str, Any]:
+        job = self.store.get(job_id)
+        if job.state not in {JobState.COMPLETED, JobState.FAILED}:
+            raise OperationError("user", "run has not completed", "result_not_ready")
+        if not job.run_directory:
+            raise OperationError("framework", "run directory is unavailable", "result_unavailable")
+        summary_path = Path(job.run_directory) / "run" / "result-summary.json"
+        if not summary_path.is_file():
+            raise OperationError("framework", "result summary is unavailable", "result_unavailable")
+        if summary_path.stat().st_size > max_bytes:
+            raise OperationError("framework", "result summary exceeds size limit", "result_too_large")
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OperationError("framework", "result summary is not valid JSON", "invalid_result") from exc
+        if job.result_status != ResultStatus.AVAILABLE:
+            self.store.transition(
+                job_id,
+                job.state,
+                result_status=ResultStatus.AVAILABLE.value,
+            )
+        return {"job_id": job_id, "result_status": ResultStatus.AVAILABLE.value, "summary": summary}
+
     def _launch(self, job_id: str, session_id: str, run_file: Path, job_directory: Path) -> None:
         log_path = job_directory / "runner.log"
         log = log_path.open("ab")

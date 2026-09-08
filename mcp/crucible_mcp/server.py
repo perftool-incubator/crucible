@@ -149,8 +149,22 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "get_run_status":
                 try:
                     value = _job_status(self.server.jobs.get(arguments["mcp_job_id"]))
+                    value["results_ready"] = value["result_status"] == "available"
                 except (KeyError, JobNotFoundError) as exc:
                     return self._error(request_id, -32602, str(exc))
+            elif name == "get_run_logs":
+                try:
+                    value = self.server.run_manager.get_logs(
+                        arguments["mcp_job_id"],
+                        int(arguments.get("offset", 0)),
+                        int(arguments.get("limit", 65_536)),
+                    )
+                except (KeyError, TypeError, ValueError) as exc:
+                    return self._error(request_id, -32602, str(exc))
+            elif name == "get_run_summary":
+                if "mcp_job_id" not in arguments:
+                    return self._error(request_id, -32602, "mcp_job_id is required")
+                value = self.server.run_manager.get_summary(arguments["mcp_job_id"])
             elif name in TOOL_NAMES:
                 return self._error(request_id, -32001, "operation not implemented")
             else:

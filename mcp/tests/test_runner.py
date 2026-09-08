@@ -50,6 +50,9 @@ class TestRunManager(unittest.TestCase):
         thread.join(timeout=5)
         self.assertEqual(self.store.get(job.mcp_job_id).state.value, "completed")
         self.assertEqual(self.store.get(job.mcp_job_id).run_directory, "/tmp/result")
+        logs = self.manager.get_logs(job.mcp_job_id)
+        self.assertTrue(logs["complete"])
+        self.assertEqual(logs["text"], "")
         self.assertTrue((self.root / "runs" / job.mcp_job_id / "input" / "run-file.json").is_file())
 
     def test_failed_runner_is_persisted(self):
