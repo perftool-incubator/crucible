@@ -2,6 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from crucible_mcp.jobs import JobStore
 from crucible_mcp.models import JobState
@@ -92,6 +93,16 @@ class TestRunManager(unittest.TestCase):
         self.store.transition(job.mcp_job_id, JobState.RECOVERY_REQUIRED)
         self.assertEqual(self.manager.reconcile(), [])
         self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.RECOVERY_REQUIRED)
+
+    def test_reconcile_marks_live_runner_for_recovery(self):
+        job, _ = self.store.create_or_get("key-live", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.STARTING, runner_pid=1234)
+        with patch.object(self.manager, "_process_exists", return_value=True):
+            changed = self.manager.reconcile()
+        self.assertEqual([item.mcp_job_id for item in changed], [job.mcp_job_id])
+        recovered = self.store.get(job.mcp_job_id)
+        self.assertEqual(recovered.state, JobState.RECOVERY_REQUIRED)
+        self.assertEqual(recovered.error_category, "recovery")
 
 
 if __name__ == "__main__":

@@ -26,21 +26,33 @@ class JobNotFoundError(JobError):
 
 
 _TRANSITIONS = {
-    JobState.QUEUED: {JobState.STARTING, JobState.FAILED, JobState.UNKNOWN_AFTER_CRASH},
+    JobState.QUEUED: {
+        JobState.STARTING,
+        JobState.FAILED,
+        JobState.RECOVERY_REQUIRED,
+        JobState.UNKNOWN_AFTER_CRASH,
+    },
     JobState.STARTING: {
         JobState.RUNNING,
         JobState.POSTPROCESSING,
         JobState.FAILED,
+        JobState.RECOVERY_REQUIRED,
         JobState.UNKNOWN_AFTER_CRASH,
     },
     JobState.RUNNING: {
         JobState.POSTPROCESSING,
         JobState.COMPLETED,
         JobState.FAILED,
+        JobState.RECOVERY_REQUIRED,
         JobState.UNKNOWN_AFTER_CRASH,
     },
-    JobState.POSTPROCESSING: {JobState.INDEXING, JobState.COMPLETED, JobState.FAILED},
-    JobState.INDEXING: {JobState.COMPLETED, JobState.FAILED},
+    JobState.POSTPROCESSING: {
+        JobState.INDEXING,
+        JobState.COMPLETED,
+        JobState.FAILED,
+        JobState.RECOVERY_REQUIRED,
+    },
+    JobState.INDEXING: {JobState.COMPLETED, JobState.FAILED, JobState.RECOVERY_REQUIRED},
     JobState.RECOVERY_REQUIRED: {JobState.FAILED},
     JobState.UNKNOWN_AFTER_CRASH: {JobState.RECOVERY_REQUIRED, JobState.FAILED},
     JobState.COMPLETED: set(),

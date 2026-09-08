@@ -104,6 +104,19 @@ class RunManager:
         for job in self.store.list_active():
             if job.state in {JobState.UNKNOWN_AFTER_CRASH, JobState.RECOVERY_REQUIRED}:
                 continue
+            if job.runner_pid is not None and self._process_exists(job.runner_pid):
+                changed.append(
+                    self.store.transition(
+                        job.mcp_job_id,
+                        JobState.RECOVERY_REQUIRED,
+                        error_category="recovery",
+                        error_message=(
+                            "runner was still active during service reconciliation; "
+                            "manual recovery is required"
+                        ),
+                    )
+                )
+                continue
             if job.runner_pid is None or not self._process_exists(job.runner_pid):
                 changed.append(
                     self.store.transition(
