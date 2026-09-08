@@ -322,6 +322,7 @@ def main() -> None:
     parser.add_argument("--crucible-home", type=Path, required=True)
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--max-run-file-bytes", type=int, default=1_048_576)
+    parser.add_argument("--cdm-readiness-timeout", type=int, default=60)
     parser.add_argument("--audit-log", type=Path, default=Path("/var/lib/crucible/logs/mcp-audit.jsonl"))
     parser.add_argument("--audit-max-bytes", type=int, default=10 * 1024 * 1024)
     parser.add_argument("--audit-retained-files", type=int, default=5)
@@ -341,6 +342,7 @@ def main() -> None:
         args.database.parent / "runs",
         [str(args.crucible_home / "bin" / "crucible")],
         args.max_request_bytes,
+        args.cdm_readiness_timeout,
     )
     server.audit = AuditLogger(args.audit_log, args.audit_max_bytes, args.audit_retained_files)
     server.run_manager.reconcile()

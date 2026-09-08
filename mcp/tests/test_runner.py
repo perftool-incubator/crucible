@@ -1,5 +1,6 @@
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -103,6 +104,22 @@ class TestRunManager(unittest.TestCase):
         recovered = self.store.get(job.mcp_job_id)
         self.assertEqual(recovered.state, JobState.RECOVERY_REQUIRED)
         self.assertEqual(recovered.error_category, "recovery")
+
+    def test_summary_wait_uses_configured_cdm_readiness_timeout(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "summary-timeout-runs",
+            [sys.executable, "-c", "import sys; sys.exit(0)"],
+            cdm_readiness_timeout=0.01,
+        )
+        job, _ = manager.submit("key-summary-timeout", document={"benchmarks": [{"name": "example"}]})
+        manager._threads[job.mcp_job_id].join(timeout=5)
+        started = time.monotonic()
+        with self.assertRaises(OperationError) as raised:
+            manager.get_summary(job.mcp_job_id)
+        self.assertEqual(raised.exception.code, "result_unavailable")
+        self.assertLess(time.monotonic() - started, 1)
 
 
 if __name__ == "__main__":

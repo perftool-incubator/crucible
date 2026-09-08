@@ -31,12 +31,14 @@ class RunManager:
         run_root: Path,
         crucible_command: Sequence[str],
         max_inline_bytes: int = 1_048_576,
+        cdm_readiness_timeout: int = 60,
     ):
         self.store = store
         self.operations = operations
         self.run_root = Path(run_root)
         self.crucible_command = tuple(crucible_command)
         self.max_inline_bytes = max_inline_bytes
+        self.cdm_readiness_timeout = cdm_readiness_timeout
         self.run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._threads: dict[str, threading.Thread] = {}
 
@@ -155,6 +157,12 @@ class RunManager:
         if not job.run_directory:
             raise OperationError("framework", "run directory is unavailable", "result_unavailable")
         summary_path = Path(job.run_directory) / "run" / "result-summary.json"
+        deadline = time.monotonic() + self.cdm_readiness_timeout
+        while not summary_path.is_file():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.1, remaining))
         if not summary_path.is_file():
             raise OperationError("framework", "result summary is unavailable", "result_unavailable")
         if summary_path.stat().st_size > max_bytes:
