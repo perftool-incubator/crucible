@@ -91,8 +91,8 @@ class InputPolicy:
             raise PolicyError("run-file must be a regular file")
         if candidate.stat().st_size > self._max_bytes:
             raise PolicyError("run-file exceeds the configured size limit")
-        if candidate.stat().st_mode & 0o002:
-            raise PolicyError("run-file must not be world-writable")
+        if candidate.stat().st_mode & 0o022:
+            raise PolicyError("run-file must not be group- or world-writable")
         if not any(candidate == root or root in candidate.parents for root in self._roots):
             raise PolicyError("run-file is outside the configured input roots")
         return candidate

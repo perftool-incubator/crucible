@@ -36,6 +36,15 @@ class TestPolicy(unittest.TestCase):
         with self.assertRaises(PolicyError):
             InputPolicy([allowed]).canonical_input(run_file)
 
+    def test_input_policy_rejects_group_writable_file(self):
+        allowed = self.root / "inputs"
+        allowed.mkdir()
+        run_file = allowed / "run.json"
+        run_file.write_text("{}", encoding="utf-8")
+        run_file.chmod(0o620)
+        with self.assertRaises(PolicyError):
+            InputPolicy([allowed]).canonical_input(run_file)
+
     def test_token_rotation_is_atomic_and_private(self):
         token_path = self.root / "mcp-server.token"
         first = rotate_token(token_path)
