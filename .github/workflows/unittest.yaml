@@ -24,3 +24,8 @@ jobs:
         run: |
           source .venv/bin/activate
           python3 -m unittest discover -s bin -p "test_*.py" -v
+
+      - name: Run MCP unit tests
+        run: |
+          source .venv/bin/activate
+          PYTHONPATH=mcp python3 -m unittest discover -s mcp/tests -p "test_*.py" -v

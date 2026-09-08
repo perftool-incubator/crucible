@@ -26,6 +26,7 @@ execution depends on:
 - **cdm-server** — CDM query API server for result analysis
 - **httpd** — Web UI for browsing results and logs
 - **image-sourcing** — Container image builder for engine images
+- **mcp-server** — Authenticated MCP interface for Crucible operations
 
 Services are managed via `crucible start <service>` and
 `crucible stop <service>`, and configured in
@@ -85,6 +86,40 @@ benchmark and tool engines. It runs per-architecture instances
 — one for each CPU architecture that endpoints require. The
 native architecture runs locally; non-native architectures
 require remote builder hosts.
+
+### MCP server
+
+The MCP server provides an authenticated interface for discovery,
+validation, run submission, status polling, bounded logs, and result
+summaries. It is disabled for `crucible start all` by default and can be
+enabled in `config/services.json`:
+
+```json
+{
+    "mcp-server": {
+        "enabled": true,
+        "bind": "127.0.0.1",
+        "port": 8889,
+        "transport": "streamable-http",
+        "token-file": "/etc/crucible/mcp-server.token",
+        "database": "/var/lib/crucible/mcp/jobs.db",
+        "input-root": "/var/lib/crucible/mcp/inputs",
+        "max-inline-bytes": 1048576,
+        "max-run-file-bytes": 1048576,
+        "cdm-readiness-timeout": 60
+    }
+}
+```
+
+The service requires a bearer token for every request, including localhost
+requests. The default implementation accepts localhost binding only; remote
+binding remains unavailable until TLS support is configured. The token file
+is root-owned with mode `0600`, and MCP job state is stored in SQLite at the
+configured database path.
+
+MCP-owned jobs prevent service shutdown while they are queued, running,
+post-processing, indexing, or awaiting recovery. This protects jobs that are
+not represented by an active Rickshaw container.
 
 ### Remote archive storage
 
@@ -283,6 +318,11 @@ The `remote-archive` section configures remote storage backends:
 - **image-sourcing.use**: Enable/disable image sourcing
 - **image-sourcing.services**: Per-architecture SIS
   configuration
+- **mcp-server.enabled**: Include MCP in `start all` when enabled
+- **mcp-server.bind/port**: MCP listener address and port
+- **mcp-server.token-file**: Root-owned bearer-token file
+- **mcp-server.database**: Durable MCP job database
+- **mcp-server.input-root**: Default approved run-file directory
 - **remote-archive.remotes**: Named map of remote storage
   backends
 - **remote-archive.default**: Default remote for `--remote

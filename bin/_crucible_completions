@@ -578,7 +578,7 @@ _complete_start_stop() {
     done
 
     local remaining
-    remaining=$(_crucible_filter_used_flags 2 all cdm-server httpd image-sourcing opensearch valkey)
+    remaining=$(_crucible_filter_used_flags 2 all cdm-server httpd image-sourcing mcp-server opensearch valkey)
     COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
 }
 

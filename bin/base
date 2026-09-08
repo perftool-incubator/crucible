@@ -629,6 +629,123 @@ function stop_cdm_server() {
     return ${RC}
 }
 
+function start_mcp_server() {
+    local RC=0 mcp_bind mcp_port mcp_token_file mcp_database
+    local mcp_input_root mcp_max_inline_bytes actual_port mcp_cmd
+
+    mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
+    mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
+    mcp_token_file=$(jq_query ${SERVICES_CFG} '."mcp-server"."token-file"')
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    mcp_input_root=$(jq_query ${SERVICES_CFG} '."mcp-server"."input-root"')
+    mcp_max_inline_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."max-inline-bytes"')
+
+    if [ -z "${mcp_bind}" -o -z "${mcp_port}" -o -z "${mcp_token_file}" -o -z "${mcp_database}" ]; then
+        echo "ERROR: mcp-server configuration is incomplete"
+        return 1
+    fi
+    if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+        echo "ERROR: MCP remote binding is unavailable until TLS support is configured"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "${mcp_token_file}")" "${mcp_input_root}"
+    if [ ! -e "${mcp_token_file}" ]; then
+        (umask 077; head -c 32 /dev/urandom | base64 > "${mcp_token_file}")
+    fi
+    chmod 600 "${mcp_token_file}"
+
+    echo -n "Checking for MCP server"
+    if ! podman_running crucible-mcp-server; then
+        actual_port=$(find_available_port "mcp-server" ${mcp_port})
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        if [ ${actual_port} -ne ${mcp_port} ]; then
+            jq_update_validated ${SERVICES_CFG} \
+                                ${SERVICES_CFG_SCHEMA} \
+                                "services:mcp-server-port-search" \
+                                ".\"mcp-server\".port = ${actual_port}"
+            mcp_port=${actual_port}
+        fi
+
+        mcp_cmd="${CRUCIBLE_HOME}/bin/crucible-mcp"
+        mcp_cmd+=" --bind ${mcp_bind}"
+        mcp_cmd+=" --port ${mcp_port}"
+        mcp_cmd+=" --token-file ${mcp_token_file}"
+        mcp_cmd+=" --database ${mcp_database}"
+        mcp_cmd+=" --max-request-bytes ${mcp_max_inline_bytes}"
+
+        ${podman_run} --name crucible-mcp-server \
+            --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \
+            --mount=type=bind,source=${mcp_token_file},destination=${mcp_token_file},readonly \
+            "${container_common_args[@]}" "${container_service_args[@]}" \
+            ${CRUCIBLE_CONTROLLER_IMAGE} ${mcp_cmd} > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not start MCP server"
+            return ${RC}
+        fi
+    fi
+
+    local mcp_token mcp_available=0 mcp_count=1 mcp_timeout=30
+    mcp_token=$(cat "${mcp_token_file}")
+    echo "Waiting for MCP server to be available (${mcp_timeout} seconds maximum)..."
+    while [ ${mcp_available} -eq 0 -a ${mcp_count} -le ${mcp_timeout} ]; do
+        if curl --silent --show-error --fail \
+            --header "Authorization: Bearer ${mcp_token}" \
+            "http://${mcp_bind}:${mcp_port}/health" >/dev/null 2>&1; then
+            mcp_available=1
+        else
+            sleep 1
+        fi
+        (( mcp_count += 1 ))
+    done
+    if [ ${mcp_available} -eq 0 ]; then
+        echo "ERROR: MCP server failed to become available within ${mcp_timeout} seconds"
+        return 1
+    fi
+    echo "Successfully started MCP server on port ${mcp_port}"
+    return ${RC}
+}
+
+function stop_mcp_server() {
+    local RC=0 mcp_port
+
+    mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
+    echo -n "Checking for MCP server"
+    if podman_running crucible-mcp-server; then
+        close_firewall_port ${mcp_port} tcp
+        ${podman_stop} crucible-mcp-server > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop MCP server"
+        else
+            echo "Successfully stopped MCP server"
+        fi
+    fi
+    return ${RC}
+}
+
+function mcp_active_jobs() {
+    local mcp_database
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    if [ ! -f "${mcp_database}" ]; then
+        return 0
+    fi
+    PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_database}" <<'PY'
+import sys
+from crucible_mcp.jobs import JobStore
+
+store = JobStore(sys.argv[1])
+try:
+    for job in store.list_active():
+        print(f"{job.mcp_job_id} {job.state.value}")
+finally:
+    store.close()
+PY
+}
+
 function extract_run_id() {
     local RUN_DIR THIS_ID
 
@@ -1297,6 +1414,18 @@ function service_control() {
             echo "ERROR: Wait for the run(s) to complete or stop them manually before stopping services"
             return 1
         fi
+
+        local mcp_jobs
+        mcp_jobs=$(mcp_active_jobs)
+        if [ -n "${mcp_jobs}" ]; then
+            echo "ERROR: Cannot stop services while MCP jobs are active"
+            echo "ERROR: Active MCP job(s):"
+            echo "${mcp_jobs}" | while read job_id job_state; do
+                echo "ERROR:   ${job_id} (${job_state})"
+            done
+            echo "ERROR: Wait for MCP jobs to complete before stopping services"
+            return 1
+        fi
     fi
 
     action_rc=0
@@ -1306,7 +1435,10 @@ function service_control() {
         shift
 
         if [ "${service}" == "all" ]; then
-            local all_services="httpd opensearch valkey cdm-server image-sourcing"
+            local all_services="httpd opensearch valkey cdm-server image-sourcing mcp-server"
+            if [ "$(jq_query ${SERVICES_CFG} '."mcp-server".enabled // false')" != "true" ]; then
+                all_services="httpd opensearch valkey cdm-server image-sourcing"
+            fi
             service_control ${action} ${all_services}
             return $?
         fi
@@ -1317,7 +1449,7 @@ function service_control() {
         fi
 
         case "${service}" in
-            "httpd"|"opensearch"|"valkey")
+            "httpd"|"opensearch"|"valkey"|"mcp-server")
                 ${action}_${service}
                 service_rc=$?
                 ;;
