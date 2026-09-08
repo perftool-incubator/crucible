@@ -323,6 +323,9 @@ The `remote-archive` section configures remote storage backends:
 - **mcp-server.token-file**: Root-owned bearer-token file
 - **mcp-server.database**: Durable MCP job database
 - **mcp-server.input-root**: Default approved run-file directory
+- **mcp-server.audit-log**: Credential-safe JSONL security audit log
+- **mcp-server.audit-max-bytes**: Active audit-log size limit
+- **mcp-server.audit-retained-files**: Number of rotated audit logs retained
 - **remote-archive.remotes**: Named map of remote storage
   backends
 - **remote-archive.default**: Default remote for `--remote

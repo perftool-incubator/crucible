@@ -4,6 +4,7 @@ from .jobs import JobConflictError, JobNotFoundError, JobStore
 from .models import Job, JobState, ResultStatus
 from .operations import CrucibleOperations, OperationError
 from .runner import RunManager
+from .audit import AuditLogger
 
 __all__ = [
     "Job",
@@ -14,5 +15,6 @@ __all__ = [
     "CrucibleOperations",
     "OperationError",
     "RunManager",
+    "AuditLogger",
     "ResultStatus",
 ]

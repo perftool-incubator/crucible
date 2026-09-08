@@ -12,7 +12,10 @@
         "input-root": "/var/lib/crucible/mcp/inputs",
         "max-inline-bytes": 1048576,
         "max-run-file-bytes": 1048576,
-        "cdm-readiness-timeout": 60
+        "cdm-readiness-timeout": 60,
+        "audit-log": "/var/lib/crucible/logs/mcp-audit.jsonl",
+        "audit-max-bytes": 10485760,
+        "audit-retained-files": 5
     },
     "httpd": {
         "port": 8080

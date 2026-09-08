@@ -17,6 +17,7 @@ from .models import Job
 from .operations import CrucibleOperations, OperationError
 from .policy import InputPolicy, PolicyError, read_token, token_matches
 from .runner import RunManager
+from .audit import AuditLogger
 
 
 TOOL_NAMES = (
@@ -54,15 +55,20 @@ class MCPHandler(BaseHTTPRequestHandler):
             expected = read_token(self.server.token_path)
         except PolicyError:
             return False
-        return token_matches(authorization[7:], expected)
+        matched = token_matches(authorization[7:], expected)
+        if matched:
+            self._authenticated_token = expected
+        return matched
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         if self.path != "/health":
             self._json(404, {"error": "not_found"})
             return
         if not self._authorized():
+            self._audit("health", "denied")
             self._json(401, {"error": "unauthorized"})
             return
+        self._audit("health", "success")
         self._json(200, {"status": "ok", "service": "mcp-server"})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
@@ -70,8 +76,10 @@ class MCPHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not_found"})
             return
         if not self._authorized():
+            self._audit("mcp", "denied")
             self._json(401, {"error": "unauthorized"})
             return
+        request: Any = {}
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > self.server.max_request_bytes:
@@ -80,7 +88,25 @@ class MCPHandler(BaseHTTPRequestHandler):
             response = self._dispatch(request)
         except (ValueError, json.JSONDecodeError) as exc:
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": str(exc)}}
+        operation = request.get("method", "invalid") if isinstance(request, dict) else "invalid"
+        params = request.get("params", {}) if isinstance(request, dict) else {}
+        self._audit(
+            operation,
+            "error" if "error" in response else "success",
+            job_id=params.get("arguments", {}).get("mcp_job_id") if isinstance(params, dict) else None,
+        )
         self._json(200, response)
+
+    def _audit(self, operation: str, outcome: str, job_id: str | None = None) -> None:
+        audit = getattr(self.server, "audit", None)
+        if audit is not None:
+            audit.record(
+                operation=operation,
+                outcome=outcome,
+                source_address=self.client_address[0],
+                job_id=job_id,
+                token=getattr(self, "_authenticated_token", None),
+            )
 
     def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         request_id = request.get("id")
@@ -192,6 +218,9 @@ def main() -> None:
     parser.add_argument("--crucible-home", type=Path, required=True)
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--max-run-file-bytes", type=int, default=1_048_576)
+    parser.add_argument("--audit-log", type=Path, default=Path("/var/lib/crucible/logs/mcp-audit.jsonl"))
+    parser.add_argument("--audit-max-bytes", type=int, default=10 * 1024 * 1024)
+    parser.add_argument("--audit-retained-files", type=int, default=5)
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.bind, args.port), MCPHandler)
@@ -208,6 +237,7 @@ def main() -> None:
         [str(args.crucible_home / "bin" / "crucible")],
         args.max_request_bytes,
     )
+    server.audit = AuditLogger(args.audit_log, args.audit_max_bytes, args.audit_retained_files)
     server.run_manager.reconcile()
     server.max_request_bytes = args.max_request_bytes
     try:

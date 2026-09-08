@@ -143,6 +143,22 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 3600
+                },
+                "audit-log": {
+                    "description": "Bounded MCP security audit log",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "audit-max-bytes": {
+                    "description": "Maximum size of the active MCP audit log",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "audit-retained-files": {
+                    "description": "Number of rotated MCP audit files to retain",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
                 }
             },
             "additionalProperties": false,
@@ -156,7 +172,10 @@
                 "input-root",
                 "max-inline-bytes",
                 "max-run-file-bytes",
-                "cdm-readiness-timeout"
+                "cdm-readiness-timeout",
+                "audit-log",
+                "audit-max-bytes",
+                "audit-retained-files"
             ]
         },
         "httpd": {
