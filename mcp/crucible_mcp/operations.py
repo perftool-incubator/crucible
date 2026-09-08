@@ -40,13 +40,16 @@ class CrucibleOperations:
         return {
             "name": "crucible",
             "mcp_contract_version": "1",
-            "execution_supported": False,
+            "execution_supported": True,
             "capabilities": [
                 "crucible_info",
                 "list_benchmarks",
                 "describe_benchmark",
                 "validate_run",
+                "start_run",
                 "get_run_status",
+                "get_run_logs",
+                "get_run_summary",
             ],
         }
 

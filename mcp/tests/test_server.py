@@ -74,7 +74,11 @@ class TestServer(unittest.TestCase):
         })
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
-        self.assertEqual(payload["result"]["structuredContent"]["mcp_contract_version"], "1")
+        info = payload["result"]["structuredContent"]
+        self.assertTrue(info["execution_supported"])
+        self.assertIn("start_run", info["capabilities"])
+        self.assertIn("get_run_logs", info["capabilities"])
+        self.assertIn("get_run_summary", info["capabilities"])
 
 
 if __name__ == "__main__":
