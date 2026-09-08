@@ -202,9 +202,6 @@ class JobStore:
         return [self._row_to_job(row) for row in rows]
 
     def transition(self, job_id: str, state: JobState, **updates: Any) -> Job:
-        current = self.get(job_id)
-        if state != current.state and state not in _TRANSITIONS[current.state]:
-            raise JobError(f"invalid job transition: {current.state.value} -> {state.value}")
         allowed_columns = {
             "result_status", "logger_session_id", "rickshaw_run_id", "cdm_run_id",
             "run_directory", "runner_pid", "runner_container_id", "exit_code",
@@ -217,6 +214,14 @@ class JobStore:
         updates["updated_at"] = _now()
         assignments = ", ".join(f"{column} = ?" for column in updates)
         with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE mcp_job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise JobNotFoundError(f"unknown MCP job: {job_id}")
+            current = self._row_to_job(row)
+            if state != current.state and state not in _TRANSITIONS[current.state]:
+                raise JobError(f"invalid job transition: {current.state.value} -> {state.value}")
             connection.execute(
                 f"UPDATE jobs SET {assignments} WHERE mcp_job_id = ?",
                 tuple(updates.values()) + (job_id,),
