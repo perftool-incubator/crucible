@@ -3,11 +3,13 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import Mock
 from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
 
 from crucible_mcp.operations import CrucibleOperations
+from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.policy import InputPolicy, rotate_token
 from crucible_mcp.server import MCPHandler
 from http.server import ThreadingHTTPServer
@@ -99,6 +101,33 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32602)
+
+    def test_job_store_errors_return_json_rpc_errors(self):
+        self.server.run_manager = Mock()
+        self.server.run_manager.get_logs.side_effect = JobNotFoundError("unknown MCP job: missing")
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {"name": "get_run_logs", "arguments": {"mcp_job_id": "missing"}},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32004)
+
+        self.server.run_manager.submit.side_effect = JobConflictError("idempotency conflict")
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "start_run",
+                "arguments": {"idempotency_key": "duplicate", "document": {}},
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32009)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .jobs import JobNotFoundError, JobStore
+from .jobs import JobConflictError, JobNotFoundError, JobStore
 from .models import Job
 from .operations import CrucibleOperations, OperationError
 from .policy import InputPolicy, PolicyError, read_token, token_matches
@@ -285,6 +285,10 @@ class MCPHandler(BaseHTTPRequestHandler):
                 return self._error(request_id, -32001, "operation not implemented")
             else:
                 return self._error(request_id, -32602, "unknown tool")
+        except JobConflictError as exc:
+            return self._error(request_id, -32009, str(exc))
+        except JobNotFoundError as exc:
+            return self._error(request_id, -32004, str(exc))
         except OperationError as exc:
             return self._error(request_id, -32000, json.dumps(exc.as_dict()))
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": json.dumps(value)}], "structuredContent": value}}
