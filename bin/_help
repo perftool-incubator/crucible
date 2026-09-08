@@ -45,6 +45,8 @@ function help() {
     echo "                              |        (found from initial metric query, like cstype or id)"
     echo "                              |      --aggregation <sum|avg|max|min>"
     echo "                              |        (override the metric's default-aggregation for this query)"
+    echo "                              |      --distribution-stats <stats>"
+    echo "                              |        (comma-separated: min,max,mean,median,stddev,pNN)"
     echo "                              |      --allow-incompatible-aggregation"
     echo "                              |        (allow an aggregation explicitly disallowed by the metric definition)"
     echo "                              |      --filter <gt|lt:number>"
