@@ -1446,7 +1446,7 @@ function service_control() {
 
         if [ "${service}" == "all" ]; then
             local all_services="httpd opensearch valkey cdm-server image-sourcing mcp-server"
-            if [ "$(jq_query ${SERVICES_CFG} '."mcp-server".enabled // false')" != "true" ]; then
+            if [ "${action}" == "start" ] && [ "$(jq_query ${SERVICES_CFG} '."mcp-server".enabled // false')" != "true" ]; then
                 all_services="httpd opensearch valkey cdm-server image-sourcing"
             fi
             service_control ${action} ${all_services}
