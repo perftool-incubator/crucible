@@ -239,6 +239,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "validate_run":
                 if "document" in arguments and "path" in arguments:
                     return self._error(request_id, -32602, "provide exactly one of document or path")
+                if "path" in arguments and not isinstance(arguments["path"], str):
+                    return self._error(request_id, -32602, "path must be a string")
                 if "document" in arguments:
                     value = self.server.operations.validate_run(arguments["document"])
                 elif "path" in arguments:
@@ -248,6 +250,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "start_run":
                 if "document" in arguments and "path" in arguments:
                     return self._error(request_id, -32602, "provide exactly one of document or path")
+                if "path" in arguments and not isinstance(arguments["path"], str):
+                    return self._error(request_id, -32602, "path must be a string")
                 if "document" in arguments:
                     job, created = self.server.run_manager.submit(
                         arguments.get("idempotency_key", ""),

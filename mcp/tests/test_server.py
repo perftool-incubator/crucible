@@ -129,6 +129,21 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32009)
 
+    def test_non_string_paths_return_json_rpc_errors(self):
+        for tool_name in ("validate_run", "start_run"):
+            arguments = {"path": None}
+            if tool_name == "start_run":
+                arguments["idempotency_key"] = "path-type"
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            })
+            status, payload = self.request("POST", "/mcp", body, self.token)
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["error"]["code"], -32602)
+
 
 if __name__ == "__main__":
     unittest.main()
