@@ -633,6 +633,7 @@ function start_mcp_server() {
     local RC=0 mcp_bind mcp_port mcp_token_file mcp_database
     local mcp_input_root mcp_max_inline_bytes mcp_max_run_file_bytes mcp_audit_log
     local mcp_audit_max_bytes mcp_audit_retained_files actual_port mcp_cmd
+    local mcp_health_host
 
     mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
     mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
@@ -652,6 +653,10 @@ function start_mcp_server() {
     if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
         echo "ERROR: MCP remote binding is unavailable until TLS support is configured"
         return 1
+    fi
+    mcp_health_host="${mcp_bind}"
+    if [[ "${mcp_bind}" == *:* ]]; then
+        mcp_health_host="[${mcp_bind}]"
     fi
 
     mkdir -p "$(dirname "${mcp_token_file}")" "${mcp_input_root}"
@@ -705,7 +710,7 @@ function start_mcp_server() {
     while [ ${mcp_available} -eq 0 -a ${mcp_count} -le ${mcp_timeout} ]; do
         if curl --silent --show-error --fail \
             --header "Authorization: Bearer ${mcp_token}" \
-            "http://${mcp_bind}:${mcp_port}/health" >/dev/null 2>&1; then
+            "http://${mcp_health_host}:${mcp_port}/health" >/dev/null 2>&1; then
             mcp_available=1
         else
             sleep 1
