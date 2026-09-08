@@ -168,10 +168,11 @@ class MCPHandler(BaseHTTPRequestHandler):
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": str(exc)}}
         operation = request.get("method", "invalid") if isinstance(request, dict) else "invalid"
         params = request.get("params", {}) if isinstance(request, dict) else {}
+        arguments = params.get("arguments") if isinstance(params, dict) else None
         self._audit(
             operation,
             "error" if "error" in response else "success",
-            job_id=params.get("arguments", {}).get("mcp_job_id") if isinstance(params, dict) else None,
+            job_id=arguments.get("mcp_job_id") if isinstance(arguments, dict) else None,
         )
         self._json(200, response)
 
@@ -187,9 +188,15 @@ class MCPHandler(BaseHTTPRequestHandler):
             )
 
     def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(request, dict):
+            return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid JSON-RPC request"}}
         request_id = request.get("id")
         method = request.get("method")
-        params = request.get("params") or {}
+        params = request.get("params", {})
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            return self._error(request_id, -32602, "params must be an object")
         if request.get("jsonrpc") != "2.0" or not isinstance(method, str):
             return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32600, "message": "invalid JSON-RPC request"}}
 
@@ -217,7 +224,11 @@ class MCPHandler(BaseHTTPRequestHandler):
 
     def _call_tool(self, request_id: Any, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
-        arguments = params.get("arguments") or {}
+        arguments = params.get("arguments", {})
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            return self._error(request_id, -32602, "arguments must be an object")
         try:
             if name == "crucible_info":
                 value = self.server.operations.crucible_info()

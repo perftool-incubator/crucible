@@ -84,6 +84,22 @@ class TestServer(unittest.TestCase):
         self.assertIn("get_run_logs", info["capabilities"])
         self.assertIn("get_run_summary", info["capabilities"])
 
+    def test_invalid_parameter_shapes_return_json_rpc_errors(self):
+        body = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": []})
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {"name": "crucible_info", "arguments": []},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+
 
 if __name__ == "__main__":
     unittest.main()
