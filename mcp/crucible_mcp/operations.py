@@ -90,10 +90,12 @@ class CrucibleOperations:
         validator = Draft201909Validator(schema)
         errors = sorted(validator.iter_errors(document), key=lambda error: list(error.path))
         benchmark_errors = []
-        for benchmark in document.get("benchmarks", []):
-            name = benchmark.get("name") if isinstance(benchmark, dict) else None
-            if not isinstance(name, str) or self._benchmark_directory(name) is None:
-                benchmark_errors.append(f"benchmark is not installed: {name!r}")
+        benchmarks = document.get("benchmarks", [])
+        if isinstance(benchmarks, list):
+            for benchmark in benchmarks:
+                name = benchmark.get("name") if isinstance(benchmark, dict) else None
+                if not isinstance(name, str) or self._benchmark_directory(name) is None:
+                    benchmark_errors.append(f"benchmark is not installed: {name!r}")
 
         messages = [self._format_validation_error(error) for error in errors]
         messages.extend(benchmark_errors)

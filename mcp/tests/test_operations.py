@@ -56,6 +56,11 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertIn("benchmark is not installed", result["errors"][-1])
 
+    def test_validate_run_returns_schema_error_for_null_benchmarks(self):
+        result = self.operations.validate_run({"benchmarks": None})
+        self.assertFalse(result["valid"])
+        self.assertTrue(result["errors"])
+
         result = self.operations.validate_run({"benchmarks": [{"name": "escaped"}]})
         self.assertFalse(result["valid"])
         self.assertIn("benchmark is not installed", result["errors"][-1])
