@@ -631,7 +631,7 @@ function stop_cdm_server() {
 
 function start_mcp_server() {
     local RC=0 mcp_bind mcp_port mcp_token_file mcp_database
-    local mcp_input_root mcp_max_inline_bytes actual_port mcp_cmd
+    local mcp_input_root mcp_max_inline_bytes mcp_max_run_file_bytes actual_port mcp_cmd
 
     mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
     mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
@@ -639,6 +639,7 @@ function start_mcp_server() {
     mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
     mcp_input_root=$(jq_query ${SERVICES_CFG} '."mcp-server"."input-root"')
     mcp_max_inline_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."max-inline-bytes"')
+    mcp_max_run_file_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."max-run-file-bytes"')
 
     if [ -z "${mcp_bind}" -o -z "${mcp_port}" -o -z "${mcp_token_file}" -o -z "${mcp_database}" ]; then
         echo "ERROR: mcp-server configuration is incomplete"
@@ -677,6 +678,7 @@ function start_mcp_server() {
         mcp_cmd+=" --max-request-bytes ${mcp_max_inline_bytes}"
         mcp_cmd+=" --crucible-home ${CRUCIBLE_HOME}"
         mcp_cmd+=" --input-root ${mcp_input_root}"
+        mcp_cmd+=" --max-run-file-bytes ${mcp_max_run_file_bytes}"
 
         ${podman_run} --name crucible-mcp-server \
             --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \

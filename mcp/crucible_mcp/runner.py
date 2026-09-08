@@ -1,0 +1,179 @@
+"""Asynchronous supervision for MCP-launched Crucible runs."""
+
+import json
+import os
+import subprocess
+import threading
+import uuid
+from pathlib import Path
+from typing import Any, Sequence
+
+from .jobs import JobStore
+from .models import Job, JobState, ResultStatus
+from .operations import CrucibleOperations, OperationError
+
+
+class RunManager:
+    """Submit and supervise Crucible runs without shell interpolation.
+
+    The command is passed to ``subprocess.Popen`` as an argument sequence.
+    This first runner delegates the complete synchronous Crucible workflow to
+    ``crucible run``; later lifecycle events can refine the state between
+    ``running`` and ``completed`` without changing the durable job contract.
+    """
+
+    def __init__(
+        self,
+        store: JobStore,
+        operations: CrucibleOperations,
+        run_root: Path,
+        crucible_command: Sequence[str],
+        max_inline_bytes: int = 1_048_576,
+    ):
+        self.store = store
+        self.operations = operations
+        self.run_root = Path(run_root)
+        self.crucible_command = tuple(crucible_command)
+        self.max_inline_bytes = max_inline_bytes
+        self.run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._threads: dict[str, threading.Thread] = {}
+
+    def submit(
+        self,
+        idempotency_key: str,
+        *,
+        document: Any | None = None,
+        path: Path | None = None,
+    ) -> tuple[Job, bool]:
+        if not idempotency_key:
+            raise OperationError("user", "idempotency_key is required", "missing_idempotency_key")
+        if (document is None) == (path is None):
+            raise OperationError(
+                "user", "provide exactly one of document or path", "invalid_input"
+            )
+        if document is not None:
+            encoded = json.dumps(document, separators=(",", ":"), ensure_ascii=True)
+            if len(encoded.encode("utf-8")) > self.max_inline_bytes:
+                raise OperationError("user", "inline document exceeds size limit", "too_large")
+            validation = self.operations.validate_run(document)
+            if not validation["valid"]:
+                raise OperationError("user", json.dumps(validation), "invalid_run")
+            canonical_document = document
+        else:
+            assert path is not None
+            try:
+                canonical_path = self.operations.input_policy.canonical_input(path)
+                canonical_document = json.loads(canonical_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise OperationError("user", "run-file is not valid JSON", "invalid_json") from exc
+            validation = self.operations.validate_run(canonical_document)
+            if not validation["valid"]:
+                raise OperationError("user", json.dumps(validation), "invalid_run")
+
+        job, created = self.store.create_or_get(
+            idempotency_key,
+            {"run_document": canonical_document},
+        )
+        if not created:
+            return job, False
+
+        session_id = str(uuid.uuid4())
+        job_directory = self.run_root / job.mcp_job_id
+        input_directory = job_directory / "input"
+        input_directory.mkdir(mode=0o700, parents=True)
+        run_file = input_directory / "run-file.json"
+        run_file.write_text(json.dumps(canonical_document, indent=2) + "\n", encoding="utf-8")
+        os.chmod(run_file, 0o600)
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.QUEUED,
+            logger_session_id=session_id,
+            run_directory=str(job_directory),
+        )
+        self._launch(job.mcp_job_id, session_id, run_file, job_directory)
+        return self.store.get(job.mcp_job_id), True
+
+    def reconcile(self) -> list[Job]:
+        """Mark jobs whose recorded runner no longer exists as crash-unknown."""
+
+        changed = []
+        for job in self.store.list_active():
+            if job.runner_pid is None or not self._process_exists(job.runner_pid):
+                changed.append(
+                    self.store.transition(
+                        job.mcp_job_id,
+                        JobState.UNKNOWN_AFTER_CRASH,
+                        error_category="recovery",
+                        error_message="runner was not present during service reconciliation",
+                    )
+                )
+        return changed
+
+    def _launch(self, job_id: str, session_id: str, run_file: Path, job_directory: Path) -> None:
+        log_path = job_directory / "runner.log"
+        log = log_path.open("ab")
+        environment = os.environ.copy()
+        environment["CRUCIBLE_MCP_SESSION_ID"] = session_id
+        try:
+            process = subprocess.Popen(
+                [*self.crucible_command, "run", str(run_file)],
+                cwd=str(self.operations.crucible_home),
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+            )
+        except OSError as exc:
+            log.write(f"runner launch failed: {exc}\n".encode("utf-8"))
+            log.close()
+            self.store.transition(
+                job_id,
+                JobState.FAILED,
+                error_category="infrastructure",
+                error_message=str(exc),
+                exit_code=127,
+            )
+            return
+
+        self.store.transition(job_id, JobState.STARTING, runner_pid=process.pid)
+        thread = threading.Thread(
+            target=self._wait_for_completion,
+            args=(job_id, process, log),
+            daemon=True,
+            name=f"mcp-run-{job_id}",
+        )
+        self._threads[job_id] = thread
+        thread.start()
+
+    def _wait_for_completion(self, job_id: str, process: subprocess.Popen, log: Any) -> None:
+        self.store.transition(job_id, JobState.RUNNING)
+        exit_code = process.wait()
+        log.close()
+        self._threads.pop(job_id, None)
+        if exit_code == 0:
+            self.store.transition(
+                job_id,
+                JobState.COMPLETED,
+                result_status=ResultStatus.PENDING.value,
+                exit_code=exit_code,
+            )
+        else:
+            self.store.transition(
+                job_id,
+                JobState.FAILED,
+                result_status=ResultStatus.UNAVAILABLE.value,
+                exit_code=exit_code,
+                error_category="framework",
+                error_message=f"crucible run exited with status {exit_code}",
+            )
+
+    @staticmethod
+    def _process_exists(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True

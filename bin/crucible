@@ -23,7 +23,12 @@ if [ ! -e $CRUCIBLE_HOME ]; then
     exit 1
 fi
 export CRUCIBLE_HOME
-CRUCIBLE_NEW_SESSION_ID="yes"
+if [ -n "${CRUCIBLE_MCP_SESSION_ID}" ]; then
+    export SESSION_ID="${CRUCIBLE_MCP_SESSION_ID}"
+    CRUCIBLE_NEW_SESSION_ID="no"
+else
+    CRUCIBLE_NEW_SESSION_ID="yes"
+fi
 CRUCIBLE_CFG_JSON_VALIDATION="yes"
 . $CRUCIBLE_HOME/bin/base
 

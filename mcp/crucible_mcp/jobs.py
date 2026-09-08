@@ -3,6 +3,7 @@
 import hashlib
 import json
 import sqlite3
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -25,7 +26,7 @@ class JobNotFoundError(JobError):
 
 
 _TRANSITIONS = {
-    JobState.QUEUED: {JobState.STARTING, JobState.FAILED},
+    JobState.QUEUED: {JobState.STARTING, JobState.FAILED, JobState.UNKNOWN_AFTER_CRASH},
     JobState.STARTING: {
         JobState.RUNNING,
         JobState.POSTPROCESSING,
@@ -34,6 +35,7 @@ _TRANSITIONS = {
     },
     JobState.RUNNING: {
         JobState.POSTPROCESSING,
+        JobState.COMPLETED,
         JobState.FAILED,
         JobState.UNKNOWN_AFTER_CRASH,
     },
@@ -68,7 +70,10 @@ class JobStore:
     def __init__(self, database_path: Path):
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self.database_path, timeout=10)
+        self._lock = threading.RLock()
+        self._connection = sqlite3.connect(
+            self.database_path, timeout=10, check_same_thread=False
+        )
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.execute("PRAGMA journal_mode = WAL")
@@ -120,14 +125,15 @@ class JobStore:
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
         connection = self._connection
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            yield connection
-        except BaseException:
-            connection.rollback()
-            raise
-        else:
-            connection.commit()
+        with self._lock:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                yield connection
+            except BaseException:
+                connection.rollback()
+                raise
+            else:
+                connection.commit()
 
     def create_or_get(self, idempotency_key: str, request: Any) -> tuple[Job, bool]:
         if not idempotency_key:
@@ -166,19 +172,21 @@ class JobStore:
             return self.get(job_id), True
 
     def get(self, job_id: str) -> Job:
-        row = self._connection.execute(
-            "SELECT * FROM jobs WHERE mcp_job_id = ?", (job_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM jobs WHERE mcp_job_id = ?", (job_id,)
+            ).fetchone()
         if row is None:
             raise JobNotFoundError(f"unknown MCP job: {job_id}")
         return self._row_to_job(row)
 
     def list_active(self) -> list[Job]:
         placeholders = ",".join("?" for _ in ACTIVE_JOB_STATES)
-        rows = self._connection.execute(
-            f"SELECT * FROM jobs WHERE state IN ({placeholders}) ORDER BY created_at",
-            tuple(state.value for state in ACTIVE_JOB_STATES),
-        ).fetchall()
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT * FROM jobs WHERE state IN ({placeholders}) ORDER BY created_at",
+                tuple(state.value for state in ACTIVE_JOB_STATES),
+            ).fetchall()
         return [self._row_to_job(row) for row in rows]
 
     def transition(self, job_id: str, state: JobState, **updates: Any) -> Job:

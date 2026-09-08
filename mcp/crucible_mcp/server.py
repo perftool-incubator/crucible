@@ -16,6 +16,7 @@ from .jobs import JobNotFoundError, JobStore
 from .models import Job
 from .operations import CrucibleOperations, OperationError
 from .policy import InputPolicy, PolicyError, read_token, token_matches
+from .runner import RunManager
 
 
 TOOL_NAMES = (
@@ -129,6 +130,22 @@ class MCPHandler(BaseHTTPRequestHandler):
                     value = self.server.operations.validate_run_file(Path(arguments["path"]))
                 else:
                     return self._error(request_id, -32602, "validate_run requires document or path")
+            elif name == "start_run":
+                if "document" in arguments and "path" in arguments:
+                    return self._error(request_id, -32602, "provide exactly one of document or path")
+                if "document" in arguments:
+                    job, created = self.server.run_manager.submit(
+                        arguments.get("idempotency_key", ""),
+                        document=arguments["document"],
+                    )
+                elif "path" in arguments:
+                    job, created = self.server.run_manager.submit(
+                        arguments.get("idempotency_key", ""),
+                        path=Path(arguments["path"]),
+                    )
+                else:
+                    return self._error(request_id, -32602, "start_run requires document or path")
+                value = {"created": created, "job": _job_status(job)}
             elif name == "get_run_status":
                 try:
                     value = _job_status(self.server.jobs.get(arguments["mcp_job_id"]))
@@ -159,12 +176,24 @@ def main() -> None:
     parser.add_argument("--max-request-bytes", type=int, default=1_048_576)
     parser.add_argument("--crucible-home", type=Path, required=True)
     parser.add_argument("--input-root", type=Path, required=True)
+    parser.add_argument("--max-run-file-bytes", type=int, default=1_048_576)
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.bind, args.port), MCPHandler)
     server.token_path = args.token_file
     server.jobs = JobStore(args.database)
-    server.operations = CrucibleOperations(args.crucible_home, InputPolicy([args.input_root]))
+    server.operations = CrucibleOperations(
+        args.crucible_home,
+        InputPolicy([args.input_root], args.max_run_file_bytes),
+    )
+    server.run_manager = RunManager(
+        server.jobs,
+        server.operations,
+        args.database.parent / "runs",
+        [str(args.crucible_home / "bin" / "crucible")],
+        args.max_request_bytes,
+    )
+    server.run_manager.reconcile()
     server.max_request_bytes = args.max_request_bytes
     try:
         server.serve_forever()
