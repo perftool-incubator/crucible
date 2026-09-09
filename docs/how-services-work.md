@@ -164,6 +164,24 @@ curl -H "Authorization: Bearer $(cat /etc/crucible/mcp-server.token)" \
     http://127.0.0.1:8889/health
 ```
 
+#### MCP integration checks
+
+The live read-only checks are opt-in so the normal unit-test suite does not
+depend on local services:
+
+```bash
+CRUCIBLE_MCP_INTEGRATION=1 \
+CRUCIBLE_MCP_LOG_DB="$HOME/.crucible/log.db" \
+PYTHONPATH=mcp python3 -m unittest mcp.tests.test_integration
+```
+
+The suite checks CDM run discovery, logger queries, and Podman discovery. Set
+`CRUCIBLE_MCP_CDM_URL` to query a non-default CDM endpoint. To exercise a
+metric query, also set `CRUCIBLE_MCP_RUN`, `CRUCIBLE_MCP_SOURCE`, and
+`CRUCIBLE_MCP_TYPE`, plus either `CRUCIBLE_MCP_PERIOD` or both
+`CRUCIBLE_MCP_BEGIN` and `CRUCIBLE_MCP_END`. These checks are read-only and
+never submit runs or change containers.
+
 ### Remote archive storage
 
 Remote archive storage enables uploading and downloading result
