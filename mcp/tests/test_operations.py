@@ -129,6 +129,8 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(sent["source"], "fio")
         self.assertEqual(sent["type"], "IOPS")
         self.assertEqual(sent["period"], "measurement")
+        self.assertNotIn("distribution-stats", sent)
+        self.assertNotIn("filter", sent)
 
     def test_get_metric_requires_period_or_range(self):
         with self.assertRaises(OperationError) as context:

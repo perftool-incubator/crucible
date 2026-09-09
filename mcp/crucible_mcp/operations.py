@@ -267,18 +267,21 @@ class CrucibleOperations:
             raise OperationError("user", "resolution is outside configured bounds", "invalid_resolution")
         body: dict[str, Any] = {
             "run": run,
-            "period": period,
-            "begin": begin,
-            "end": end,
             "source": source,
             "type": metric_type,
             "resolution": resolution,
             "breakout": breakout or [],
+            "allow-incompatible-aggregation": allow_incompatible_aggregation,
+        }
+        optional_fields = {
+            "period": period,
+            "begin": begin,
+            "end": end,
             "filter": filter,
             "aggregation": aggregation,
             "distribution-stats": distribution_stats,
-            "allow-incompatible-aggregation": allow_incompatible_aggregation,
         }
+        body.update({key: value for key, value in optional_fields.items() if value is not None})
         return self._cdm_request("/api/v1/metric-data", method="POST", body=body)
 
     def list_log_sessions(self, limit: int = 100) -> dict[str, Any]:
