@@ -1471,8 +1471,12 @@ function service_control() {
         fi
 
         case "${service}" in
-            "httpd"|"opensearch"|"valkey"|"mcp-server")
+            "httpd"|"opensearch"|"valkey")
                 ${action}_${service}
+                service_rc=$?
+                ;;
+            "mcp-server")
+                ${action}_mcp_server
                 service_rc=$?
                 ;;
             "cdm-server")
