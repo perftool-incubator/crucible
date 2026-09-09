@@ -40,12 +40,15 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(self.operations.describe_benchmark("example")["description"], "Example benchmark")
 
     def test_list_tools_returns_installed_tool_metadata(self):
-        tool = self.root / "subprojects" / "tools" / "sysstat"
-        tool.mkdir(parents=True)
-        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
-        (tool / "tool-metadata.json").write_text(
+        tool_repository = self.root / "repos" / "git@github.com:perftool-incubator/tool-sysstat.git"
+        tool_repository.mkdir(parents=True)
+        (tool_repository / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        (tool_repository / "tool-metadata.json").write_text(
             '{"description":"System statistics"}', encoding="utf-8"
         )
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.parent.mkdir(parents=True)
+        tool.symlink_to(tool_repository, target_is_directory=True)
 
         self.assertEqual(
             self.operations.list_tools(),

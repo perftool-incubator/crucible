@@ -94,6 +94,7 @@ class CrucibleOperations:
         root = self.crucible_home / "subprojects" / "tools"
         if not root.is_dir():
             return []
+        repository_root = self.crucible_home / "repos"
         entries = []
         for directory in sorted(root.iterdir(), key=lambda path: path.name):
             if not directory.is_dir():
@@ -102,7 +103,10 @@ class CrucibleOperations:
                 resolved = directory.resolve(strict=True)
             except FileNotFoundError:
                 continue
-            if not self._under_managed_root(resolved, root):
+            if not (
+                self._under_managed_root(resolved, root)
+                or self._under_managed_root(resolved, repository_root)
+            ):
                 continue
             try:
                 rickshaw = json.loads(
