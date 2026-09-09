@@ -12,6 +12,7 @@
         "motd",
         "dnf-tools",
         "core-utils",
+        "mcp-python-deps",
         "build-libraries",
         "build-tools",
         "python3-pip",
@@ -70,6 +71,15 @@
       "distro_info": {
         "packages": [
           "python3-pip"
+        ]
+      }
+    },
+    {
+      "name": "mcp-python-deps",
+      "type": "python3",
+      "python3_info": {
+        "packages": [
+          "jsonschema"
         ]
       }
     },
