@@ -635,8 +635,9 @@ function start_mcp_server() {
     local mcp_cdm_port
     local mcp_audit_log
     local mcp_audit_max_bytes mcp_audit_retained_files actual_port
-    local -a mcp_cmd mcp_data_mounts
-    local mcp_data_path mcp_data_readonly mcp_health_host
+    local -a mcp_cmd mcp_data_mounts mcp_data_paths mcp_data_readonly_flags
+    local mcp_data_path mcp_data_readonly mcp_data_index mcp_existing_index
+    local mcp_mount_index mcp_health_host
 
     mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
     mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
@@ -714,18 +715,40 @@ function start_mcp_server() {
         )
 
         mcp_data_mounts=()
-        for mcp_data_path in "${mcp_database}" "${mcp_input_root}" "${mcp_audit_log}" "${LOG_DB}"; do
+        mcp_data_paths=()
+        mcp_data_readonly_flags=()
+        for mcp_data_index in 0 1 2 3; do
+            case ${mcp_data_index} in
+                0) mcp_data_path=$(dirname "${mcp_database}"); mcp_data_readonly=false ;;
+                1) mcp_data_path=${mcp_input_root}; mcp_data_readonly=true ;;
+                2) mcp_data_path=$(dirname "${mcp_audit_log}"); mcp_data_readonly=false ;;
+                3) mcp_data_path=$(dirname "${LOG_DB}"); mcp_data_readonly=true ;;
+            esac
             case "${mcp_data_path}" in
                 /var/lib/crucible|/var/lib/crucible/*|/root|/root/*|/home|/home/*|"${CRUCIBLE_HOME}"|"${CRUCIBLE_HOME}"/*)
                     continue
                     ;;
             esac
 
-            mcp_data_readonly=false
-            if [ "${mcp_data_path}" == "${mcp_input_root}" ] || [ "${mcp_data_path}" == "${LOG_DB}" ]; then
-                mcp_data_readonly=true
+            mcp_mount_index=-1
+            for mcp_existing_index in "${!mcp_data_paths[@]}"; do
+                if [ "${mcp_data_paths[${mcp_existing_index}]}" == "${mcp_data_path}" ]; then
+                    mcp_mount_index=${mcp_existing_index}
+                    break
+                fi
+            done
+            if [ ${mcp_mount_index} -eq -1 ]; then
+                mcp_data_paths+=("${mcp_data_path}")
+                mcp_data_readonly_flags+=("${mcp_data_readonly}")
+            else
+                if [ "${mcp_data_readonly}" == "false" ]; then
+                    mcp_data_readonly_flags[${mcp_mount_index}]=false
+                fi
             fi
-            if [ "${mcp_data_readonly}" == "true" ]; then
+        done
+        for mcp_data_index in "${!mcp_data_paths[@]}"; do
+            mcp_data_path=${mcp_data_paths[${mcp_data_index}]}
+            if [ "${mcp_data_readonly_flags[${mcp_data_index}]}" == "true" ]; then
                 mcp_data_mounts+=("--mount=type=bind,source=${mcp_data_path},destination=${mcp_data_path},readonly")
             else
                 mcp_data_mounts+=("--mount=type=bind,source=${mcp_data_path},destination=${mcp_data_path}")
