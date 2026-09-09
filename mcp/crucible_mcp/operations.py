@@ -2,7 +2,6 @@
 
 import json
 import sqlite3
-import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -65,8 +64,6 @@ class CrucibleOperations:
                 "get_metric",
                 "list_log_sessions",
                 "get_log_info",
-                "list_containers",
-                "list_images",
                 "validate_run",
                 "start_run",
                 "get_run_status",
@@ -336,13 +333,6 @@ class CrucibleOperations:
             raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
         return {"sessions": sessions, "lines": lines, "sources": sources}
 
-    def list_containers(self) -> dict[str, Any]:
-        return {"containers": self._podman_json(["ps", "--filter", "name=crucible"])}
-
-    def list_images(self) -> dict[str, Any]:
-        images = self._podman_json(["images"])
-        return {"images": [image for image in images if "crucible" in json.dumps(image).lower()]}
-
     def _cdm_request(
         self, path: str, *, method: str = "GET", body: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -367,23 +357,6 @@ class CrucibleOperations:
     def _require_text(value: Any, label: str) -> None:
         if not isinstance(value, str) or not value:
             raise OperationError("user", f"{label} is required", "missing_argument")
-
-    @staticmethod
-    def _podman_json(arguments: list[str]) -> list[dict[str, Any]]:
-        try:
-            completed = subprocess.run(
-                ["podman", *arguments, "--format", "json"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            payload = json.loads(completed.stdout or "[]")
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            raise OperationError("framework", "container runtime is unavailable", "runtime_unavailable") from exc
-        if not isinstance(payload, list):
-            raise OperationError("framework", "container runtime returned an invalid response", "invalid_runtime_response")
-        return [item for item in payload if isinstance(item, dict)]
 
     def describe_benchmark(self, name: str) -> dict[str, Any]:
         directory = self._benchmark_directory(name)

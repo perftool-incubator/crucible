@@ -164,20 +164,6 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(operations.get_log_info()["sessions"], 1)
         self.assertEqual(operations.get_log_info()["lines"], 2)
 
-    def test_runtime_discovery_uses_bounded_podman_queries(self):
-        with patch.object(self.operations, "_podman_json") as podman:
-            podman.side_effect = [
-                [{"Names": ["crucible-run"]}],
-                [{"Repository": "quay.io/crucible/controller"}, {"Repository": "other"}],
-            ]
-            self.assertEqual(
-                self.operations.list_containers(), {"containers": [{"Names": ["crucible-run"]}]}
-            )
-            self.assertEqual(
-                self.operations.list_images(),
-                {"images": [{"Repository": "quay.io/crucible/controller"}]},
-            )
-
     def test_validate_run_reports_schema_and_installed_benchmark_errors(self):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})
         self.assertFalse(result["valid"])

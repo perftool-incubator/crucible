@@ -6,7 +6,6 @@ modify the logger database, or create/remove containers.
 """
 
 import os
-import shutil
 import unittest
 from pathlib import Path
 
@@ -58,15 +57,6 @@ class TestMCPIntegration(unittest.TestCase):
         self.assertEqual(set(info), {"sessions", "lines", "sources"})
         sessions = self.operations.list_log_sessions(limit=1)
         self.assertLessEqual(len(sessions["sessions"]), 1)
-
-    def test_podman_discovery(self):
-        if shutil.which("podman") is None:
-            self.skipTest("podman is not installed")
-        containers = self.operations.list_containers()
-        images = self.operations.list_images()
-        self.assertIsInstance(containers["containers"], list)
-        self.assertIsInstance(images["images"], list)
-
 
 if __name__ == "__main__":
     unittest.main()

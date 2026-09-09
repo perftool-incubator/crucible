@@ -33,8 +33,6 @@ TOOL_NAMES = (
     "get_metric",
     "list_log_sessions",
     "get_log_info",
-    "list_containers",
-    "list_images",
     "describe_benchmark",
     "validate_run",
     "start_run",
@@ -105,8 +103,6 @@ TOOL_DEFINITIONS = (
         "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000}}, "additionalProperties": False},
     },
     {"name": "get_log_info", "description": "Return aggregate Crucible logger database counts.", "inputSchema": _EMPTY_INPUT},
-    {"name": "list_containers", "description": "List Crucible containers from the container runtime.", "inputSchema": _EMPTY_INPUT},
-    {"name": "list_images", "description": "List Crucible container images from the container runtime.", "inputSchema": _EMPTY_INPUT},
     {
         "name": "describe_benchmark",
         "description": "Describe an installed benchmark.",
@@ -345,10 +341,6 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = self.server.operations.list_log_sessions(arguments.get("limit", 100))
             elif name == "get_log_info":
                 value = self.server.operations.get_log_info()
-            elif name == "list_containers":
-                value = self.server.operations.list_containers()
-            elif name == "list_images":
-                value = self.server.operations.list_images()
             elif name == "describe_benchmark":
                 value = self.server.operations.describe_benchmark(arguments.get("name", ""))
             elif name == "validate_run":
