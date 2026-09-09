@@ -1494,7 +1494,11 @@ function service_control() {
         fi
 
         local mcp_jobs
-        mcp_jobs=$(mcp_active_jobs)
+        if ! mcp_jobs=$(mcp_active_jobs); then
+            echo "ERROR: Cannot verify MCP job state; refusing to stop services"
+            echo "ERROR: Resolve the MCP job database error before stopping services"
+            return 1
+        fi
         if [ -n "${mcp_jobs}" ]; then
             echo "ERROR: Cannot stop services while MCP jobs are active"
             echo "ERROR: Active MCP job(s):"
