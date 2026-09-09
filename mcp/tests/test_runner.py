@@ -77,6 +77,22 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(failed.state.value, "failed")
         self.assertEqual(failed.exit_code, 7)
 
+    def test_staging_failure_is_persisted_as_infrastructure_failure(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        with patch.object(Path, "write_text", side_effect=OSError("no space left on device")):
+            job, created = self.manager.submit("key-staging-failure", document=document)
+
+        self.assertTrue(created)
+        self.assertEqual(job.state, JobState.FAILED)
+        self.assertEqual(job.error_category, "infrastructure")
+        self.assertIn("could not stage run input", job.error_message)
+        duplicate, duplicate_created = self.manager.submit(
+            "key-staging-failure", document=document
+        )
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
+        self.assertEqual(duplicate.state, JobState.FAILED)
+
     def test_input_path_outside_approved_root_returns_authorization_error(self):
         path = self.root / "outside.json"
         path.write_text('{"benchmarks":[{"name":"example"}]}', encoding="utf-8")

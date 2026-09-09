@@ -86,10 +86,21 @@ class RunManager:
         session_id = str(uuid.uuid4())
         job_directory = self.run_root / job.mcp_job_id
         input_directory = job_directory / "input"
-        input_directory.mkdir(mode=0o700, parents=True)
         run_file = input_directory / "run-file.json"
-        run_file.write_text(json.dumps(canonical_document, indent=2) + "\n", encoding="utf-8")
-        os.chmod(run_file, 0o600)
+        try:
+            input_directory.mkdir(mode=0o700, parents=True)
+            run_file.write_text(
+                json.dumps(canonical_document, indent=2) + "\n", encoding="utf-8"
+            )
+            os.chmod(run_file, 0o600)
+        except OSError as exc:
+            failed = self.store.transition(
+                job.mcp_job_id,
+                JobState.FAILED,
+                error_category="infrastructure",
+                error_message=f"could not stage run input: {exc}",
+            )
+            return failed, True
         self.store.transition(
             job.mcp_job_id,
             JobState.QUEUED,
