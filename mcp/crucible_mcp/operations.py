@@ -1,8 +1,13 @@
 """Typed, non-execution Crucible operations for the MCP contract."""
 
 import json
+import sqlite3
+import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 
 from jsonschema import Draft201909Validator
 
@@ -30,8 +35,16 @@ class CrucibleOperations:
     the same typed validation result without passing user strings to a shell.
     """
 
-    def __init__(self, crucible_home: Path, input_policy: InputPolicy | None = None):
+    def __init__(
+        self,
+        crucible_home: Path,
+        input_policy: InputPolicy | None = None,
+        cdm_base_url: str = "http://127.0.0.1:3000",
+        log_db: Path | None = None,
+    ):
         self.crucible_home = Path(crucible_home).resolve()
+        self.cdm_base_url = cdm_base_url.rstrip("/")
+        self.log_db = Path(log_db) if log_db else None
         self.input_policy = input_policy or InputPolicy(
             [self.crucible_home / "mcp" / "inputs"]
         )
@@ -45,6 +58,14 @@ class CrucibleOperations:
                 "crucible_info",
                 "list_benchmarks",
                 "describe_benchmark",
+                "list_tools",
+                "list_results",
+                "get_result",
+                "get_metric",
+                "list_log_sessions",
+                "get_log_info",
+                "list_containers",
+                "list_images",
                 "validate_run",
                 "start_run",
                 "get_run_status",
@@ -66,6 +87,242 @@ class CrucibleOperations:
             if metadata is not None:
                 entries.append(metadata)
         return entries
+
+    def list_tools(self, name: str | None = None) -> list[dict[str, Any]]:
+        """List installed tools without invoking the host CLI or a shell."""
+
+        root = self.crucible_home / "subprojects" / "tools"
+        if not root.is_dir():
+            return []
+        entries = []
+        for directory in sorted(root.iterdir(), key=lambda path: path.name):
+            if not directory.is_dir():
+                continue
+            try:
+                resolved = directory.resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            if not self._under_managed_root(resolved, root):
+                continue
+            try:
+                rickshaw = json.loads(
+                    (directory / "rickshaw.json").read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError):
+                continue
+            tool_name = rickshaw.get("tool") if isinstance(rickshaw, dict) else None
+            if not isinstance(tool_name, str) or (name is not None and tool_name != name):
+                continue
+            metadata: dict[str, Any] = {}
+            metadata_path = directory / "tool-metadata.json"
+            if metadata_path.is_file():
+                try:
+                    loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        metadata = loaded
+                except (OSError, json.JSONDecodeError):
+                    pass
+            entries.append(
+                {
+                    "name": tool_name,
+                    "description": metadata.get("description"),
+                    "metadata": metadata,
+                }
+            )
+        return entries
+
+    def list_results(
+        self,
+        *,
+        run: str | None = None,
+        name: str | None = None,
+        email: str | None = None,
+        harness: str | None = None,
+        benchmark: str | None = None,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        """List historical run IDs through the read-only CDM API."""
+
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        filters = {
+            key: value
+            for key, value in {
+                "run": run,
+                "name": name,
+                "email": email,
+                "harness": harness,
+                "benchmark": benchmark,
+            }.items()
+            if value is not None
+        }
+        query = f"?{urlencode(filters)}" if filters else ""
+        payload = self._cdm_request(f"/api/v1/runs{query}")
+        run_ids = payload.get("runIds") if isinstance(payload, dict) else None
+        if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
+            raise OperationError(
+                "framework", "CDM result search returned an invalid response", "invalid_result_response"
+            )
+        return {"run_ids": run_ids[:limit], "count": min(len(run_ids), limit)}
+
+    def get_result(self, run: str) -> dict[str, Any]:
+        """Return structured metadata for one historical CDM run."""
+
+        self._require_text(run, "run")
+        encoded_run = quote(run, safe="")
+        matches = self.list_results(run=run, limit=1)["run_ids"]
+        if not matches:
+            raise OperationError("user", f"unknown result run: {run}", "not_found")
+        prefix = f"/api/v1/run/{encoded_run}"
+        return {
+            "run_id": run,
+            "tags": self._cdm_request(f"{prefix}/tags").get("tags", []),
+            "benchmark": self._cdm_request(f"{prefix}/benchmark").get("benchmark"),
+            "partial_status": self._cdm_request(f"{prefix}/partial-status"),
+            "iterations": self._cdm_request(f"{prefix}/iterations").get("iterations", []),
+            "metric_sources": self._cdm_request(f"{prefix}/metric-sources").get("sources", []),
+        }
+
+    def get_metric(
+        self,
+        *,
+        run: str,
+        source: str,
+        metric_type: str,
+        period: str | None = None,
+        begin: int | None = None,
+        end: int | None = None,
+        resolution: int = 1,
+        breakout: list[str] | None = None,
+        filter: str | None = None,
+        aggregation: str | None = None,
+        distribution_stats: str | None = None,
+        allow_incompatible_aggregation: bool = False,
+    ) -> dict[str, Any]:
+        """Query bounded metric data through the CDM API."""
+
+        for value, label in ((run, "run"), (source, "source"), (metric_type, "type")):
+            self._require_text(value, label)
+        if period is None and (begin is None or end is None):
+            raise OperationError("user", "provide period or both begin and end", "invalid_metric_range")
+        if resolution < 1 or resolution > 100_000:
+            raise OperationError("user", "resolution is outside configured bounds", "invalid_resolution")
+        body: dict[str, Any] = {
+            "run": run,
+            "period": period,
+            "begin": begin,
+            "end": end,
+            "source": source,
+            "type": metric_type,
+            "resolution": resolution,
+            "breakout": breakout or [],
+            "filter": filter,
+            "aggregation": aggregation,
+            "distribution-stats": distribution_stats,
+            "allow-incompatible-aggregation": allow_incompatible_aggregation,
+        }
+        return self._cdm_request("/api/v1/metric-data", method="POST", body=body)
+
+    def list_log_sessions(self, limit: int = 100) -> dict[str, Any]:
+        """List recent Crucible logger sessions without reading log contents."""
+
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT sessions.session_id, sessions.timestamp,
+                           sources.source, commands.command,
+                           COUNT(lines.id) AS line_count
+                    FROM sessions
+                    JOIN sources ON sources.id = sessions.source
+                    JOIN commands ON commands.id = sessions.command
+                    LEFT JOIN lines ON lines.session = sessions.id
+                    GROUP BY sessions.id
+                    ORDER BY sessions.timestamp DESC LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        return {
+            "sessions": [
+                {
+                    "session_id": row[0],
+                    "timestamp": row[1],
+                    "source": row[2],
+                    "command": row[3],
+                    "line_count": row[4],
+                }
+                for row in rows
+            ]
+        }
+
+    def get_log_info(self) -> dict[str, Any]:
+        """Return aggregate logger database information."""
+
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                sessions = connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                lines = connection.execute("SELECT COUNT(*) FROM lines").fetchone()[0]
+                sources = connection.execute("SELECT COUNT(*) FROM sources").fetchone()[0]
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        return {"sessions": sessions, "lines": lines, "sources": sources}
+
+    def list_containers(self) -> dict[str, Any]:
+        return {"containers": self._podman_json(["ps", "--filter", "name=crucible"])}
+
+    def list_images(self) -> dict[str, Any]:
+        images = self._podman_json(["images"])
+        return {"images": [image for image in images if "crucible" in json.dumps(image).lower()]}
+
+    def _cdm_request(
+        self, path: str, *, method: str = "GET", body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        encoded = None if body is None else json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"} if encoded is not None else {}
+        request = Request(f"{self.cdm_base_url}{path}", data=encoded, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=10) as response:
+                raw = response.read(2_097_153)
+            if len(raw) > 2_097_152:
+                raise OperationError("framework", "CDM response exceeds size limit", "result_too_large")
+            payload = json.loads(raw.decode("utf-8"))
+        except OperationError:
+            raise
+        except (OSError, URLError, json.JSONDecodeError) as exc:
+            raise OperationError("framework", "CDM query is unavailable", "result_query_failed") from exc
+        if not isinstance(payload, dict):
+            raise OperationError("framework", "CDM query returned an invalid response", "invalid_result_response")
+        return payload
+
+    @staticmethod
+    def _require_text(value: Any, label: str) -> None:
+        if not isinstance(value, str) or not value:
+            raise OperationError("user", f"{label} is required", "missing_argument")
+
+    @staticmethod
+    def _podman_json(arguments: list[str]) -> list[dict[str, Any]]:
+        try:
+            completed = subprocess.run(
+                ["podman", *arguments, "--format", "json"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            payload = json.loads(completed.stdout or "[]")
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            raise OperationError("framework", "container runtime is unavailable", "runtime_unavailable") from exc
+        if not isinstance(payload, list):
+            raise OperationError("framework", "container runtime returned an invalid response", "invalid_runtime_response")
+        return [item for item in payload if isinstance(item, dict)]
 
     def describe_benchmark(self, name: str) -> dict[str, Any]:
         directory = self._benchmark_directory(name)
@@ -137,6 +394,11 @@ class CrucibleOperations:
         if not resolved.is_dir():
             return None
         return candidate
+
+    @staticmethod
+    def _under_managed_root(candidate: Path, root: Path) -> bool:
+        resolved_root = root.resolve()
+        return candidate == resolved_root or resolved_root in candidate.parents
 
     def _benchmark_metadata(self, directory: Path) -> dict[str, Any] | None:
         rickshaw_path = directory / "rickshaw.json"

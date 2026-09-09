@@ -632,6 +632,7 @@ function stop_cdm_server() {
 function start_mcp_server() {
     local RC=0 mcp_bind mcp_port mcp_token_file mcp_database
     local mcp_input_root mcp_max_inline_bytes mcp_max_run_file_bytes mcp_cdm_readiness_timeout
+    local mcp_cdm_port
     local mcp_audit_log
     local mcp_audit_max_bytes mcp_audit_retained_files actual_port
     local -a mcp_cmd
@@ -645,6 +646,7 @@ function start_mcp_server() {
     mcp_max_inline_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."max-inline-bytes"')
     mcp_max_run_file_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."max-run-file-bytes"')
     mcp_cdm_readiness_timeout=$(jq_query ${SERVICES_CFG} '."mcp-server"."cdm-readiness-timeout"')
+    mcp_cdm_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
     mcp_audit_log=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-log"')
     mcp_audit_max_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-max-bytes"')
     mcp_audit_retained_files=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-retained-files"')
@@ -694,6 +696,8 @@ function start_mcp_server() {
             --input-root "${mcp_input_root}"
             --max-run-file-bytes "${mcp_max_run_file_bytes}"
             --cdm-readiness-timeout "${mcp_cdm_readiness_timeout}"
+            --cdm-url "http://127.0.0.1:${mcp_cdm_port}"
+            --log-db "${LOG_DB}"
             --audit-log "${mcp_audit_log}"
             --audit-max-bytes "${mcp_audit_max_bytes}"
             --audit-retained-files "${mcp_audit_retained_files}"

@@ -23,7 +23,15 @@ from .audit import AuditLogger
 
 TOOL_NAMES = (
     "crucible_info",
+    "list_tools",
     "list_benchmarks",
+    "list_results",
+    "get_result",
+    "get_metric",
+    "list_log_sessions",
+    "get_log_info",
+    "list_containers",
+    "list_images",
     "describe_benchmark",
     "validate_run",
     "start_run",
@@ -35,7 +43,62 @@ TOOL_NAMES = (
 _EMPTY_INPUT = {"type": "object", "properties": {}, "additionalProperties": False}
 TOOL_DEFINITIONS = (
     {"name": "crucible_info", "description": "Describe Crucible MCP capabilities.", "inputSchema": _EMPTY_INPUT},
+    {
+        "name": "list_tools",
+        "description": "List installed Crucible tools and their metadata.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "minLength": 1}},
+            "additionalProperties": False,
+        },
+    },
     {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
+    {
+        "name": "list_results",
+        "description": "List historical run IDs from the configured CDM service.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run": {"type": "string", "minLength": 1},
+                "name": {"type": "string", "minLength": 1},
+                "email": {"type": "string", "minLength": 1},
+                "harness": {"type": "string", "minLength": 1},
+                "benchmark": {"type": "string", "minLength": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_result",
+        "description": "Get structured metadata for a historical CDM run.",
+        "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
+    },
+    {
+        "name": "get_metric",
+        "description": "Query metric data for a historical CDM run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run": {"type": "string", "minLength": 1}, "period": {"type": "string", "minLength": 1},
+                "source": {"type": "string", "minLength": 1}, "type": {"type": "string", "minLength": 1},
+                "begin": {"type": "integer", "minimum": 0}, "end": {"type": "integer", "minimum": 0},
+                "resolution": {"type": "integer", "minimum": 1, "maximum": 100000},
+                "breakout": {"type": "array", "items": {"type": "string"}}, "filter": {"type": "string"},
+                "aggregation": {"type": "string", "enum": ["sum", "avg", "max", "min"]},
+                "distribution_stats": {"type": "string"}, "allow_incompatible_aggregation": {"type": "boolean"}
+            },
+            "required": ["run", "source", "type"], "additionalProperties": False
+        },
+    },
+    {
+        "name": "list_log_sessions",
+        "description": "List recent Crucible logger sessions.",
+        "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000}}, "additionalProperties": False},
+    },
+    {"name": "get_log_info", "description": "Return aggregate Crucible logger database counts.", "inputSchema": _EMPTY_INPUT},
+    {"name": "list_containers", "description": "List Crucible containers from the container runtime.", "inputSchema": _EMPTY_INPUT},
+    {"name": "list_images", "description": "List Crucible container images from the container runtime.", "inputSchema": _EMPTY_INPUT},
     {
         "name": "describe_benchmark",
         "description": "Describe an installed benchmark.",
@@ -239,8 +302,34 @@ class MCPHandler(BaseHTTPRequestHandler):
         try:
             if name == "crucible_info":
                 value = self.server.operations.crucible_info()
+            elif name == "list_tools":
+                value = {"tools": self.server.operations.list_tools(arguments.get("name"))}
             elif name == "list_benchmarks":
                 value = {"benchmarks": self.server.operations.list_benchmarks()}
+            elif name == "list_results":
+                value = self.server.operations.list_results(
+                    **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}
+                )
+            elif name == "get_result":
+                value = self.server.operations.get_result(arguments.get("run", ""))
+            elif name == "get_metric":
+                value = self.server.operations.get_metric(
+                    run=arguments.get("run", ""), source=arguments.get("source", ""),
+                    metric_type=arguments.get("type", ""), period=arguments.get("period"),
+                    begin=arguments.get("begin"), end=arguments.get("end"),
+                    resolution=arguments.get("resolution", 1), breakout=arguments.get("breakout"),
+                    filter=arguments.get("filter"), aggregation=arguments.get("aggregation"),
+                    distribution_stats=arguments.get("distribution_stats"),
+                    allow_incompatible_aggregation=arguments.get("allow_incompatible_aggregation", False),
+                )
+            elif name == "list_log_sessions":
+                value = self.server.operations.list_log_sessions(arguments.get("limit", 100))
+            elif name == "get_log_info":
+                value = self.server.operations.get_log_info()
+            elif name == "list_containers":
+                value = self.server.operations.list_containers()
+            elif name == "list_images":
+                value = self.server.operations.list_images()
             elif name == "describe_benchmark":
                 value = self.server.operations.describe_benchmark(arguments.get("name", ""))
             elif name == "validate_run":
@@ -323,6 +412,8 @@ def main() -> None:
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--max-run-file-bytes", type=int, default=1_048_576)
     parser.add_argument("--cdm-readiness-timeout", type=int, default=60)
+    parser.add_argument("--cdm-url", default="http://127.0.0.1:3000")
+    parser.add_argument("--log-db", type=Path)
     parser.add_argument("--audit-log", type=Path, default=Path("/var/lib/crucible/logs/mcp-audit.jsonl"))
     parser.add_argument("--audit-max-bytes", type=int, default=10 * 1024 * 1024)
     parser.add_argument("--audit-retained-files", type=int, default=5)
@@ -335,6 +426,8 @@ def main() -> None:
     server.operations = CrucibleOperations(
         args.crucible_home,
         InputPolicy([args.input_root], args.max_run_file_bytes),
+        cdm_base_url=args.cdm_url,
+        log_db=args.log_db,
     )
     server.run_manager = RunManager(
         server.jobs,
