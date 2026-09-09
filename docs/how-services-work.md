@@ -124,6 +124,46 @@ MCP-owned jobs prevent service shutdown while they are queued, running,
 post-processing, indexing, or awaiting recovery. This protects jobs that are
 not represented by an active Rickshaw container.
 
+#### MCP tools
+
+The MCP endpoint is available at `http://<bind>:<port>/mcp`. Every request
+requires the bearer token from `token-file`. Tool discovery is available
+through the standard `tools/list` request; the current interface is:
+
+| Tool | Purpose |
+| --- | --- |
+| `crucible_info` | Report the MCP contract version and supported capabilities. |
+| `list_tools` | List installed Crucible tools and their metadata. |
+| `list_benchmarks` | List installed benchmarks. |
+| `describe_benchmark` | Return metadata for one installed benchmark. |
+| `validate_run` | Validate an inline run document or an approved run-file path. |
+| `start_run` | Submit an asynchronous, idempotent Crucible run. |
+| `get_run_status` | Poll the lifecycle and result-readiness state of a submitted run. |
+| `get_run_logs` | Read a bounded slice of runner output for a submitted run. |
+| `get_run_summary` | Retrieve the summary of a completed submitted run. |
+| `list_results` | Search historical result run IDs through CDM. |
+| `get_result` | Retrieve structured metadata for one historical run. |
+| `get_metric` | Query metric data for a historical run with bounded range and resolution options. |
+| `list_log_sessions` | List recent logger sessions without returning their full contents. |
+| `get_log_info` | Return aggregate counts from the logger database. |
+| `list_containers` | List Crucible containers visible to the configured Podman runtime. |
+| `list_images` | List Crucible-related images visible to the configured Podman runtime. |
+
+The result, metric, log, and runtime-discovery tools are read-only. Result
+queries use the local CDM server configured by `cdm-server.port`; log queries
+use Crucible's configured logger database. Runtime discovery uses fixed
+Podman queries and does not expose an arbitrary command runner. Run-file
+submission remains restricted to the configured `input-root` and its policy
+checks.
+
+For example, after obtaining the token, a client can verify service health
+with:
+
+```bash
+curl -H "Authorization: Bearer $(cat /etc/crucible/mcp-server.token)" \
+    http://127.0.0.1:8889/health
+```
+
 ### Remote archive storage
 
 Remote archive storage enables uploading and downloading result
