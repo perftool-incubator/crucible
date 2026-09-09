@@ -635,8 +635,8 @@ function start_mcp_server() {
     local mcp_cdm_port
     local mcp_audit_log
     local mcp_audit_max_bytes mcp_audit_retained_files actual_port
-    local -a mcp_cmd
-    local mcp_health_host
+    local -a mcp_cmd mcp_data_mounts
+    local mcp_data_path mcp_data_readonly mcp_health_host
 
     mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
     mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
@@ -666,6 +666,8 @@ function start_mcp_server() {
     fi
 
     mkdir -p "$(dirname "${mcp_token_file}")" "${mcp_input_root}"
+    mkdir -p "$(dirname "${mcp_database}")" "$(dirname "${mcp_audit_log}")" "$(dirname "${LOG_DB}")"
+    touch "${mcp_database}" "${mcp_audit_log}" "${LOG_DB}"
     if [ ! -e "${mcp_token_file}" ]; then
         (umask 077; head -c 32 /dev/urandom | base64 > "${mcp_token_file}")
     fi
@@ -711,10 +713,29 @@ function start_mcp_server() {
             --audit-retained-files "${mcp_audit_retained_files}"
         )
 
+        mcp_data_mounts=()
+        for mcp_data_path in "${mcp_database}" "${mcp_input_root}" "${mcp_audit_log}" "${LOG_DB}"; do
+            case "${mcp_data_path}" in
+                /var/lib/crucible|/var/lib/crucible/*|/root|/root/*|/home|/home/*|"${CRUCIBLE_HOME}"|"${CRUCIBLE_HOME}"/*)
+                    continue
+                    ;;
+            esac
+
+            mcp_data_readonly=false
+            if [ "${mcp_data_path}" == "${mcp_input_root}" ] || [ "${mcp_data_path}" == "${LOG_DB}" ]; then
+                mcp_data_readonly=true
+            fi
+            if [ "${mcp_data_readonly}" == "true" ]; then
+                mcp_data_mounts+=("--mount=type=bind,source=${mcp_data_path},destination=${mcp_data_path},readonly")
+            else
+                mcp_data_mounts+=("--mount=type=bind,source=${mcp_data_path},destination=${mcp_data_path}")
+            fi
+        done
+
         ${podman_run} --name crucible-mcp-server \
             --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \
             "--mount=type=bind,source=${mcp_token_file},destination=${mcp_token_file},readonly" \
-            "${container_common_args[@]}" "${container_service_args[@]}" \
+            "${mcp_data_mounts[@]}" "${container_common_args[@]}" "${container_service_args[@]}" \
             ${CRUCIBLE_CONTROLLER_IMAGE} "${mcp_cmd[@]}" > /dev/null
         RC=$?
         if [ ${RC} != 0 ]; then
