@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft201909Validator
+
 from .jobs import JobConflictError, JobNotFoundError, JobStore
 from .models import Job
 from .operations import CrucibleOperations, OperationError
@@ -172,6 +174,7 @@ TOOL_DEFINITIONS = (
         },
     },
 )
+_TOOL_SCHEMAS = {tool["name"]: tool["inputSchema"] for tool in TOOL_DEFINITIONS}
 
 
 class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
@@ -299,6 +302,14 @@ class MCPHandler(BaseHTTPRequestHandler):
             arguments = {}
         if not isinstance(arguments, dict):
             return self._error(request_id, -32602, "arguments must be an object")
+        if not isinstance(name, str):
+            return self._error(request_id, -32602, "tool name must be a string")
+        schema = _TOOL_SCHEMAS.get(name)
+        if schema is None:
+            return self._error(request_id, -32602, "unknown tool")
+        validation_error = next(iter(Draft201909Validator(schema).iter_errors(arguments)), None)
+        if validation_error is not None:
+            return self._error(request_id, -32602, f"invalid arguments: {validation_error.message}")
         try:
             if name == "crucible_info":
                 value = self.server.operations.crucible_info()
@@ -381,8 +392,6 @@ class MCPHandler(BaseHTTPRequestHandler):
                 if "mcp_job_id" not in arguments:
                     return self._error(request_id, -32602, "mcp_job_id is required")
                 value = self.server.run_manager.get_summary(arguments["mcp_job_id"])
-            elif name in TOOL_NAMES:
-                return self._error(request_id, -32001, "operation not implemented")
             else:
                 return self._error(request_id, -32602, "unknown tool")
         except JobConflictError as exc:

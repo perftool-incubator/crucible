@@ -104,6 +104,42 @@ class TestServer(unittest.TestCase):
 
         body = json.dumps({
             "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {"name": [], "arguments": {}},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {"name": "list_results", "arguments": {"limit": "1"}},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "get_metric",
+                "arguments": {
+                    "run": "run-1", "source": "fio", "type": "IOPS",
+                    "period": "measurement", "breakout": "hostname",
+                },
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
             "id": 5,
             "method": "tools/call",
             "params": {"name": "crucible_info", "arguments": []},
