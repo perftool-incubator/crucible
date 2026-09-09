@@ -115,6 +115,38 @@ directories into the engine's environment. This is commonly
 used to expose device files, `/proc`, `/sys`, or application
 sockets to the engine.
 
+### Choosing the remotehost SSH address
+
+For a remotehosts endpoint, `remotes[].config.host` is the
+address that the Crucible controller uses to access that remote
+host. It may be either a hostname or an IP address; the format
+does not determine which address is correct. The selected address
+must be verified as SSH-reachable from the Crucible controller
+using the user and key configured for the run.
+
+A remote host can have multiple interfaces or network paths to the
+controller. When more than one path is available, prefer an access
+or management path for controller SSH so that the dataplane can
+remain dedicated to benchmark traffic. This separation is a
+preference, not a requirement: network policies or firewalls may
+block the canonical or assumed access path, and the only usable
+route may be a less obvious dedicated private network that is also
+used by the benchmark dataplane. The address that is appropriate
+for benchmark traffic is not necessarily the address that the
+controller can use for SSH, and the reverse can also be true.
+
+Regardless of which path is selected, test SSH access from the
+Crucible controller to the exact `config.host` value using the
+configured user and key before running the benchmark. Do not
+assume that an address is reachable based on its name, role, or
+reachability from another system.
+
+The `config.host` value must remain usable for every remotehosts
+endpoint operation, including validation, engine deployment, file
+transfer, and cleanup. Selecting an address that works only for
+benchmark traffic can therefore cause endpoint validation to fail
+before the benchmark starts.
+
 ### Kubernetes
 
 The kube endpoint deploys engines as pods:
@@ -227,6 +259,13 @@ Clients connect directly to server IPs. Since both client and
 server containers run on known hosts with known IPs, the server
 publishes its host IP and ports via the roadblock messaging
 system. The client reads the message and connects directly.
+
+This benchmark dataplane address may be the same as, or different
+from, `remotes[].config.host`, which is reserved for
+controller-to-remote SSH and related endpoint operations.
+Benchmark-specific mechanisms select dataplane addresses
+separately; for example, uperf can use its `ifname` and
+service-discovery configuration.
 
 ### Kubernetes
 
