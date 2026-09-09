@@ -669,6 +669,14 @@ function start_mcp_server() {
     if [ ! -e "${mcp_token_file}" ]; then
         (umask 077; head -c 32 /dev/urandom | base64 > "${mcp_token_file}")
     fi
+    if [ -L "${mcp_token_file}" ] || [ ! -f "${mcp_token_file}" ]; then
+        echo "ERROR: MCP token file must be a regular, non-symlink file"
+        return 1
+    fi
+    if [ "$(stat -c '%u' "${mcp_token_file}")" != "0" ]; then
+        echo "ERROR: MCP token file must be owned by root"
+        return 1
+    fi
     chmod 600 "${mcp_token_file}"
 
     echo -n "Checking for MCP server"
