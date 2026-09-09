@@ -61,6 +61,7 @@ class CrucibleOperations:
                 "list_tools",
                 "list_results",
                 "get_result",
+                "list_run_periods",
                 "get_metric",
                 "list_log_sessions",
                 "get_log_info",
@@ -185,7 +186,60 @@ class CrucibleOperations:
             "partial_status": self._cdm_request(f"{prefix}/partial-status"),
             "iterations": self._cdm_request(f"{prefix}/iterations").get("iterations", []),
             "metric_sources": self._cdm_request(f"{prefix}/metric-sources").get("sources", []),
+            "periods": self.list_run_periods(run)["periods"],
         }
+
+    def list_run_periods(self, run: str) -> dict[str, Any]:
+        """List every primary period and sample associated with a run."""
+
+        self._require_text(run, "run")
+        encoded_run = quote(run, safe="")
+        prefix = f"/api/v1/run/{encoded_run}"
+        iterations = self._cdm_request(f"{prefix}/iterations").get("iterations", [])
+        if not isinstance(iterations, list) or not all(isinstance(item, str) for item in iterations):
+            raise OperationError("framework", "CDM returned invalid iteration data", "invalid_result_response")
+        if not iterations:
+            return {"run_id": run, "periods": []}
+
+        def post(path: str, body: dict[str, Any]) -> dict[str, Any]:
+            return self._cdm_request(path, method="POST", body=body)
+
+        samples = post(f"{prefix}/iterations/samples", {"iterations": iterations}).get("samples", [])
+        statuses = post(f"{prefix}/samples/statuses", {"sampleIds": samples}).get("statuses", [])
+        period_names = post(
+            f"{prefix}/iterations/primary-period-name", {"iterations": iterations}
+        ).get("periodNames", [])
+        period_ids = post(
+            f"{prefix}/samples/primary-period-id",
+            {"sampleIds": samples, "periodNames": period_names},
+        ).get("periodIds", [])
+        ranges = post(f"{prefix}/periods/range", {"periodIds": period_ids}).get("ranges", [])
+
+        periods = []
+        for iteration_index, iteration_id in enumerate(iterations):
+            iteration_samples = samples[iteration_index] if iteration_index < len(samples) else []
+            iteration_statuses = statuses[iteration_index] if iteration_index < len(statuses) else []
+            iteration_period_ids = period_ids[iteration_index] if iteration_index < len(period_ids) else []
+            iteration_ranges = ranges[iteration_index] if iteration_index < len(ranges) else []
+            for sample_index, period_id in enumerate(iteration_period_ids):
+                if not isinstance(period_id, str) or not period_id:
+                    continue
+                period_range = iteration_ranges[sample_index] if sample_index < len(iteration_ranges) else {}
+                periods.append(
+                    {
+                        "iteration_id": iteration_id,
+                        "sample_id": iteration_samples[sample_index]
+                        if sample_index < len(iteration_samples)
+                        else None,
+                        "primary_period_id": period_id,
+                        "status": iteration_statuses[sample_index]
+                        if sample_index < len(iteration_statuses)
+                        else None,
+                        "begin": period_range.get("begin") if isinstance(period_range, dict) else None,
+                        "end": period_range.get("end") if isinstance(period_range, dict) else None,
+                    }
+                )
+        return {"run_id": run, "periods": periods}
 
     def get_metric(
         self,

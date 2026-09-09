@@ -29,6 +29,7 @@ TOOL_NAMES = (
     "list_benchmarks",
     "list_results",
     "get_result",
+    "list_run_periods",
     "get_metric",
     "list_log_sessions",
     "get_log_info",
@@ -74,6 +75,11 @@ TOOL_DEFINITIONS = (
     {
         "name": "get_result",
         "description": "Get structured metadata for a historical CDM run.",
+        "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
+    },
+    {
+        "name": "list_run_periods",
+        "description": "List the primary periods and samples associated with a historical run.",
         "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
     },
     {
@@ -323,6 +329,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                 )
             elif name == "get_result":
                 value = self.server.operations.get_result(arguments.get("run", ""))
+            elif name == "list_run_periods":
+                value = self.server.operations.list_run_periods(arguments.get("run", ""))
             elif name == "get_metric":
                 value = self.server.operations.get_metric(
                     run=arguments.get("run", ""), source=arguments.get("source", ""),

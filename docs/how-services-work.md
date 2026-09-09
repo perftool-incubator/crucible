@@ -143,14 +143,18 @@ through the standard `tools/list` request; the current interface is:
 | `get_run_summary` | Retrieve the summary of a completed submitted run. |
 | `list_results` | Search historical result run IDs through CDM. |
 | `get_result` | Retrieve structured metadata for one historical run. |
+| `list_run_periods` | List every primary period and sample associated with a historical run. |
 | `get_metric` | Query metric data for a historical run with bounded range and resolution options. |
 | `list_log_sessions` | List recent logger sessions without returning their full contents. |
 | `get_log_info` | Return aggregate counts from the logger database. |
 | `list_containers` | List Crucible containers visible to the configured Podman runtime. |
 | `list_images` | List Crucible-related images visible to the configured Podman runtime. |
 
-The result, metric, log, and runtime-discovery tools are read-only. Result
-queries use the local CDM server configured by `cdm-server.port`; log queries
+The result, period, metric, log, and runtime-discovery tools are read-only.
+Metric queries should pass a `primary_period_id` returned by
+`list_run_periods` as the `period` argument; this avoids combining distinct
+primary periods implicitly.
+Result queries use the local CDM server configured by `cdm-server.port`; log queries
 use Crucible's configured logger database. Runtime discovery uses fixed
 Podman queries and does not expose an arbitrary command runner. Run-file
 submission remains restricted to the configured `input-root` and its policy

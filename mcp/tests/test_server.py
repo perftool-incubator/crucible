@@ -75,7 +75,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("inputSchema", tools["get_run_logs"])
         for tool_name in (
-            "list_tools", "list_results", "get_result", "get_metric",
+            "list_tools", "list_results", "get_result", "list_run_periods", "get_metric",
             "list_log_sessions", "get_log_info", "list_containers", "list_images",
         ):
             self.assertIn(tool_name, tools)

@@ -80,13 +80,38 @@ class TestCrucibleOperations(unittest.TestCase):
             "/api/v1/run/run-1/metric-sources": {"sources": ["latency"]},
         }
         with patch.object(self.operations, "list_results", return_value={"run_ids": ["run-1"]}), \
+                patch.object(self.operations, "list_run_periods", return_value={"periods": []}), \
                 patch.object(self.operations, "_cdm_request", side_effect=payloads.get) as request:
             result = self.operations.get_result("run-1")
 
         self.assertEqual(result["tags"], ["nightly"])
         self.assertEqual(result["benchmark"], "fio")
         self.assertEqual(result["partial_status"], {"status": "complete"})
+        self.assertEqual(result["periods"], [])
         self.assertEqual(request.call_count, 5)
+
+    def test_list_run_periods_preserves_multiple_primary_periods(self):
+        payloads = {
+            "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},
+            "/api/v1/run/run-1/iterations/samples": {"samples": [["sample-1", "sample-2"]]},
+            "/api/v1/run/run-1/samples/statuses": {"statuses": [["pass", "pass"]]},
+            "/api/v1/run/run-1/iterations/primary-period-name": {"periodNames": ["measurement"]},
+            "/api/v1/run/run-1/samples/primary-period-id": {
+                "periodIds": [["period-1", "period-2"]]
+            },
+            "/api/v1/run/run-1/periods/range": {
+                "ranges": [[{"begin": 10, "end": 20}, {"begin": 30, "end": 40}]]
+            },
+        }
+
+        def response(path, **_kwargs):
+            return payloads[path]
+
+        with patch.object(self.operations, "_cdm_request", side_effect=response):
+            result = self.operations.list_run_periods("run-1")
+
+        self.assertEqual([period["primary_period_id"] for period in result["periods"]], ["period-1", "period-2"])
+        self.assertEqual(result["periods"][1]["begin"], 30)
 
     def test_get_metric_posts_typed_query(self):
         response = Mock()
