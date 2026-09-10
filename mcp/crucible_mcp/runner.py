@@ -111,35 +111,86 @@ class RunManager:
         return self.store.get(job.mcp_job_id), True
 
     def reconcile(self) -> list[Job]:
-        """Mark jobs whose recorded runner no longer exists as crash-unknown."""
+        """Recover supervision for jobs surviving an MCP service restart."""
 
-        changed = []
+        changed: list[Job] = []
         for job in self.store.list_active():
             if job.state in {JobState.UNKNOWN_AFTER_CRASH, JobState.RECOVERY_REQUIRED}:
+                changed.append(self._fail_recovery_job(job, "job requires recovery after a previous restart"))
                 continue
-            if job.runner_pid is not None and self._process_exists(job.runner_pid):
-                changed.append(
-                    self.store.transition(
-                        job.mcp_job_id,
-                        JobState.RECOVERY_REQUIRED,
-                        error_category="recovery",
-                        error_message=(
-                            "runner was still active during service reconciliation; "
-                            "manual recovery is required"
-                        ),
-                    )
-                )
+
+            if (
+                job.runner_pid is not None
+                and self._process_exists(job.runner_pid)
+                and self._runner_identity_matches(job)
+            ):
+                self._reattach(job)
                 continue
-            if job.runner_pid is None or not self._process_exists(job.runner_pid):
-                changed.append(
-                    self.store.transition(
-                        job.mcp_job_id,
-                        JobState.UNKNOWN_AFTER_CRASH,
-                        error_category="recovery",
-                        error_message="runner was not present during service reconciliation",
-                    )
-                )
+
+            changed.append(self._resolve_or_fail(job))
         return changed
+
+    def _fail_recovery_job(self, job: Job, message: str) -> Job:
+        return self.store.transition(
+            job.mcp_job_id,
+            JobState.FAILED,
+            result_status=ResultStatus.UNAVAILABLE.value,
+            error_category="recovery",
+            error_message=message,
+        )
+
+    def _resolve_or_fail(self, job: Job) -> Job:
+        if job.run_directory:
+            summary_path = Path(job.run_directory) / "run" / "result-summary.json"
+            if summary_path.is_file() and job.state == JobState.RUNNING:
+                return self.store.transition(
+                    job.mcp_job_id,
+                    JobState.COMPLETED,
+                    result_status=ResultStatus.AVAILABLE.value,
+                    exit_code=0,
+                )
+        return self._fail_recovery_job(
+            job, "runner was not present or could not be verified during reconciliation"
+        )
+
+    def _runner_identity_matches(self, job: Job) -> bool:
+        if job.runner_pid is None or not job.run_directory:
+            return False
+        run_file = Path(job.run_directory) / "input" / "run-file.json"
+        try:
+            command_line = Path(f"/proc/{job.runner_pid}/cmdline").read_bytes()
+        except OSError:
+            return False
+        return str(run_file).encode("utf-8") in command_line.split(b"\0")
+
+    def _reattach(self, job: Job) -> None:
+        if job.mcp_job_id in self._threads:
+            return
+        event_path = Path(job.run_directory) / "events.jsonl" if job.run_directory else None
+        if event_path is None:
+            self._fail_recovery_job(job, "runner has no persisted run directory")
+            return
+        thread = threading.Thread(
+            target=self._wait_for_recovered_process,
+            args=(job, event_path),
+            daemon=True,
+            name=f"mcp-recover-{job.mcp_job_id}",
+        )
+        self._threads[job.mcp_job_id] = thread
+        thread.start()
+
+    def _wait_for_recovered_process(self, job: Job, event_path: Path) -> None:
+        position = 0
+        while job.runner_pid is not None and self._process_exists(job.runner_pid):
+            position = self._consume_events(job.mcp_job_id, event_path, position)
+            time.sleep(0.1)
+        position = self._consume_events(job.mcp_job_id, event_path, position)
+        current = self.store.get(job.mcp_job_id)
+        if current.state in {JobState.COMPLETED, JobState.FAILED}:
+            self._threads.pop(job.mcp_job_id, None)
+            return
+        self._resolve_or_fail(current)
+        self._threads.pop(job.mcp_job_id, None)
 
     def get_logs(self, job_id: str, offset: int = 0, limit: int = 65_536) -> dict[str, Any]:
         if offset < 0 or limit <= 0 or limit > 1_048_576:

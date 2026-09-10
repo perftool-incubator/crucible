@@ -101,25 +101,43 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(raised.exception.category, "authorization")
         self.assertEqual(raised.exception.code, "input_path_rejected")
 
-    def test_reconcile_is_idempotent_for_recovery_states(self):
+    def test_reconcile_resolves_previous_recovery_states(self):
         job, _ = self.store.create_or_get("key-recovery", {"run": 1})
         self.store.transition(job.mcp_job_id, JobState.UNKNOWN_AFTER_CRASH)
-        self.assertEqual(self.manager.reconcile(), [])
-        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.UNKNOWN_AFTER_CRASH)
+        changed = self.manager.reconcile()
+        self.assertEqual([item.mcp_job_id for item in changed], [job.mcp_job_id])
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.FAILED)
 
+        job, _ = self.store.create_or_get("key-recovery-2", {"run": 2})
         self.store.transition(job.mcp_job_id, JobState.RECOVERY_REQUIRED)
-        self.assertEqual(self.manager.reconcile(), [])
-        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.RECOVERY_REQUIRED)
+        changed = self.manager.reconcile()
+        self.assertEqual([item.mcp_job_id for item in changed], [job.mcp_job_id])
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.FAILED)
 
-    def test_reconcile_marks_live_runner_for_recovery(self):
+    def test_reconcile_reattaches_verified_live_runner(self):
         job, _ = self.store.create_or_get("key-live", {"run": 1})
+        run_directory = self.root / "live-run"
+        (run_directory / "input").mkdir(parents=True)
+        (run_directory / "input" / "run-file.json").write_text("{}", encoding="utf-8")
+        self.store.transition(
+            job.mcp_job_id, JobState.STARTING, runner_pid=1234, run_directory=str(run_directory)
+        )
+        with (
+            patch.object(self.manager, "_process_exists", return_value=True),
+            patch.object(self.manager, "_runner_identity_matches", return_value=True),
+            patch.object(self.manager, "_reattach") as reattach,
+        ):
+            changed = self.manager.reconcile()
+        self.assertEqual(changed, [])
+        reattach.assert_called_once_with(self.store.get(job.mcp_job_id))
+
+    def test_reconcile_marks_unverified_runner_failed(self):
+        job, _ = self.store.create_or_get("key-unverified", {"run": 1})
         self.store.transition(job.mcp_job_id, JobState.STARTING, runner_pid=1234)
         with patch.object(self.manager, "_process_exists", return_value=True):
             changed = self.manager.reconcile()
         self.assertEqual([item.mcp_job_id for item in changed], [job.mcp_job_id])
-        recovered = self.store.get(job.mcp_job_id)
-        self.assertEqual(recovered.state, JobState.RECOVERY_REQUIRED)
-        self.assertEqual(recovered.error_category, "recovery")
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.FAILED)
 
     def test_summary_wait_uses_configured_cdm_readiness_timeout(self):
         manager = RunManager(
