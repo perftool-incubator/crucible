@@ -315,13 +315,37 @@ class RunManager:
         exit_code = process.returncode
         log.close()
         self._threads.pop(job_id, None)
+        current = self.store.get(job_id)
         if exit_code == 0:
+            result_status = current.result_status
+            if result_status == ResultStatus.NOT_AVAILABLE:
+                result_status = ResultStatus.PENDING
             self.store.transition(
                 job_id,
                 JobState.COMPLETED,
-                result_status=ResultStatus.PENDING.value,
+                result_status=result_status.value,
                 exit_code=exit_code,
             )
+        elif current.state == JobState.INDEXING:
+            if self._wait_for_result_summary(current):
+                self.store.transition(
+                    job_id,
+                    JobState.COMPLETED,
+                    result_status=ResultStatus.AVAILABLE.value,
+                    exit_code=exit_code,
+                )
+            else:
+                self.store.transition(
+                    job_id,
+                    JobState.COMPLETED,
+                    result_status=ResultStatus.UNAVAILABLE.value,
+                    exit_code=exit_code,
+                    error_category="cdm",
+                    error_message=(
+                        "CDM result summary was unavailable after the configured "
+                        "readiness timeout"
+                    ),
+                )
         else:
             self.store.transition(
                 job_id,
@@ -331,6 +355,18 @@ class RunManager:
                 error_category="framework",
                 error_message=f"crucible run exited with status {exit_code}",
             )
+
+    def _wait_for_result_summary(self, job: Job) -> bool:
+        if not job.run_directory:
+            return False
+        summary_path = Path(job.run_directory) / "run" / "result-summary.json"
+        deadline = time.monotonic() + self.cdm_readiness_timeout
+        while not summary_path.is_file():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(0.1, remaining))
+        return True
 
     def _capture_container_id(self, job_id: str, container_name: str) -> None:
         try:

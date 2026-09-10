@@ -77,6 +77,31 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(failed.state.value, "failed")
         self.assertEqual(failed.exit_code, 7)
 
+    def test_cdm_failure_after_indexing_is_not_benchmark_failure(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "cdm-failed-runs",
+            [
+                sys.executable,
+                "-c",
+                "import json, os, sys; "
+                "open(os.environ['CRUCIBLE_MCP_EVENT_FILE'], 'a').write("
+                "json.dumps({'state': 'postprocessing'}) + '\\n' + "
+                "json.dumps({'state': 'indexing'}) + '\\n'); "
+                "import time; time.sleep(0.2); sys.exit(1)",
+            ],
+            cdm_readiness_timeout=0.01,
+        )
+        job, _ = manager.submit(
+            "key-cdm-failure", document={"benchmarks": [{"name": "example"}]}
+        )
+        manager._threads[job.mcp_job_id].join(timeout=5)
+        completed = self.store.get(job.mcp_job_id)
+        self.assertEqual(completed.state, JobState.COMPLETED)
+        self.assertEqual(completed.result_status.value, "unavailable")
+        self.assertEqual(completed.error_category, "cdm")
+
     def test_lifecycle_event_persists_correlation_identifiers(self):
         job, _ = self.store.create_or_get("key-identifiers", {"run": 1})
         event_path = self.root / "events.jsonl"
