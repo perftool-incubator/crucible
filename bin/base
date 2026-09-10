@@ -635,6 +635,7 @@ function start_mcp_server() {
     local mcp_cdm_port
     local mcp_audit_log
     local mcp_audit_max_bytes mcp_audit_retained_files actual_port
+    local mcp_private_dir mcp_private_file
     local -a mcp_cmd mcp_data_mounts mcp_data_paths mcp_data_readonly_flags
     local mcp_data_path mcp_data_readonly mcp_data_index mcp_existing_index
     local mcp_mount_index mcp_health_host
@@ -667,8 +668,20 @@ function start_mcp_server() {
     fi
 
     mkdir -p "$(dirname "${mcp_token_file}")" "${mcp_input_root}"
-    mkdir -p "$(dirname "${mcp_database}")" "$(dirname "${mcp_audit_log}")" "$(dirname "${LOG_DB}")"
-    touch "${mcp_database}" "${mcp_audit_log}" "${LOG_DB}"
+    for mcp_private_dir in "$(dirname "${mcp_database}")" \
+                           "$(dirname "${mcp_audit_log}")" \
+                           "$(dirname "${LOG_DB}")"; do
+        if ! mkdir -p "${mcp_private_dir}" || ! chmod 700 "${mcp_private_dir}"; then
+            echo "ERROR: Could not secure MCP storage directory '${mcp_private_dir}'"
+            return 1
+        fi
+    done
+    for mcp_private_file in "${mcp_database}" "${mcp_audit_log}" "${LOG_DB}"; do
+        if ! touch "${mcp_private_file}" || ! chmod 600 "${mcp_private_file}"; then
+            echo "ERROR: Could not secure MCP storage file '${mcp_private_file}'"
+            return 1
+        fi
+    done
     if [ ! -e "${mcp_token_file}" ]; then
         (umask 077; head -c 32 /dev/urandom | base64 > "${mcp_token_file}")
     fi
