@@ -117,8 +117,142 @@ infrastructure without container isolation layers.
 
 **Host mounts**: The `host-mounts` setting allows mounting host
 directories into the engine's environment. This is commonly
-used to expose device files, `/proc`, `/sys`, or application
-sockets to the engine.
+used to expose a specific host path, such as an application
+socket or a device file, to the engine. It is not necessary to
+add a host mount simply because a benchmark reads ordinary
+system, network, or process information. The runtime already
+provides standard views of those interfaces, and the effective
+view also depends on the namespace and privilege options below.
+
+#### Effective Podman environment
+
+The default `remotehosts` Podman engine is created with the
+following settings:
+
+| Setting | Effect |
+|---------|--------|
+| `--privileged` | Grants the container broad device and capability access and removes the normal container device restrictions. |
+| `--pid=host` | Places the engine in the host PID namespace. Process information visible through `/proc` therefore describes the host, subject to the image and kernel's normal `/proc` behavior. |
+| `--net=host` | Places the engine in the host network namespace. Host interfaces, routes, and network devices are visible without binding `/proc` or `/sys`. |
+| `--ipc=host` (default) | Shares the host IPC namespace. This is replaced by `--shm-size` when that Podman setting is configured. |
+| `--security-opt=label=disable` | Disables SELinux label separation for the engine. This changes labeling restrictions; it does not by itself add a filesystem mount. |
+
+In addition to the standard container filesystem and namespace
+views, Crucible explicitly bind-mounts these paths for the
+Podman engine:
+
+- the remote run data directory at `/shared-engines-dir`;
+- `/lib/firmware`;
+- `/lib/modules`;
+- `/usr/src`; and
+- `/var/run`.
+
+The run file's `host-mounts` entries are appended to this list.
+They are bind mounts from the remote endpoint host, not from the
+Crucible controller. A `dest` is optional; when omitted, the
+source path is used as the destination path. The optional
+`podman-settings.device` entries are separate from host mounts:
+they are passed as Podman's `--device` mappings and should be
+used when a benchmark needs a particular device node.
+
+Crucible does not explicitly bind-mount `/proc`, `/sys`, or
+`/dev` in the `remotehosts` Podman command. Their visibility comes
+from Podman's normal container setup together with the host PID
+namespace, host network namespace, and privileged mode. Therefore,
+the existence of a path inside the engine does not prove that it
+is an explicit host bind mount, and adding a redundant `host-mounts`
+entry can make a run less portable. Add an explicit mount or device
+mapping only when the benchmark requires a particular host path or
+device and the effective endpoint configuration does not already
+provide it.
+
+The `remotehosts` client and server engines use the same Podman
+environment. Their role changes engine and tool configuration, but
+does not change the default namespace or mount settings. Each
+remote host is evaluated independently: a path available on one
+remote is not assumed to exist on another.
+
+The `remotehosts` `chroot` runtime has a different contract. It
+bind-mounts the run data directory and recursively bind-mounts
+`/proc`, `/dev`, `/sys`, `/lib/firmware`, `/lib/modules`, `/usr/src`,
+`/boot`, and `/var/run` into the extracted image filesystem. In
+chroot mode, these are actual host filesystem mounts, so the
+Podman namespace guidance above does not apply.
+
+#### Kubernetes host visibility
+
+Kubernetes engines are configured separately from `remotehosts`.
+For the host-like engine pods, Rickshaw requests host PID, host
+network, and host IPC namespaces and marks the container
+privileged. The kube endpoint's `host-mounts` object controls these
+explicit host paths, all enabled by default:
+
+| Setting | Host path | Scope |
+|---------|-----------|-------|
+| `firmware` | `/lib/firmware` | All pods |
+| `run` | `/var/run` | Worker and master engine pods |
+| `modules` | `/lib/modules` | Worker and master engine pods |
+
+Kubernetes does not use the `remotehosts` list of arbitrary
+`{src,dest}` host mounts. Additional volumes and volume mounts must
+be supplied through the Kubernetes endpoint's container settings.
+Whether a cluster permits privileged pods or host namespaces is a
+cluster policy concern; a run can fail or have less visibility when
+those permissions are restricted.
+
+#### Inspecting the effective environment
+
+When diagnosing a run, inspect the endpoint where the engine was
+created. For a running `remotehosts` Podman engine, the following
+commands show the mounts and the namespace links selected by
+Podman:
+
+```bash
+ssh <remote> sudo podman inspect <container-name> \
+    --format '{{json .Mounts}}'
+ssh <remote> sudo podman inspect <container-name> \
+    --format '{{json .HostConfig}}'
+ssh <remote> sudo podman exec <container-name> findmnt
+ssh <remote> sudo podman exec <container-name> ls -l /proc/1/ns /proc/self/ns
+```
+
+The endpoint process records the generated `podman create` command
+under the message `Podman create command is`. Endpoint stdout and
+stderr are redirected by `rickshaw-run` to the endpoint's run
+directory; they are not sent through the normal Crucible logger.
+The file is:
+
+```text
+<base-run-dir>/run/endpoint/<endpoint-label>/endpoint-stderrout.txt
+```
+
+After the endpoint exits, `rickshaw-run` compresses it to:
+
+```text
+<base-run-dir>/run/endpoint/<endpoint-label>/endpoint-stderrout.txt.xz
+```
+
+For example, inspect a completed endpoint log with:
+
+```bash
+xz -dc <base-run-dir>/run/endpoint/<endpoint-label>/endpoint-stderrout.txt.xz \
+    | grep -A 20 "Podman create command"
+```
+
+While a run is in progress, read the uncompressed file directly.
+The regular Crucible logger captures the controller and
+`rickshaw-run` output, including the parent message that starts the
+endpoint command, but it does not contain the endpoint's detailed
+Python logging. The endpoint file is therefore the authoritative
+source for the generated Podman command and the endpoint's remote
+operation results.
+
+The command log shows explicit mounts and device mappings, while
+`podman inspect` and commands run inside the engine show the
+effective configuration after Podman has created it. For
+Kubernetes, inspect the generated pod with `kubectl get pod
+<pod-name> -o yaml` and check `securityContext`, `hostPID`,
+`hostNetwork`, `hostIPC`, `volumes`, and `volumeMounts`.
 
 ### Kubernetes
 
