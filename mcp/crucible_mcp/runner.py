@@ -1,6 +1,7 @@
 """Asynchronous supervision for MCP-launched Crucible runs."""
 
 import json
+import lzma
 import os
 import subprocess
 import threading
@@ -288,7 +289,7 @@ class RunManager:
         self.store.transition(job_id, JobState.STARTING, runner_pid=process.pid)
         thread = threading.Thread(
             target=self._wait_for_completion,
-            args=(job_id, process, log, event_path),
+            args=(job_id, process, log, event_path, f"crucible-rickshaw-run-{session_id}"),
             daemon=True,
             name=f"mcp-run-{job_id}",
         )
@@ -296,14 +297,21 @@ class RunManager:
         thread.start()
 
     def _wait_for_completion(
-        self, job_id: str, process: subprocess.Popen, log: Any, event_path: Path
+        self,
+        job_id: str,
+        process: subprocess.Popen,
+        log: Any,
+        event_path: Path,
+        container_name: str,
     ) -> None:
         self.store.transition(job_id, JobState.RUNNING)
         event_position = 0
         while process.poll() is None:
             event_position = self._consume_events(job_id, event_path, event_position)
+            self._capture_container_id(job_id, container_name)
             time.sleep(0.1)
         event_position = self._consume_events(job_id, event_path, event_position)
+        self._backfill_identifiers(job_id)
         exit_code = process.returncode
         log.close()
         self._threads.pop(job_id, None)
@@ -324,6 +332,56 @@ class RunManager:
                 error_message=f"crucible run exited with status {exit_code}",
             )
 
+    def _capture_container_id(self, job_id: str, container_name: str) -> None:
+        try:
+            result = subprocess.run(
+                ["podman", "inspect", "--format", "{{.Id}}", container_name],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        container_id = result.stdout.strip()
+        if result.returncode != 0 or not container_id:
+            return
+        job = self.store.get(job_id)
+        if job.runner_container_id != container_id:
+            self.store.transition(job_id, job.state, runner_container_id=container_id)
+
+    def _backfill_identifiers(self, job_id: str) -> None:
+        job = self.store.get(job_id)
+        if not job.run_directory:
+            return
+        updates: dict[str, str] = {}
+        rickshaw_data = self._read_json_artifact(Path(job.run_directory) / "run" / "rickshaw-run.json")
+        if rickshaw_data is None:
+            rickshaw_data = self._read_json_artifact(
+                Path(job.run_directory) / "run" / "rickshaw-run.json.xz"
+            )
+        if isinstance(rickshaw_data, dict):
+            value = rickshaw_data.get("run-id") or rickshaw_data.get("id")
+            if isinstance(value, str) and value:
+                updates["rickshaw_run_id"] = value
+
+        summary = self._read_json_artifact(Path(job.run_directory) / "run" / "result-summary.json")
+        if isinstance(summary, dict):
+            value = summary.get("cdm_run_id") or summary.get("cdm-run-id")
+            if isinstance(value, str) and value:
+                updates["cdm_run_id"] = value
+        if updates:
+            self.store.transition(job_id, job.state, **updates)
+
+    @staticmethod
+    def _read_json_artifact(path: Path) -> Any | None:
+        try:
+            if path.suffix == ".xz":
+                return json.loads(lzma.open(path, "rt", encoding="utf-8").read())
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, lzma.LZMAError, json.JSONDecodeError):
+            return None
+
     def _consume_events(self, job_id: str, event_path: Path, position: int) -> int:
         if not event_path.is_file():
             return position
@@ -338,6 +396,9 @@ class RunManager:
                 updates = {}
                 if event.get("run_directory"):
                     updates["run_directory"] = event["run_directory"]
+                for field in ("rickshaw_run_id", "cdm_run_id", "runner_container_id"):
+                    if isinstance(event.get(field), str) and event[field]:
+                        updates[field] = event[field]
                 if state in {
                     JobState.STARTING,
                     JobState.RUNNING,

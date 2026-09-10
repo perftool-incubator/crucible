@@ -11,9 +11,18 @@ function mcp_event() {
     fi
     local state="${1}"
     local run_directory="${2:-}"
+    local rickshaw_run_id="${3:-}"
+    local cdm_run_id="${4:-}"
+    local runner_container_id="${5:-}"
     if [ -n "${run_directory}" ]; then
         jq -cn --arg state "${state}" --arg run_directory "${run_directory}" \
-            '{state: $state, run_directory: $run_directory}' >> "${CRUCIBLE_MCP_EVENT_FILE}"
+            --arg rickshaw_run_id "${rickshaw_run_id}" --arg cdm_run_id "${cdm_run_id}" \
+            --arg runner_container_id "${runner_container_id}" \
+            '{state: $state, run_directory: $run_directory} +
+             (if $rickshaw_run_id != "" then {rickshaw_run_id: $rickshaw_run_id} else {} end) +
+             (if $cdm_run_id != "" then {cdm_run_id: $cdm_run_id} else {} end) +
+             (if $runner_container_id != "" then {runner_container_id: $runner_container_id} else {} end)' \
+            >> "${CRUCIBLE_MCP_EVENT_FILE}"
     else
         jq -cn --arg state "${state}" '{state: $state}' >> "${CRUCIBLE_MCP_EVENT_FILE}"
     fi
@@ -615,7 +624,10 @@ elif [ "${1}" == "run" ]; then
         EXIT_VAL=${RC}
     fi
     if [ ${EXIT_VAL} == 0 ]; then
-        mcp_event completed "${base_run_dir}"
+        rickshaw_run_id=$(extract_run_id "${base_run_dir}" 2>/dev/null)
+        cdm_run_id=$(jq -r '.cdm_run_id // .["cdm-run-id"] // empty' \
+            "${base_run_dir}/run/result-summary.json" 2>/dev/null)
+        mcp_event completed "${base_run_dir}" "${rickshaw_run_id}" "${cdm_run_id}"
     fi
 elif [ "${1}" == "archive" ]; then
     shift

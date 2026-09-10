@@ -77,6 +77,41 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(failed.state.value, "failed")
         self.assertEqual(failed.exit_code, 7)
 
+    def test_lifecycle_event_persists_correlation_identifiers(self):
+        job, _ = self.store.create_or_get("key-identifiers", {"run": 1})
+        event_path = self.root / "events.jsonl"
+        event_path.write_text(
+            '{"state":"starting","run_directory":"/runs/one",'
+            '"rickshaw_run_id":"rickshaw-1","cdm_run_id":"cdm-1",'
+            '"runner_container_id":"container-1"}\n',
+            encoding="utf-8",
+        )
+        self.manager._consume_events(job.mcp_job_id, event_path, 0)
+        updated = self.store.get(job.mcp_job_id)
+        self.assertEqual(updated.rickshaw_run_id, "rickshaw-1")
+        self.assertEqual(updated.cdm_run_id, "cdm-1")
+        self.assertEqual(updated.runner_container_id, "container-1")
+
+    def test_completed_run_backfills_rickshaw_and_cdm_identifiers(self):
+        job, _ = self.store.create_or_get("key-backfill", {"run": 1})
+        run_directory = self.root / "backfill-run"
+        (run_directory / "run").mkdir(parents=True)
+        (run_directory / "run" / "rickshaw-run.json").write_text(
+            '{"run-id":"rickshaw-2"}', encoding="utf-8"
+        )
+        (run_directory / "run" / "result-summary.json").write_text(
+            '{"cdm_run_id":"cdm-2"}', encoding="utf-8"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(run_directory),
+        )
+        self.manager._backfill_identifiers(job.mcp_job_id)
+        updated = self.store.get(job.mcp_job_id)
+        self.assertEqual(updated.rickshaw_run_id, "rickshaw-2")
+        self.assertEqual(updated.cdm_run_id, "cdm-2")
+
     def test_staging_failure_is_persisted_as_infrastructure_failure(self):
         document = {"benchmarks": [{"name": "example"}]}
         with patch.object(Path, "write_text", side_effect=OSError("no space left on device")):
