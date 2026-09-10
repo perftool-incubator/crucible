@@ -200,6 +200,11 @@ class MCPHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _empty(self, status: int) -> None:
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _authorized(self) -> bool:
         authorization = self.headers.get("Authorization", "")
         if not authorization.startswith("Bearer "):
@@ -214,6 +219,12 @@ class MCPHandler(BaseHTTPRequestHandler):
         return matched
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        if self.path == "/mcp":
+            self.send_response(405)
+            self.send_header("Allow", "POST")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path != "/health":
             self._json(404, {"error": "not_found"})
             return
@@ -238,6 +249,11 @@ class MCPHandler(BaseHTTPRequestHandler):
             if length <= 0 or length > self.server.max_request_bytes:
                 raise ValueError("request size is outside configured bounds")
             request = json.loads(self.rfile.read(length))
+            if self._is_notification(request):
+                operation = request["method"]
+                self._audit(operation, "success")
+                self._empty(202)
+                return
             response = self._dispatch(request)
         except (ValueError, json.JSONDecodeError) as exc:
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": str(exc)}}
@@ -250,6 +266,15 @@ class MCPHandler(BaseHTTPRequestHandler):
             job_id=arguments.get("mcp_job_id") if isinstance(arguments, dict) else None,
         )
         self._json(200, response)
+
+    @staticmethod
+    def _is_notification(request: Any) -> bool:
+        return (
+            isinstance(request, dict)
+            and request.get("jsonrpc") == "2.0"
+            and isinstance(request.get("method"), str)
+            and "id" not in request
+        )
 
     def _audit(self, operation: str, outcome: str, job_id: str | None = None) -> None:
         audit = getattr(self.server, "audit", None)

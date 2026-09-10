@@ -51,12 +51,36 @@ class TestServer(unittest.TestCase):
         response = connection.getresponse()
         return response.status, json.loads(response.read())
 
+    def request_raw(self, method, path, body=None, token=None):
+        connection = HTTPConnection("127.0.0.1", self.server.server_port)
+        headers = {}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        return response.status, response.read(), response.headers
+
     def test_health_requires_authentication(self):
         status, _ = self.request("GET", "/health")
         self.assertEqual(status, 401)
         status, payload = self.request("GET", "/health", token=self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "ok")
+
+    def test_initialized_notification_returns_accepted_without_body(self):
+        body = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        status, payload, headers = self.request_raw("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 202)
+        self.assertEqual(payload, b"")
+        self.assertEqual(headers["Content-Length"], "0")
+
+    def test_mcp_get_returns_method_not_allowed_without_body(self):
+        status, payload, headers = self.request_raw("GET", "/mcp", token=self.token)
+        self.assertEqual(status, 405)
+        self.assertEqual(payload, b"")
+        self.assertEqual(headers["Allow"], "POST")
 
     def test_ipv6_server_uses_ipv6_address_family(self):
         self.assertEqual(IPv6ThreadingHTTPServer.address_family, socket.AF_INET6)
