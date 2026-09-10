@@ -51,13 +51,15 @@ class TestServer(unittest.TestCase):
         response = connection.getresponse()
         return response.status, json.loads(response.read())
 
-    def request_raw(self, method, path, body=None, token=None):
+    def request_raw(self, method, path, body=None, token=None, extra_headers=None):
         connection = HTTPConnection("127.0.0.1", self.server.server_port)
         headers = {}
         if body is not None:
             headers["Content-Type"] = "application/json"
         if token is not None:
             headers["Authorization"] = f"Bearer {token}"
+        if extra_headers:
+            headers.update(extra_headers)
         connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         return response.status, response.read(), response.headers
@@ -81,6 +83,34 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 405)
         self.assertEqual(payload, b"")
         self.assertEqual(headers["Allow"], "POST")
+
+    def test_mcp_origin_validation_allows_local_and_rejects_remote_origins(self):
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        for origin in (
+            f"http://127.0.0.1:{self.server.server_port}",
+            f"http://localhost:{self.server.server_port}",
+        ):
+            status, payload, _ = self.request_raw(
+                "POST", "/mcp", body, self.token, {"Origin": origin}
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(payload, b'{"jsonrpc":"2.0","id":1,"result":{}}')
+
+        status, payload, _ = self.request_raw(
+            "POST",
+            "/mcp",
+            body,
+            self.token,
+            {"Origin": "http://evil.example:443"},
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(payload)["error"], "origin_not_allowed")
+
+        status, payload, _ = self.request_raw(
+            "POST", "/mcp", body, self.token, {"Origin": "null"}
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(payload)["error"], "origin_not_allowed")
 
     def test_ipv6_server_uses_ipv6_address_family(self):
         self.assertEqual(IPv6ThreadingHTTPServer.address_family, socket.AF_INET6)

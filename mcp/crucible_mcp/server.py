@@ -12,6 +12,7 @@ import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from jsonschema import Draft201909Validator
 
@@ -243,6 +244,10 @@ class MCPHandler(BaseHTTPRequestHandler):
             self._audit("mcp", "denied")
             self._json(401, {"error": "unauthorized"})
             return
+        if not self._origin_allowed():
+            self._audit("mcp", "denied")
+            self._json(403, {"error": "origin_not_allowed"})
+            return
         request: Any = {}
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -266,6 +271,24 @@ class MCPHandler(BaseHTTPRequestHandler):
             job_id=arguments.get("mcp_job_id") if isinstance(arguments, dict) else None,
         )
         self._json(200, response)
+
+    def _origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        try:
+            parsed = urlsplit(origin)
+            port = parsed.port
+        except ValueError:
+            return False
+        if parsed.scheme != "http" or parsed.username or parsed.password:
+            return False
+        if parsed.path or parsed.query or parsed.fragment or port != self.server.server_port:
+            return False
+        allowed_hosts = {"localhost", "127.0.0.1"}
+        if isinstance(self.server, IPv6ThreadingHTTPServer):
+            allowed_hosts.add("::1")
+        return parsed.hostname in allowed_hosts
 
     @staticmethod
     def _is_notification(request: Any) -> bool:
