@@ -171,6 +171,18 @@ function find_available_port() {
     local service_name=$1
     local desired_port=$2
     local max_attempts=${3:-100}
+    local port_min port_max
+
+    port_min=$(jq_query ${SERVICES_CFG_SCHEMA} '.["$defs"].port.minimum')
+    port_max=$(jq_query ${SERVICES_CFG_SCHEMA} '.["$defs"].port.maximum')
+    if [ -z "${port_min}" -o -z "${port_max}" ]; then
+        echo "ERROR: Could not read service port bounds from ${SERVICES_CFG_SCHEMA}" >&2
+        return 1
+    fi
+    if [ ${desired_port} -lt ${port_min} -o ${desired_port} -gt ${port_max} ]; then
+        echo "ERROR: ${service_name} configured port ${desired_port} is outside the valid range ${port_min}-${port_max}" >&2
+        return 1
+    fi
 
     local port=${desired_port}
     local attempt=0
@@ -184,10 +196,13 @@ function find_available_port() {
             return 0
         fi
         (( port++ ))
+        if [ ${port} -gt ${port_max} ]; then
+            port=${port_min}
+        fi
         (( attempt++ ))
     done
 
-    echo "ERROR: Could not find an available port for ${service_name} (tried ${desired_port}-$((desired_port + max_attempts - 1)))" >&2
+    echo "ERROR: Could not find an available port for ${service_name} after ${max_attempts} attempts in the valid range ${port_min}-${port_max}" >&2
     return 1
 }
 
