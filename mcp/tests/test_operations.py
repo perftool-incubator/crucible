@@ -90,6 +90,19 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["periods"], [])
         self.assertEqual(request.call_count, 5)
 
+    def test_run_tag_operations_update_local_metadata(self):
+        run_directory = self.root / "run" / "result"
+        metadata_directory = run_directory / "run"
+        metadata_directory.mkdir(parents=True)
+        metadata_path = metadata_directory / "rickshaw-run.json"
+        metadata_path.write_text(json.dumps({"tags": [{"name": "old", "val": "1"}]}), encoding="utf-8")
+
+        self.assertEqual(self.operations.list_run_tags(run_directory)["tags"][0]["name"], "old")
+        added = self.operations.add_run_tags(run_directory, ["old:2", "new:value"])
+        self.assertEqual({tag["name"]: tag["val"] for tag in added["tags"]}, {"old": "2", "new": "value"})
+        removed = self.operations.remove_run_tags(run_directory, ["old"])
+        self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
+
     def test_list_run_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},

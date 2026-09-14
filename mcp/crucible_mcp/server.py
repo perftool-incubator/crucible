@@ -42,6 +42,9 @@ TOOL_NAMES = (
     "get_run_summary",
     "postprocess_run",
     "index_run",
+    "list_run_tags",
+    "add_run_tags",
+    "remove_run_tags",
     "search_documentation",
 )
 
@@ -197,6 +200,35 @@ TOOL_DEFINITIONS = (
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1}},
             "required": ["idempotency_key"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
+            "additionalProperties": False},
+    },
+    {
+        "name": "list_run_tags",
+        "description": "List tags from an approved local run result.",
+        "inputSchema": {"type": "object", "properties": {
+            "run_path": {"type": "string", "minLength": 1},
+            "mcp_job_id": {"type": "string", "minLength": 1}},
+            "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
+            "additionalProperties": False},
+    },
+    {
+        "name": "add_run_tags",
+        "description": "Add or replace tags on an approved local run result.",
+        "inputSchema": {"type": "object", "properties": {
+            "run_path": {"type": "string", "minLength": 1},
+            "mcp_job_id": {"type": "string", "minLength": 1},
+            "tags": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}},
+            "required": ["tags"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
+            "additionalProperties": False},
+    },
+    {
+        "name": "remove_run_tags",
+        "description": "Remove named tags from an approved local run result.",
+        "inputSchema": {"type": "object", "properties": {
+            "run_path": {"type": "string", "minLength": 1},
+            "mcp_job_id": {"type": "string", "minLength": 1},
+            "names": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}},
+            "required": ["names"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
             "additionalProperties": False},
     },
     {
@@ -511,6 +543,22 @@ class MCPHandler(BaseHTTPRequestHandler):
                     processing_path,
                 )
                 value = {"created": created, "job": _job_status(job)}
+            elif name in {"list_run_tags", "add_run_tags", "remove_run_tags"}:
+                if "run_path" in arguments:
+                    tag_path = Path(arguments["run_path"])
+                else:
+                    source_job = self.server.jobs.get(arguments["mcp_job_id"])
+                    if source_job.state != JobState.COMPLETED:
+                        return self._error(request_id, -32000, "source job has not completed")
+                    if not source_job.run_directory:
+                        return self._error(request_id, -32000, "source job has no run directory")
+                    tag_path = Path(source_job.run_directory)
+                if name == "list_run_tags":
+                    value = self.server.operations.list_run_tags(tag_path)
+                elif name == "add_run_tags":
+                    value = self.server.operations.add_run_tags(tag_path, arguments["tags"])
+                else:
+                    value = self.server.operations.remove_run_tags(tag_path, arguments["names"])
             elif name == "search_documentation":
                 value = self.server.operations.search_documentation(
                     arguments["query"], arguments.get("limit", 10)

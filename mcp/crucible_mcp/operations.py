@@ -1,7 +1,13 @@
 """Typed, non-execution Crucible operations for the MCP contract."""
 
 import json
+import lzma
+import os
+import re
+import shutil
 import sqlite3
+import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -75,6 +81,9 @@ class CrucibleOperations:
                 "get_run_summary",
                 "postprocess_run",
                 "index_run",
+                "list_run_tags",
+                "add_run_tags",
+                "remove_run_tags",
                 "search_documentation",
             ],
         }
@@ -106,6 +115,81 @@ class CrucibleOperations:
         except ValueError as exc:
             raise OperationError("user", str(exc), "invalid_query") from exc
         return {"query": query, "resources": resources, "count": len(resources)}
+
+    def list_run_tags(self, run_directory: Path) -> dict[str, Any]:
+        _, document = self._load_run_metadata(run_directory)
+        return {"run_path": str(run_directory), "tags": document.get("tags", [])}
+
+    def add_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
+        path, document = self._load_run_metadata(run_directory)
+        current = document.setdefault("tags", [])
+        for raw_tag in tags:
+            match = re.fullmatch(r"([a-zA-Z0-9-_\s]+):([a-zA-Z0-9-_:\s\\/\.]+)", raw_tag)
+            if match is None:
+                raise OperationError("user", f"invalid tag: {raw_tag}", "invalid_tag")
+            existing = next((tag for tag in current if tag.get("name") == match.group(1)), None)
+            if existing is None:
+                current.append({"name": match.group(1), "val": match.group(2)})
+            else:
+                existing["val"] = match.group(2)
+        self._write_run_metadata(path, document)
+        return {"run_path": str(run_directory), "tags": current}
+
+    def remove_run_tags(self, run_directory: Path, names: list[str]) -> dict[str, Any]:
+        path, document = self._load_run_metadata(run_directory)
+        if any(not re.fullmatch(r"[a-zA-Z0-9-_\s]+", name) for name in names):
+            raise OperationError("user", "tag names must not include values", "invalid_tag")
+        existing = document.get("tags", [])
+        document["tags"] = [tag for tag in existing if tag.get("name") not in names]
+        if len(document["tags"]) == len(existing):
+            raise OperationError("user", "no matching tags were found", "tag_not_found")
+        self._write_run_metadata(path, document)
+        return {"run_path": str(run_directory), "tags": document["tags"]}
+
+    @staticmethod
+    def _run_metadata_path(run_directory: Path) -> Path:
+        for relative in ("run/rickshaw-run.json.xz", "run/rickshaw-run.json",
+                         "config/rickshaw-run.json.xz", "config/rickshaw-run.json"):
+            path = run_directory / relative
+            if path.is_file():
+                return path
+        raise OperationError("user", "run metadata is unavailable", "invalid_run")
+
+    def _load_run_metadata(self, run_directory: Path) -> tuple[Path, dict[str, Any]]:
+        try:
+            canonical = self.run_policy.canonical_directory(run_directory)
+            path = self._run_metadata_path(canonical)
+            opener = lzma.open if path.suffix == ".xz" else open
+            with opener(path, "rt", encoding="utf-8") as stream:
+                document = json.load(stream)
+        except OperationError:
+            raise
+        except (OSError, lzma.LZMAError, json.JSONDecodeError) as exc:
+            raise OperationError("user", "run metadata is not valid JSON", "invalid_run") from exc
+        if not isinstance(document, dict):
+            raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
+        return path, document
+
+    @staticmethod
+    def _write_run_metadata(path: Path, document: dict[str, Any]) -> None:
+        backup = path.with_name(f"{path.name}.mcp-backup-{time.time_ns()}")
+        temporary = None
+        try:
+            shutil.copy2(path, backup)
+            fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+            os.close(fd)
+            temporary = Path(temporary_name)
+            if path.suffix == ".xz":
+                with lzma.open(temporary, "wt", encoding="utf-8") as stream:
+                    json.dump(document, stream, indent=4, sort_keys=True)
+            else:
+                temporary.write_text(json.dumps(document, indent=4, sort_keys=True), encoding="utf-8")
+            os.chmod(temporary, path.stat().st_mode & 0o777)
+            os.replace(temporary, path)
+        except (OSError, lzma.LZMAError, TypeError) as exc:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            raise OperationError("framework", "could not update run metadata", "write_failed") from exc
 
     def list_benchmarks(self) -> list[dict[str, Any]]:
         root = self.crucible_home / "subprojects" / "benchmarks"
