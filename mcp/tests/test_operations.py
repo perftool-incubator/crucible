@@ -121,6 +121,17 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["runs"][0]["status"], "complete")
         self.assertEqual(result["runs"][1]["status"], "incomplete")
 
+    def test_get_local_run_summary_reads_local_artifact(self):
+        run_directory = self.root / "run" / "completed-run"
+        summary_path = run_directory / "run" / "result-summary.json"
+        summary_path.parent.mkdir(parents=True)
+        summary_path.write_text(json.dumps({"benchmark": "fio", "samples": 1}), encoding="utf-8")
+
+        result = self.operations.get_local_run_summary(run_directory)
+
+        self.assertEqual(result["run_path"], str(run_directory.resolve()))
+        self.assertEqual(result["summary"], {"benchmark": "fio", "samples": 1})
+
     def test_list_indexed_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},

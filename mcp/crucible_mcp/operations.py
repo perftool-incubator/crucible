@@ -69,6 +69,7 @@ class CrucibleOperations:
                 "describe_benchmark",
                 "list_tools",
                 "list_local_runs",
+                "get_local_run_summary",
                 "list_indexed_results",
                 "get_indexed_result",
                 "list_indexed_periods",
@@ -192,6 +193,36 @@ class CrucibleOperations:
             if len(entries) >= limit:
                 break
         return {"runs": entries, "count": len(entries)}
+
+    def get_local_run_summary(self, run_path: Path, max_bytes: int = 1_048_576) -> dict[str, Any]:
+        """Read a bounded summary from an approved local run artifact."""
+
+        try:
+            canonical = self.run_policy.canonical_directory(run_path)
+            summary_path = canonical / "run" / "result-summary.json"
+            size = summary_path.stat().st_size
+            if size > max_bytes:
+                raise OperationError(
+                    "framework", "result summary exceeds size limit", "result_too_large"
+                )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except OperationError:
+            raise
+        except FileNotFoundError as exc:
+            raise OperationError(
+                "user", "local run summary is unavailable", "result_unavailable"
+            ) from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OperationError(
+                "user", "local run summary is not valid JSON", "invalid_result"
+            ) from exc
+        if not isinstance(summary, dict):
+            raise OperationError("user", "local run summary must be a JSON object", "invalid_result")
+        return {
+            "run_path": str(canonical),
+            "result_status": "available",
+            "summary": summary,
+        }
 
     @staticmethod
     def _run_metadata_path(run_directory: Path) -> Path:

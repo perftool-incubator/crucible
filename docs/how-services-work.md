@@ -137,6 +137,7 @@ through the standard `tools/list` request; the current interface is:
 | `list_tools` | List installed Crucible tools and their metadata. |
 | `list_benchmarks` | List installed benchmarks. |
 | `list_local_runs` | List local run artifacts from approved run roots. |
+| `get_local_run_summary` | Read a completed result summary from an approved local run artifact. |
 | `describe_benchmark` | Return metadata for one installed benchmark. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `start_run` | Submit an asynchronous, idempotent Crucible run. |
@@ -188,6 +189,8 @@ The postprocessing and indexing tools accept either an approved run directory
 or a completed MCP job ID as their source.
 `delete_indexed_result` accepts an indexed run ID and operates only on the
 configured OpenSearch/CDM result; it does not remove local run files.
+`get_local_run_summary` reads the local `run/result-summary.json` artifact and
+does not query CDM.
 Tag operations accept an approved run directory or a completed MCP job ID and
 update the local `rickshaw-run.json[.xz]` artifact. They do not automatically
 re-index the result in CDM; run `index_local_run` separately when the indexed result
