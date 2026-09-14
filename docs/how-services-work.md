@@ -90,8 +90,9 @@ require remote builder hosts.
 ### MCP server
 
 The MCP server provides an authenticated interface for discovery,
-validation, run submission, status polling, bounded logs, and result
-summaries. It is disabled for `crucible start all` by default and can be
+validation, run submission, post-processing, indexing, status polling,
+bounded logs, and result summaries. It is disabled for `crucible start all`
+by default and can be
 enabled in `config/services.json`:
 
 ```json
@@ -138,6 +139,8 @@ through the standard `tools/list` request; the current interface is:
 | `describe_benchmark` | Return metadata for one installed benchmark. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `start_run` | Submit an asynchronous, idempotent Crucible run. |
+| `postprocess_run` | Post-process an approved run directory asynchronously. |
+| `index_run` | Generate CDM documents and index an approved run directory asynchronously. |
 | `get_run_status` | Poll the lifecycle and result-readiness state of a submitted run. |
 | `get_run_logs` | Read a bounded slice of runner output for a submitted run. |
 | `get_run_summary` | Retrieve the summary of a completed submitted run. |
@@ -165,7 +168,10 @@ The `search_documentation` tool is available for clients that do not provide a
 resource browser. It returns matching resource metadata, after which the client
 can retrieve the selected document with `resources/read`.
 
-The discovery, result, metric, and log tools are read-only.
+The discovery, result, metric, log, and documentation tools are read-only.
+`start_run`, `postprocess_run`, and `index_run` create asynchronous jobs;
+the latter two accept either an approved run directory or a completed MCP job
+ID as their source.
 Metric queries should pass a `primary_period_id` returned by
 `list_run_periods` as the `period` argument; this avoids combining distinct
 primary periods implicitly.
