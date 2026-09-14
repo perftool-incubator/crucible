@@ -40,6 +40,7 @@ TOOL_NAMES = (
     "get_run_status",
     "get_run_logs",
     "get_run_summary",
+    "search_documentation",
 )
 
 _EMPTY_INPUT = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -173,6 +174,19 @@ TOOL_DEFINITIONS = (
             "type": "object",
             "properties": {"mcp_job_id": {"type": "string", "minLength": 1}},
             "required": ["mcp_job_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "search_documentation",
+        "description": "Search curated user-facing Crucible documentation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["query"],
             "additionalProperties": False,
         },
     },
@@ -329,7 +343,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                 "id": request_id,
                 "result": {
                     "protocolVersion": "2025-06-18",
-                    "capabilities": {"tools": {}},
+                    "capabilities": {"tools": {}, "resources": {}},
                     "serverInfo": {"name": "crucible-mcp", "version": "0.1.0"},
                 },
             }
@@ -340,6 +354,25 @@ class MCPHandler(BaseHTTPRequestHandler):
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": {"tools": list(TOOL_DEFINITIONS)},
+            }
+        if method == "resources/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {"resources": self.server.operations.list_documentation()},
+            }
+        if method == "resources/read":
+            uri = params.get("uri")
+            if not isinstance(uri, str) or not uri:
+                return self._error(request_id, -32602, "uri must be a string")
+            try:
+                resource = self.server.operations.read_documentation(uri)
+            except OperationError as exc:
+                return self._error(request_id, -32000, json.dumps(exc.as_dict()))
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {"contents": [resource]},
             }
         if method == "tools/call":
             return self._call_tool(request_id, params)
@@ -440,6 +473,10 @@ class MCPHandler(BaseHTTPRequestHandler):
                 if "mcp_job_id" not in arguments:
                     return self._error(request_id, -32602, "mcp_job_id is required")
                 value = self.server.run_manager.get_summary(arguments["mcp_job_id"])
+            elif name == "search_documentation":
+                value = self.server.operations.search_documentation(
+                    arguments["query"], arguments.get("limit", 10)
+                )
             else:
                 return self._error(request_id, -32602, "unknown tool")
         except JobConflictError as exc:

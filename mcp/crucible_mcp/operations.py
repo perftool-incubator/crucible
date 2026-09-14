@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from jsonschema import Draft201909Validator
 
+from .documentation import DocumentationCatalog
 from .policy import InputPolicy, PolicyError
 
 
@@ -44,6 +45,7 @@ class CrucibleOperations:
         self.crucible_home = Path(crucible_home).resolve()
         self.cdm_base_url = cdm_base_url.rstrip("/")
         self.log_db = Path(log_db) if log_db else None
+        self.documentation = DocumentationCatalog(self.crucible_home)
         self.input_policy = input_policy or InputPolicy(
             [self.crucible_home / "mcp" / "inputs"]
         )
@@ -69,8 +71,37 @@ class CrucibleOperations:
                 "get_run_status",
                 "get_run_logs",
                 "get_run_summary",
+                "search_documentation",
             ],
         }
+
+    def list_documentation(self) -> list[dict[str, Any]]:
+        """List curated user-facing documentation as MCP resources."""
+
+        return self.documentation.list_resources()
+
+    def read_documentation(self, uri: str) -> dict[str, Any]:
+        """Read one curated documentation resource by stable URI."""
+
+        try:
+            return self.documentation.read_resource(uri)
+        except (FileNotFoundError, ValueError) as exc:
+            raise OperationError(
+                "user", str(exc), "documentation_not_found"
+            ) from exc
+
+    def search_documentation(self, query: str, limit: int = 10) -> dict[str, Any]:
+        """Search curated documentation without accepting filesystem paths."""
+
+        if limit < 1 or limit > 20:
+            raise OperationError(
+                "user", "limit must be between 1 and 20", "invalid_limit"
+            )
+        try:
+            resources = self.documentation.search(query, limit)
+        except ValueError as exc:
+            raise OperationError("user", str(exc), "invalid_query") from exc
+        return {"query": query, "resources": resources, "count": len(resources)}
 
     def list_benchmarks(self) -> list[dict[str, Any]]:
         root = self.crucible_home / "subprojects" / "benchmarks"

@@ -147,6 +147,20 @@ through the standard `tools/list` request; the current interface is:
 | `get_metric` | Query metric data for a historical run with bounded range and resolution options. |
 | `list_log_sessions` | List recent logger sessions without returning their full contents. |
 | `get_log_info` | Return aggregate counts from the logger database. |
+| `search_documentation` | Search the curated user-facing Crucible documentation catalog. |
+
+#### MCP documentation resources
+
+The MCP server also exposes curated user-facing documentation through the
+standard MCP resource interface. Clients can use `resources/list` to discover
+available documents and `resources/read` to retrieve one by URI. Documentation
+resources use URIs such as `crucible://docs/run-files` and are restricted to an
+allowlisted set of Markdown files under Crucible's `docs/` directory; arbitrary
+filesystem paths are not exposed.
+
+The `search_documentation` tool is available for clients that do not provide a
+resource browser. It returns matching resource metadata, after which the client
+can retrieve the selected document with `resources/read`.
 
 The discovery, result, metric, and log tools are read-only.
 Metric queries should pass a `primary_period_id` returned by

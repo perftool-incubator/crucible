@@ -120,6 +120,7 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["result"]["serverInfo"]["name"], "crucible-mcp")
+        self.assertIn("resources", payload["result"]["capabilities"])
 
         body = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         _, payload = self.request("POST", "/mcp", body, self.token)
@@ -130,10 +131,58 @@ class TestServer(unittest.TestCase):
         self.assertIn("inputSchema", tools["get_run_logs"])
         for tool_name in (
             "list_tools", "list_results", "get_result", "list_run_periods", "get_metric",
-            "list_log_sessions", "get_log_info",
+            "list_log_sessions", "get_log_info", "search_documentation",
         ):
             self.assertIn(tool_name, tools)
             self.assertIn("inputSchema", tools[tool_name])
+
+    def test_documentation_resources_are_curated_and_readable(self):
+        body = json.dumps({"jsonrpc": "2.0", "id": 11, "method": "resources/list"})
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        resources = payload["result"]["resources"]
+        resource = next(item for item in resources if item["name"] == "run-files")
+        self.assertEqual(resource["uri"], "crucible://docs/run-files")
+        self.assertEqual(resource["mimeType"], "text/markdown")
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "resources/read",
+            "params": {"uri": resource["uri"]},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        contents = payload["result"]["contents"]
+        self.assertEqual(contents[0]["uri"], resource["uri"])
+        self.assertIn("run file", contents[0]["text"].lower())
+
+    def test_documentation_resource_rejects_arbitrary_paths(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "resources/read",
+            "params": {"uri": "file:///etc/passwd"},
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+
+    def test_documentation_search_returns_resource_metadata(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {
+                "name": "search_documentation",
+                "arguments": {"query": "run-file format", "limit": 3},
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        value = payload["result"]["structuredContent"]
+        self.assertLessEqual(value["count"], 3)
+        self.assertTrue(any(item["name"] == "run-files" for item in value["resources"]))
 
     def test_crucible_info_is_structured(self):
         body = json.dumps({
