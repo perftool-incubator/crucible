@@ -318,6 +318,7 @@ class CrucibleOperations:
             raise OperationError("user", "archive must be a .tar.xz file", "invalid_archive")
         if self.archive_root not in resolved.parents:
             raise OperationError("authorization", "archive is outside the local archive root", "path_rejected")
+        self._validate_legacy_basename(resolved, "archive")
         return resolved
 
     def canonical_archive_run(self, requested_path: Path) -> Path:
@@ -333,7 +334,17 @@ class CrucibleOperations:
                 "archive target must be a direct child of the local run root",
                 "run_path_rejected",
             )
+        self._validate_legacy_basename(candidate, "run")
         return candidate
+
+    @staticmethod
+    def _validate_legacy_basename(path: Path, label: str) -> None:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", path.name) is None:
+            raise OperationError(
+                "user",
+                f"{label} name contains unsupported characters",
+                "invalid_path",
+            )
 
     @staticmethod
     def _run_metadata_path(run_directory: Path) -> Path:

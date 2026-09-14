@@ -294,6 +294,21 @@ class TestCrucibleOperations(unittest.TestCase):
             self.operations.canonical_archive_run(nested)
         self.assertEqual(raised.exception.code, "run_path_rejected")
 
+    def test_archive_paths_reject_shell_unsafe_basenames(self):
+        unsafe_run = self.root / "run" / "run;touch-pwned"
+        unsafe_run.mkdir(parents=True)
+        with self.assertRaises(OperationError) as run_error:
+            self.operations.canonical_archive_run(unsafe_run)
+        self.assertEqual(run_error.exception.code, "invalid_path")
+
+        archive_root = self.root / "archive"
+        archive_root.mkdir()
+        unsafe_archive = archive_root / "archive$(touch-pwned).tar.xz"
+        unsafe_archive.write_bytes(b"archive")
+        with self.assertRaises(OperationError) as archive_error:
+            self.operations.canonical_local_archive(unsafe_archive)
+        self.assertEqual(archive_error.exception.code, "invalid_path")
+
     def test_list_indexed_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},
