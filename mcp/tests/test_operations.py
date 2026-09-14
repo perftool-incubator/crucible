@@ -130,6 +130,16 @@ class TestCrucibleOperations(unittest.TestCase):
 
         self.assertEqual(result["count"], 1)
 
+    def test_list_local_runs_keeps_config_only_metadata_incomplete(self):
+        run_directory = self.root / "run" / "config-only"
+        metadata_path = run_directory / "config" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(json.dumps({"run-id": "run-3"}), encoding="utf-8")
+
+        result = self.operations.list_local_runs()
+
+        self.assertEqual(result["runs"][0]["status"], "incomplete")
+
     def test_list_local_runs_excludes_mcp_supervision_root(self):
         supervision_root = self.root / "mcp-runs"
         (supervision_root / "job-1").mkdir(parents=True)
