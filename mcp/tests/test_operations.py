@@ -107,6 +107,22 @@ class TestCrucibleOperations(unittest.TestCase):
         removed = self.operations.remove_local_run_tags(run_directory, ["old"])
         self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
 
+    def test_tag_operations_reject_malformed_existing_tags(self):
+        run_directory = self.root / "run" / "malformed-tags"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        for malformed in (None, ["not-an-object"]):
+            metadata_path.write_text(json.dumps({"tags": malformed}), encoding="utf-8")
+            with self.subTest(malformed=malformed):
+                for operation in (
+                    lambda: self.operations.list_local_run_tags(run_directory),
+                    lambda: self.operations.add_local_run_tags(run_directory, ["new:value"]),
+                    lambda: self.operations.remove_local_run_tags(run_directory, ["old"]),
+                ):
+                    with self.assertRaises(OperationError) as raised:
+                        operation()
+                    self.assertEqual(raised.exception.code, "invalid_run")
+
     def test_concurrent_run_tag_updates_preserve_both_changes(self):
         run_directory = self.root / "run" / "concurrent"
         metadata_path = run_directory / "run" / "rickshaw-run.json"

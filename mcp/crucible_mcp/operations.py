@@ -135,13 +135,13 @@ class CrucibleOperations:
 
     def list_local_run_tags(self, run_directory: Path) -> dict[str, Any]:
         _, document = self._load_run_metadata(run_directory)
-        return {"run_path": str(run_directory), "tags": document.get("tags", [])}
+        return {"run_path": str(run_directory), "tags": self._validated_tags(document)}
 
     def add_local_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
         canonical = self._canonical_run_directory(run_directory)
         with self._tag_lock(canonical):
             path, document = self._load_run_metadata(canonical)
-            current = document.setdefault("tags", [])
+            current = self._validated_tags(document)
             for raw_tag in tags:
                 match = re.fullmatch(r"([a-zA-Z0-9-_\s]+):([a-zA-Z0-9-_:\s\\/\.]+)", raw_tag)
                 if match is None:
@@ -160,7 +160,7 @@ class CrucibleOperations:
             path, document = self._load_run_metadata(canonical)
             if any(not re.fullmatch(r"[a-zA-Z0-9-_\s]+", name) for name in names):
                 raise OperationError("user", "tag names must not include values", "invalid_tag")
-            existing = document.get("tags", [])
+            existing = self._validated_tags(document)
             document["tags"] = [tag for tag in existing if tag.get("name") not in names]
             if len(document["tags"]) == len(existing):
                 raise OperationError("user", "no matching tags were found", "tag_not_found")
@@ -170,6 +170,15 @@ class CrucibleOperations:
     def _tag_lock(self, run_directory: Path) -> threading.Lock:
         with self._tag_locks_guard:
             return self._tag_locks.setdefault(run_directory, threading.Lock())
+
+    @staticmethod
+    def _validated_tags(document: dict[str, Any]) -> list[dict[str, Any]]:
+        tags = document.setdefault("tags", [])
+        if not isinstance(tags, list) or any(not isinstance(tag, dict) for tag in tags):
+            raise OperationError(
+                "user", "run metadata tags must be a list of objects", "invalid_run"
+            )
+        return tags
 
     def list_local_runs(self, limit: int = 1000) -> dict[str, Any]:
         """List local run directories without querying indexed result data."""
