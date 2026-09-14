@@ -54,8 +54,11 @@ class CrucibleOperations:
         self.cdm_base_url = cdm_base_url.rstrip("/")
         self.log_db = Path(log_db) if log_db else None
         self.documentation = DocumentationCatalog(self.crucible_home)
-        self.local_run_root = (Path(run_root) if run_root else self.crucible_home / "run").resolve()
-        self.archive_root = self.local_run_root.parent / "archive"
+        configured_run_root = Path(run_root) if run_root else self.crucible_home / "run"
+        if not configured_run_root.is_absolute():
+            configured_run_root = self.crucible_home / configured_run_root
+        self.archive_root = (configured_run_root.parent / "archive").resolve()
+        self.local_run_root = configured_run_root.resolve()
         self.input_policy = input_policy or InputPolicy(
             [self.crucible_home / "mcp" / "inputs"]
         )

@@ -237,6 +237,20 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["archives"][0]["name"], "run-1.tar.xz")
 
+    def test_symlinked_run_root_uses_configured_archive_sibling(self):
+        physical_run_root = self.root / "mounted-runs"
+        physical_run_root.mkdir()
+        (self.root / "run").symlink_to(physical_run_root, target_is_directory=True)
+        archive_root = self.root / "archive"
+        archive_root.mkdir()
+        (archive_root / "run-1.tar.xz").write_bytes(b"archive")
+
+        operations = CrucibleOperations(self.root, run_root=self.root / "run")
+
+        result = operations.list_local_archives()
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["archives"][0]["name"], "run-1.tar.xz")
+
     def test_archive_policy_rejects_approved_run_root(self):
         (self.root / "run").mkdir()
         with self.assertRaisesRegex(ValueError, "must be below"):
