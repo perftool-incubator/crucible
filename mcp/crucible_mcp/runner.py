@@ -278,6 +278,12 @@ class RunManager:
         if job.operation in _MAINTENANCE_OPERATIONS:
             marker = self._processing_completion_marker(job)
             if marker.is_file():
+                if job.state == JobState.STARTING:
+                    lifecycle_state = {
+                        "postprocess": JobState.POSTPROCESSING,
+                        "index": JobState.INDEXING,
+                    }.get(job.operation, JobState.RUNNING)
+                    job = self.store.transition(job.mcp_job_id, lifecycle_state)
                 return self.store.transition(
                     job.mcp_job_id,
                     JobState.COMPLETED,

@@ -278,7 +278,6 @@ class TestRunManager(unittest.TestCase):
             run_directory="run-2",
             supervision_directory=str(supervision),
         )
-        self.store.transition(job.mcp_job_id, JobState.RUNNING)
         (supervision / "processing-complete").write_text("delete_indexed_result\n")
 
         recovered = self.manager._resolve_or_fail(self.store.get(job.mcp_job_id))
