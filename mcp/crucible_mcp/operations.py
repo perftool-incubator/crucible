@@ -660,12 +660,7 @@ class CrucibleOperations:
             raise OperationError("user", "stream must be stdout or stderr", "invalid_stream")
         pattern = None
         if grep is not None:
-            if len(grep) > 256:
-                raise OperationError("user", "grep pattern is too long", "invalid_grep")
-            try:
-                pattern = re.compile(grep)
-            except re.error as exc:
-                raise OperationError("user", "grep pattern is invalid", "invalid_grep") from exc
+            pattern = self._compile_log_pattern(grep, "grep")
         if self.log_db is None:
             raise OperationError("framework", "log database is not configured", "log_unavailable")
         try:
@@ -733,10 +728,7 @@ class CrucibleOperations:
 
         if not isinstance(query, str) or not query or len(query) > 256:
             raise OperationError("user", "query must be 1..256 characters", "invalid_query")
-        try:
-            pattern = re.compile(query)
-        except re.error as exc:
-            raise OperationError("user", "query is not a valid regular expression", "invalid_query") from exc
+        pattern = self._compile_log_pattern(query, "query")
         if offset < 0 or limit < 1 or limit > 10000:
             raise OperationError("user", "offset must be nonnegative and limit must be 1..10000", "invalid_bounds")
         if stream is not None and stream not in {"stdout", "stderr"}:
@@ -793,6 +785,38 @@ class CrucibleOperations:
             "next_offset": offset + len(matches),
             "complete": complete, "matches": matches,
         }
+
+    @staticmethod
+    def _compile_log_pattern(value: str, name: str) -> re.Pattern[str]:
+        """Compile a regular-expression subset with bounded matching work."""
+
+        if len(value) > 256:
+            raise OperationError("user", f"{name} pattern is too long", f"invalid_{name}")
+        escaped = False
+        in_character_class = False
+        for character in value:
+            if escaped:
+                escaped = False
+                continue
+            if character == "\\":
+                escaped = True
+                continue
+            if character == "[":
+                in_character_class = True
+                continue
+            if character == "]" and in_character_class:
+                in_character_class = False
+                continue
+            if not in_character_class and character in "*+?{":
+                raise OperationError(
+                    "user",
+                    f"{name} pattern repetition operators are not supported",
+                    f"invalid_{name}",
+                )
+        try:
+            return re.compile(value)
+        except re.error as exc:
+            raise OperationError("user", f"{name} pattern is invalid", f"invalid_{name}") from exc
 
     def _cdm_request(
         self, path: str, *, method: str = "GET", body: dict[str, Any] | None = None

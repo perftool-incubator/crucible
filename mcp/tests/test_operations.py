@@ -306,6 +306,15 @@ class TestCrucibleOperations(unittest.TestCase):
         search = operations.search_logs("complete")
         self.assertEqual(search["matches"][0]["session_id"], "session-1")
 
+    def test_log_queries_reject_backtracking_repetition(self):
+        with self.assertRaises(OperationError) as search_error:
+            self.operations.search_logs("(a+)+$")
+        self.assertEqual(search_error.exception.code, "invalid_query")
+
+        with self.assertRaises(OperationError) as session_error:
+            self.operations.get_log_session("session-1", grep="(a+)+$")
+        self.assertEqual(session_error.exception.code, "invalid_grep")
+
     def test_validate_run_reports_schema_and_installed_benchmark_errors(self):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})
         self.assertFalse(result["valid"])
