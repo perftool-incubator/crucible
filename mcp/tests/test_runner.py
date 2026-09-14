@@ -191,6 +191,24 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(changed, [])
         reattach.assert_called_once_with(self.store.get(job.mcp_job_id))
 
+    def test_recovery_uses_processing_supervision_directory(self):
+        job, _ = self.store.create_or_get(
+            "key-processing-recovery", {"operation": "index"}, "index"
+        )
+        target = self.root / "target-run"
+        supervision = self.root / "mcp-job"
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(target),
+            supervision_directory=str(supervision),
+        )
+        with patch("crucible_mcp.runner.threading.Thread") as thread:
+            self.manager._reattach(self.store.get(job.mcp_job_id))
+        self.assertEqual(
+            thread.call_args.kwargs["args"][1], supervision / "events.jsonl"
+        )
+
     def test_reconcile_marks_unverified_runner_failed(self):
         job, _ = self.store.create_or_get("key-unverified", {"run": 1})
         self.store.transition(job.mcp_job_id, JobState.STARTING, runner_pid=1234)

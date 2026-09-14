@@ -116,6 +116,7 @@ class JobStore:
                         idempotency_key TEXT NOT NULL UNIQUE,
                         request_hash TEXT NOT NULL,
                         operation TEXT NOT NULL DEFAULT 'run',
+                        supervision_directory TEXT,
                         state TEXT NOT NULL,
                         result_status TEXT NOT NULL,
                         logger_session_id TEXT,
@@ -132,11 +133,15 @@ class JobStore:
                     )
                     """
                 )
-                connection.execute("UPDATE schema_version SET version = 2")
+                connection.execute("UPDATE schema_version SET version = 3")
             elif version[0] == 1:
                 connection.execute("ALTER TABLE jobs ADD COLUMN operation TEXT NOT NULL DEFAULT 'run'")
-                connection.execute("UPDATE schema_version SET version = 2")
-            elif version[0] != 2:
+                connection.execute("ALTER TABLE jobs ADD COLUMN supervision_directory TEXT")
+                connection.execute("UPDATE schema_version SET version = 3")
+            elif version[0] == 2:
+                connection.execute("ALTER TABLE jobs ADD COLUMN supervision_directory TEXT")
+                connection.execute("UPDATE schema_version SET version = 3")
+            elif version[0] != 3:
                 raise JobError(f"unsupported MCP job database schema: {version[0]}")
 
     @contextmanager
@@ -211,7 +216,7 @@ class JobStore:
         allowed_columns = {
             "result_status", "logger_session_id", "rickshaw_run_id", "cdm_run_id",
             "run_directory", "runner_pid", "runner_container_id", "exit_code",
-            "error_category", "error_message",
+            "error_category", "error_message", "supervision_directory",
         }
         unknown = set(updates) - allowed_columns
         if unknown:

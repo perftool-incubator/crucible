@@ -53,6 +53,7 @@ class Job:
     state: JobState
     result_status: ResultStatus
     operation: str = "run"
+    supervision_directory: Optional[str] = None
     logger_session_id: Optional[str] = None
     rickshaw_run_id: Optional[str] = None
     cdm_run_id: Optional[str] = None

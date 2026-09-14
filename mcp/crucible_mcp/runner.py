@@ -107,6 +107,7 @@ class RunManager:
             JobState.QUEUED,
             logger_session_id=session_id,
             run_directory=str(job_directory),
+            supervision_directory=str(job_directory),
         )
         self._launch(job.mcp_job_id, session_id, run_file, job_directory)
         return self.store.get(job.mcp_job_id), True
@@ -147,7 +148,8 @@ class RunManager:
         job_directory.mkdir(mode=0o700, parents=True)
         self.store.transition(job.mcp_job_id, JobState.QUEUED,
                               logger_session_id=session_id,
-                              run_directory=str(canonical))
+                              run_directory=str(canonical),
+                              supervision_directory=str(job_directory))
         self._launch_command(job.mcp_job_id, session_id, job_directory,
                               [operation, str(canonical)])
         return self.store.get(job.mcp_job_id), True
@@ -192,7 +194,8 @@ class RunManager:
     def _reattach(self, job: Job) -> None:
         if job.mcp_job_id in self._threads:
             return
-        event_path = Path(job.run_directory) / "events.jsonl" if job.run_directory else None
+        supervision_directory = job.supervision_directory or str(self.run_root / job.mcp_job_id)
+        event_path = Path(supervision_directory) / "events.jsonl"
         if event_path is None:
             self._fail_recovery_job(job, "runner has no persisted run directory")
             return
