@@ -560,7 +560,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name in {"archive_local_run", "unarchive_local_run"}:
                 if name == "archive_local_run":
                     try:
-                        path = self.server.operations.run_policy.canonical_directory(
+                        path = self.server.operations.run_policy.canonical_child_directory(
                             Path(arguments["run_path"])
                         )
                     except PolicyError as exc:

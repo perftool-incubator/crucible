@@ -154,6 +154,11 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["archives"][0]["name"], "run-1.tar.xz")
 
+    def test_archive_policy_rejects_approved_run_root(self):
+        (self.root / "run").mkdir()
+        with self.assertRaisesRegex(ValueError, "must be below"):
+            self.operations.run_policy.canonical_child_directory(self.root / "run")
+
     def test_list_indexed_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},

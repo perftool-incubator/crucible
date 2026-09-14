@@ -113,3 +113,11 @@ class InputPolicy:
         if not any(candidate == root or root in candidate.parents for root in self._roots):
             raise PolicyError("run directory is outside the configured run roots")
         return candidate
+
+    def canonical_child_directory(self, requested_path: Path) -> Path:
+        """Resolve a directory while rejecting the approved roots themselves."""
+
+        candidate = self.canonical_directory(requested_path)
+        if candidate in self._roots:
+            raise PolicyError("run directory must be below an approved run root")
+        return candidate
