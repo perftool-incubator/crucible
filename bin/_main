@@ -287,6 +287,9 @@ elif [ "${1}" == "index" ]; then
 
     if start_opensearch; then
         index_run "${access_opt}" "${cdmver_opt}" "$base_run_dir"
+        EXIT_VAL=$?
+    else
+        EXIT_VAL=$?
     fi
 elif [ "${1}" == "extract" ]; then
     shift
