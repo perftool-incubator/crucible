@@ -111,7 +111,15 @@ class TestCrucibleOperations(unittest.TestCase):
         run_directory = self.root / "run" / "malformed-tags"
         metadata_path = run_directory / "run" / "rickshaw-run.json"
         metadata_path.parent.mkdir(parents=True)
-        for malformed in (None, ["not-an-object"]):
+        for malformed in (
+            None,
+            ["not-an-object"],
+            [{}],
+            [{"name": "name"}],
+            [{"name": 1, "val": "value"}],
+            [{"name": "name", "val": "value", "extra": "field"}],
+            [{"name": "", "val": "value"}],
+        ):
             metadata_path.write_text(json.dumps({"tags": malformed}), encoding="utf-8")
             with self.subTest(malformed=malformed):
                 for operation in (

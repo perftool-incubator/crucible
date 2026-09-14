@@ -174,9 +174,20 @@ class CrucibleOperations:
     @staticmethod
     def _validated_tags(document: dict[str, Any]) -> list[dict[str, Any]]:
         tags = document.setdefault("tags", [])
-        if not isinstance(tags, list) or any(not isinstance(tag, dict) for tag in tags):
+        if (
+            not isinstance(tags, list)
+            or any(
+                not isinstance(tag, dict)
+                or set(tag) != {"name", "val"}
+                or not isinstance(tag["name"], str)
+                or not tag["name"]
+                or not isinstance(tag["val"], str)
+                or not tag["val"]
+                for tag in tags
+            )
+        ):
             raise OperationError(
-                "user", "run metadata tags must be a list of objects", "invalid_run"
+                "user", "run metadata tags do not match the run schema", "invalid_run"
             )
         return tags
 
@@ -216,8 +227,11 @@ class CrucibleOperations:
                 continue
             entry["status"] = "complete" if metadata_path.parent == canonical / "run" else "incomplete"
             entry["run_id"] = metadata.get("run-id") or metadata.get("id")
-            tags = metadata.get("tags", [])
-            entry["tags"] = tags if isinstance(tags, list) else []
+            try:
+                entry["tags"] = self._validated_tags(metadata)
+            except OperationError:
+                entry["status"] = "incomplete"
+                entry["tags"] = []
             entries.append(entry)
             if len(entries) >= limit:
                 break
