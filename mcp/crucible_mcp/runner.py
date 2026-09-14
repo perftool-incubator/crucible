@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
-from .jobs import JobStore
+from .jobs import JobConflictError, JobStore, request_hash
 from .models import Job, JobState, ResultStatus
 from .operations import CrucibleOperations, OperationError
 from .policy import PolicyError
@@ -219,13 +219,27 @@ class RunManager:
     ) -> tuple[Job, bool]:
         """Run one local archive operation through the existing CLI."""
 
+        if operation not in {"archive_local_run", "unarchive_local_run"}:
+            raise OperationError("user", "unsupported archive operation", "invalid_operation")
+        request = {"operation": operation, "path": str(path)}
+        existing = self.store.get_by_idempotency_key(idempotency_key)
+        if existing is not None:
+            if existing.request_hash != request_hash(request):
+                raise JobConflictError(
+                    "idempotency key was already used for a different request"
+                )
+            return existing, False
+        if operation == "archive_local_run":
+            try:
+                path = self.operations.run_policy.canonical_child_directory(path)
+            except PolicyError as exc:
+                raise OperationError("authorization", str(exc), "run_path_rejected") from exc
+        else:
+            path = self.operations.canonical_local_archive(path)
         commands = {
             "archive_local_run": ["archive", str(path)],
             "unarchive_local_run": ["unarchive", str(path)],
         }
-        if operation not in commands:
-            raise OperationError("user", "unsupported archive operation", "invalid_operation")
-        request = {"operation": operation, "path": str(path)}
         job, created = self.store.create_or_get(idempotency_key, request, operation)
         if not created:
             return job, False

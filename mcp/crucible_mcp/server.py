@@ -558,17 +558,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "list_local_archives":
                 value = self.server.operations.list_local_archives(arguments.get("limit", 1000))
             elif name in {"archive_local_run", "unarchive_local_run"}:
-                if name == "archive_local_run":
-                    try:
-                        path = self.server.operations.run_policy.canonical_child_directory(
-                            Path(arguments["run_path"])
-                        )
-                    except PolicyError as exc:
-                        raise OperationError("authorization", str(exc), "run_path_rejected") from exc
-                else:
-                    path = self.server.operations.canonical_local_archive(
-                        Path(arguments["archive_path"])
-                    )
+                path = Path(arguments["run_path"] if name == "archive_local_run" else arguments["archive_path"])
                 job, created = self.server.run_manager.submit_archive_operation(
                     arguments["idempotency_key"], name, path
                 )

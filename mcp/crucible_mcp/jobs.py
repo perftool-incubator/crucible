@@ -204,6 +204,15 @@ class JobStore:
             raise JobNotFoundError(f"unknown MCP job: {job_id}")
         return self._row_to_job(row)
 
+    def get_by_idempotency_key(self, idempotency_key: str) -> Job | None:
+        """Return an existing job before validating a retry's external inputs."""
+
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM jobs WHERE idempotency_key = ?", (idempotency_key,)
+            ).fetchone()
+        return self._row_to_job(row) if row is not None else None
+
     def list_active(self) -> list[Job]:
         placeholders = ",".join("?" for _ in ACTIVE_JOB_STATES)
         with self._lock:

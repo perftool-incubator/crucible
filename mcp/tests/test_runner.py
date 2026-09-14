@@ -203,6 +203,26 @@ class TestRunManager(unittest.TestCase):
         self.assertFalse(duplicate_created)
         self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
 
+    def test_archive_retry_returns_completed_job_after_source_is_removed(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "archive-retry",
+            [sys.executable, "-c", "import sys; sys.exit(0)"],
+        )
+        run_path = self.root / "run" / "archive-retry-source"
+        run_path.mkdir(parents=True)
+        job, _ = manager.submit_archive_operation("key-archive-retry", "archive_local_run", run_path)
+        manager._threads[job.mcp_job_id].join(timeout=5)
+        run_path.rmdir()
+
+        duplicate, created = manager.submit_archive_operation(
+            "key-archive-retry", "archive_local_run", run_path
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(duplicate.state, JobState.COMPLETED)
+
     def test_maintenance_jobs_persist_identity_for_recovery(self):
         job, _ = self.store.create_or_get(
             "key-maintenance-recovery", {"run": "run-1"}, "delete_indexed_result"
