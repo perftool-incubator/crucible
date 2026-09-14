@@ -156,7 +156,10 @@ standard MCP resource interface. Clients can use `resources/list` to discover
 available documents and `resources/read` to retrieve one by URI. Documentation
 resources use URIs such as `crucible://docs/run-files` and are restricted to an
 allowlisted set of Markdown files under Crucible's `docs/` directory; arbitrary
-filesystem paths are not exposed.
+filesystem paths are not exposed. Documents within the normal resource size
+limit are returned as one resource. Larger allowlisted documents are exposed as
+ordered resources such as `crucible://docs/run-files/chunk/1`; reading all
+chunks reconstructs the complete document.
 
 The `search_documentation` tool is available for clients that do not provide a
 resource browser. It returns matching resource metadata, after which the client

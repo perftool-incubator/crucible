@@ -2,10 +2,13 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
+DOCUMENT_CHUNK_BYTES = 512 * 1024
+_RESOURCE_URI = re.compile(r"^crucible://docs/([^/]+)(?:/chunk/([1-9][0-9]*))?$")
 
 
 @dataclass(frozen=True)
@@ -122,25 +125,34 @@ class DocumentationCatalog:
             path = self._path_for(entry)
             if path is None:
                 continue
-            resource = {
-                "uri": entry.uri,
-                "name": entry.slug,
-                "title": entry.title,
-                "description": entry.description,
-                "mimeType": "text/markdown",
-            }
             try:
-                resource["size"] = path.stat().st_size
+                size = path.stat().st_size
             except OSError:
                 continue
-            resources.append(resource)
+            try:
+                ranges = self._chunk_ranges(path, size)
+            except OSError:
+                continue
+            if len(ranges) == 1:
+                resources.append(self._resource_metadata(entry, size))
+                continue
+            for index, (start, end) in enumerate(ranges, start=1):
+                resources.append(
+                    self._resource_metadata(
+                        entry,
+                        end - start,
+                        chunk_index=index,
+                        chunk_count=len(ranges),
+                    )
+                )
         return resources
 
     def read_resource(self, uri: str) -> dict[str, Any]:
-        prefix = "crucible://docs/"
-        if not isinstance(uri, str) or not uri.startswith(prefix):
+        match = _RESOURCE_URI.fullmatch(uri) if isinstance(uri, str) else None
+        if match is None:
             raise ValueError("unknown documentation resource")
-        slug = uri[len(prefix):]
+        slug = match.group(1)
+        chunk_index = int(match.group(2)) if match.group(2) else None
         entry = self._entries.get(slug)
         if entry is None:
             raise ValueError("unknown documentation resource")
@@ -148,33 +160,107 @@ class DocumentationCatalog:
         if path is None:
             raise FileNotFoundError(entry.filename)
         try:
-            if path.stat().st_size > self.max_document_bytes:
-                raise ValueError("documentation resource exceeds size limit")
-            text = path.read_text(encoding="utf-8")
+            size = path.stat().st_size
+            ranges = self._chunk_ranges(path, size)
+            if chunk_index is None:
+                if len(ranges) != 1:
+                    raise ValueError("documentation resource is chunked; read its chunks")
+                start, end = ranges[0]
+                resource_uri = entry.uri
+            else:
+                if chunk_index > len(ranges):
+                    raise ValueError("unknown documentation resource chunk")
+                start, end = ranges[chunk_index - 1]
+                resource_uri = f"{entry.uri}/chunk/{chunk_index}"
+            with path.open("rb") as document:
+                document.seek(start)
+                text = document.read(end - start).decode("utf-8")
         except OSError as exc:
             raise FileNotFoundError(entry.filename) from exc
-        return {"uri": entry.uri, "mimeType": "text/markdown", "text": text}
+        except UnicodeDecodeError as exc:
+            raise ValueError("documentation resource is not valid UTF-8") from exc
+        return {"uri": resource_uri, "mimeType": "text/markdown", "text": text}
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query is required")
         terms = tuple(dict.fromkeys(query.casefold().split()))
         matches = []
+        previous_document = None
+        overlap = ""
         for resource in self.list_resources():
-            entry = self._entries[resource["name"]]
-            path = self._path_for(entry)
-            if path is None:
-                continue
+            document_slug = resource.get("document", resource["name"])
+            entry = self._entries[document_slug]
+            if document_slug != previous_document:
+                overlap = ""
+                previous_document = document_slug
             try:
-                text = path.read_text(encoding="utf-8").casefold()
-            except OSError:
+                text = self.read_resource(resource["uri"])["text"].casefold()
+            except (FileNotFoundError, OSError, UnicodeDecodeError, ValueError):
                 continue
-            haystack = f"{entry.title} {entry.description} {text}"
-            score = sum(haystack.count(term) for term in terms)
+            score = sum(text.count(term) for term in terms)
+            if not score and overlap:
+                score = sum((overlap + text).count(term) for term in terms)
+            if not score:
+                score = sum(
+                    f"{entry.title} {entry.description}".casefold().count(term)
+                    for term in terms
+                )
             if score:
                 matches.append((score, resource))
+            overlap_length = max(len(term) for term in terms) - 1
+            overlap = text[-overlap_length:] if overlap_length else ""
         matches.sort(key=lambda item: (-item[0], item[1]["name"]))
         return [resource for _, resource in matches[:limit]]
+
+    def _resource_metadata(
+        self,
+        entry: DocumentationEntry,
+        size: int,
+        *,
+        chunk_index: int | None = None,
+        chunk_count: int | None = None,
+    ) -> dict[str, Any]:
+        if chunk_index is None:
+            return {
+                "uri": entry.uri,
+                "name": entry.slug,
+                "title": entry.title,
+                "description": entry.description,
+                "mimeType": "text/markdown",
+                "size": size,
+            }
+        return {
+            "uri": f"{entry.uri}/chunk/{chunk_index}",
+            "name": f"{entry.slug}-chunk-{chunk_index}",
+            "title": f"{entry.title} (part {chunk_index} of {chunk_count})",
+            "description": entry.description,
+            "mimeType": "text/markdown",
+            "size": size,
+            "document": entry.slug,
+            "chunk": chunk_index,
+            "chunks": chunk_count,
+        }
+
+    def _chunk_ranges(self, path: Path, size: int) -> list[tuple[int, int]]:
+        if size <= self.max_document_bytes:
+            return [(0, size)]
+        chunk_size = min(DOCUMENT_CHUNK_BYTES, self.max_document_bytes)
+        ranges = []
+        with path.open("rb") as document:
+            start = 0
+            while start < size:
+                end = min(start + chunk_size, size)
+                if end < size:
+                    document.seek(end)
+                    while end < size:
+                        byte = document.read(1)
+                        if not byte or byte[0] & 0xC0 != 0x80:
+                            break
+                        end += 1
+                ranges.append((start, end))
+                start = end
+        return ranges
 
     def _path_for(self, entry: DocumentationEntry) -> Path | None:
         path = self.docs_root / entry.filename
