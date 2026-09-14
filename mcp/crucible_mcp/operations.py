@@ -297,6 +297,21 @@ class CrucibleOperations:
             raise OperationError("authorization", "archive is outside the local archive root", "path_rejected")
         return resolved
 
+    def canonical_archive_run(self, requested_path: Path) -> Path:
+        """Resolve only a direct child of the real run root for archiving."""
+
+        try:
+            candidate = self.run_policy.canonical_directory(requested_path)
+        except PolicyError as exc:
+            raise OperationError("authorization", str(exc), "run_path_rejected") from exc
+        if candidate.parent != self.local_run_root:
+            raise OperationError(
+                "authorization",
+                "archive target must be a direct child of the local run root",
+                "run_path_rejected",
+            )
+        return candidate
+
     @staticmethod
     def _run_metadata_path(run_directory: Path) -> Path:
         canonical = run_directory.resolve(strict=True)

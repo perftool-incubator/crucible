@@ -218,6 +218,13 @@ class TestCrucibleOperations(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be below"):
             self.operations.run_policy.canonical_child_directory(self.root / "run")
 
+    def test_archive_policy_rejects_nested_run_directories(self):
+        nested = self.root / "run" / "run-one" / "run"
+        nested.mkdir(parents=True)
+        with self.assertRaises(OperationError) as raised:
+            self.operations.canonical_archive_run(nested)
+        self.assertEqual(raised.exception.code, "run_path_rejected")
+
     def test_list_indexed_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},

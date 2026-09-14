@@ -232,7 +232,7 @@ class RunManager:
             return existing, False
         if operation == "archive_local_run":
             try:
-                path = self.operations.run_policy.canonical_child_directory(path)
+                path = self.operations.canonical_archive_run(path)
             except PolicyError as exc:
                 raise OperationError("authorization", str(exc), "run_path_rejected") from exc
         else:
