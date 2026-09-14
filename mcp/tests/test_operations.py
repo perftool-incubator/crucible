@@ -174,6 +174,24 @@ class TestCrucibleOperations(unittest.TestCase):
                     operation()
                 self.assertEqual(raised.exception.code, "run_path_rejected")
 
+    def test_local_artifact_symlinks_cannot_escape_run_directory(self):
+        run_directory = self.root / "run" / "symlink-run"
+        (run_directory / "run").mkdir(parents=True)
+        outside = self.root / "outside.json"
+        outside.write_text('{"secret": true}', encoding="utf-8")
+        (run_directory / "run" / "result-summary.json").symlink_to(outside)
+        (run_directory / "run" / "rickshaw-run.json").symlink_to(outside)
+
+        for operation in (
+            lambda: self.operations.get_local_run_summary(run_directory),
+            lambda: self.operations.get_local_run_metadata(run_directory),
+            lambda: self.operations.list_local_run_tags(run_directory),
+        ):
+            with self.subTest(operation=operation):
+                with self.assertRaises(OperationError) as raised:
+                    operation()
+                self.assertEqual(raised.exception.code, "path_rejected")
+
     def test_list_local_archives_is_bounded_and_local_only(self):
         archive_root = self.root / "archive"
         archive_root.mkdir()

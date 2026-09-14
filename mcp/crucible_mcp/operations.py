@@ -205,7 +205,7 @@ class CrucibleOperations:
 
         try:
             canonical = self._canonical_run_directory(run_path)
-            summary_path = canonical / "run" / "result-summary.json"
+            summary_path = self._safe_artifact_path(canonical, "run/result-summary.json")
             size = summary_path.stat().st_size
             if size > max_bytes:
                 raise OperationError(
@@ -299,12 +299,31 @@ class CrucibleOperations:
 
     @staticmethod
     def _run_metadata_path(run_directory: Path) -> Path:
+        canonical = run_directory.resolve(strict=True)
         for relative in ("run/rickshaw-run.json.xz", "run/rickshaw-run.json",
                          "config/rickshaw-run.json.xz", "config/rickshaw-run.json"):
             path = run_directory / relative
             if path.is_file():
-                return path
+                resolved = path.resolve(strict=True)
+                if canonical not in resolved.parents:
+                    raise OperationError(
+                        "authorization", "run metadata is outside the run directory", "path_rejected"
+                    )
+                return resolved
         raise OperationError("user", "run metadata is unavailable", "invalid_run")
+
+    @staticmethod
+    def _safe_artifact_path(run_directory: Path, relative: str) -> Path:
+        canonical = run_directory.resolve(strict=True)
+        path = run_directory / relative
+        resolved = path.resolve(strict=True)
+        if canonical not in resolved.parents:
+            raise OperationError(
+                "authorization", "run artifact is outside the run directory", "path_rejected"
+            )
+        if not resolved.is_file():
+            raise FileNotFoundError(resolved)
+        return resolved
 
     def _load_run_metadata(self, run_directory: Path) -> tuple[Path, dict[str, Any]]:
         try:
