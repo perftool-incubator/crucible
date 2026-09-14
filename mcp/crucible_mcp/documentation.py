@@ -115,6 +115,8 @@ class DocumentationCatalog:
     """Read only a fixed set of Markdown files below the Crucible docs root."""
 
     def __init__(self, crucible_home: Path, max_document_bytes: int = MAX_DOCUMENT_BYTES):
+        if max_document_bytes < 4:
+            raise ValueError("max_document_bytes must be at least 4")
         self.docs_root = (Path(crucible_home) / "docs").resolve()
         self.max_document_bytes = max_document_bytes
         self._entries = {entry.slug: entry for entry in DOCUMENTATION_ENTRIES}

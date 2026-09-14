@@ -55,6 +55,10 @@ class TestDocumentationCatalog(unittest.TestCase):
         )
         self.assertEqual(assembled, content)
 
+    def test_rejects_limit_smaller_than_maximum_utf8_character(self):
+        with self.assertRaises(ValueError):
+            DocumentationCatalog(self.root, max_document_bytes=1)
+
 
 if __name__ == "__main__":
     unittest.main()
