@@ -74,6 +74,7 @@ class CrucibleOperations:
                 "get_metric",
                 "list_log_sessions",
                 "get_log_info",
+                "get_log_session",
                 "validate_run",
                 "start_run",
                 "get_run_status",
@@ -451,6 +452,82 @@ class CrucibleOperations:
         except sqlite3.Error as exc:
             raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
         return {"sessions": sessions, "lines": lines, "sources": sources}
+
+    def get_log_session(
+        self,
+        session_id: str,
+        offset: int = 0,
+        limit: int = 1000,
+        stream: str | None = None,
+        grep: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a bounded, structured slice of one logger session."""
+
+        self._require_text(session_id, "session_id")
+        if offset < 0 or limit < 1 or limit > 10000:
+            raise OperationError("user", "offset must be nonnegative and limit must be 1..10000", "invalid_bounds")
+        if stream is not None and stream not in {"stdout", "stderr"}:
+            raise OperationError("user", "stream must be stdout or stderr", "invalid_stream")
+        pattern = None
+        if grep is not None:
+            if len(grep) > 256:
+                raise OperationError("user", "grep pattern is too long", "invalid_grep")
+            try:
+                pattern = re.compile(grep)
+            except re.error as exc:
+                raise OperationError("user", "grep pattern is invalid", "invalid_grep") from exc
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                metadata = connection.execute(
+                    """SELECT sessions.timestamp, sources.source, commands.command
+                       FROM sessions JOIN sources ON sources.id = sessions.source
+                       JOIN commands ON commands.id = sessions.command
+                       WHERE sessions.session_id = ?""",
+                    (session_id,),
+                ).fetchone()
+                if metadata is None:
+                    raise OperationError("user", f"unknown log session: {session_id}", "not_found")
+                query = """SELECT lines.timestamp, streams.stream, lines.line
+                           FROM sessions JOIN lines ON lines.session = sessions.id
+                           JOIN streams ON streams.id = lines.stream
+                           WHERE sessions.session_id = ?"""
+                params: list[Any] = [session_id]
+                if stream is not None:
+                    query += " AND streams.stream = ?"
+                    params.append(stream.upper())
+                query += " ORDER BY lines.id"
+                rows = connection.execute(query, params)
+                lines = []
+                matched = 0
+                complete = True
+                for timestamp, line_stream, line in rows:
+                    line = line or ""
+                    if pattern is not None and pattern.search(line) is None:
+                        continue
+                    if matched < offset:
+                        matched += 1
+                        continue
+                    if len(lines) >= limit:
+                        complete = False
+                        break
+                    lines.append({"timestamp": timestamp, "stream": line_stream, "line": line})
+                    matched += 1
+        except OperationError:
+            raise
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        return {
+            "session_id": session_id,
+            "timestamp": metadata[0],
+            "source": metadata[1],
+            "command": metadata[2],
+            "offset": offset,
+            "next_offset": offset + len(lines),
+            "complete": complete,
+            "lines": lines,
+        }
 
     def _cdm_request(
         self, path: str, *, method: str = "GET", body: dict[str, Any] | None = None

@@ -161,12 +161,14 @@ class TestCrucibleOperations(unittest.TestCase):
                 id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT,
                 source INTEGER, command INTEGER
             );
-            CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER, line TEXT);
+            CREATE TABLE streams (id INTEGER PRIMARY KEY, stream TEXT);
+            CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER, stream INTEGER, timestamp TEXT, line TEXT);
+            INSERT INTO streams VALUES (1, 'STDOUT');
             INSERT INTO sources VALUES (1, 'runner');
             INSERT INTO commands VALUES (1, 'crucible run example.json');
             INSERT INTO sessions VALUES (1, 'session-1', '2026-09-09T00:00:00Z', 1, 1);
-            INSERT INTO lines VALUES (1, 1, 'done');
-            INSERT INTO lines VALUES (2, 1, 'complete');
+            INSERT INTO lines VALUES (1, 1, 1, '2026-09-09T00:00:01Z', 'done');
+            INSERT INTO lines VALUES (2, 1, 1, '2026-09-09T00:00:02Z', 'complete');
             """
         )
         connection.commit()
@@ -176,6 +178,9 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(operations.list_log_sessions()["sessions"][0]["line_count"], 2)
         self.assertEqual(operations.get_log_info()["sessions"], 1)
         self.assertEqual(operations.get_log_info()["lines"], 2)
+        session = operations.get_log_session("session-1", limit=1)
+        self.assertEqual(session["lines"][0]["line"], "done")
+        self.assertFalse(session["complete"])
 
     def test_validate_run_reports_schema_and_installed_benchmark_errors(self):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})

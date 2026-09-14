@@ -153,6 +153,7 @@ through the standard `tools/list` request; the current interface is:
 | `get_metric` | Query metric data for a historical run with bounded range and resolution options. |
 | `list_log_sessions` | List recent logger sessions without returning their full contents. |
 | `get_log_info` | Return aggregate counts from the logger database. |
+| `get_log_session` | Read a bounded, structured slice of one logger session with optional stream and regex filters. |
 | `search_documentation` | Search the curated user-facing Crucible documentation catalog. |
 
 `validate_run` is intentionally limited to Crucible run documents: clients can
@@ -190,7 +191,8 @@ Metric queries should pass a `primary_period_id` returned by
 `list_run_periods` as the `period` argument; this avoids combining distinct
 primary periods implicitly.
 Result queries use the local CDM server configured by `cdm-server.port`; log queries
-use Crucible's configured logger database. Run-file
+use Crucible's configured logger database. `get_log_session` uses offsets for
+bounded polling and does not provide the CLI's live `--follow` mode. Run-file
 submission remains restricted to the configured `input-root` and its policy
 checks.
 

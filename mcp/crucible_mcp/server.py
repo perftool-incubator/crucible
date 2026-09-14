@@ -34,6 +34,7 @@ TOOL_NAMES = (
     "get_metric",
     "list_log_sessions",
     "get_log_info",
+    "get_log_session",
     "describe_benchmark",
     "validate_run",
     "start_run",
@@ -110,6 +111,17 @@ TOOL_DEFINITIONS = (
         "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000}}, "additionalProperties": False},
     },
     {"name": "get_log_info", "description": "Return aggregate Crucible logger database counts.", "inputSchema": _EMPTY_INPUT},
+    {
+        "name": "get_log_session",
+        "description": "Read a bounded structured slice of a Crucible logger session.",
+        "inputSchema": {"type": "object", "properties": {
+            "session_id": {"type": "string", "minLength": 1},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 10000},
+            "stream": {"type": "string", "enum": ["stdout", "stderr"]},
+            "grep": {"type": "string", "maxLength": 256}},
+            "required": ["session_id"], "additionalProperties": False},
+    },
     {
         "name": "describe_benchmark",
         "description": "Describe an installed benchmark.",
@@ -476,6 +488,12 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = self.server.operations.list_log_sessions(arguments.get("limit", 100))
             elif name == "get_log_info":
                 value = self.server.operations.get_log_info()
+            elif name == "get_log_session":
+                value = self.server.operations.get_log_session(
+                    arguments["session_id"], arguments.get("offset", 0),
+                    arguments.get("limit", 1000), arguments.get("stream"),
+                    arguments.get("grep"),
+                )
             elif name == "describe_benchmark":
                 value = self.server.operations.describe_benchmark(arguments.get("name", ""))
             elif name == "validate_run":
