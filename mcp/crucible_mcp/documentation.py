@@ -198,14 +198,10 @@ class DocumentationCatalog:
                 text = self.read_resource(resource["uri"])["text"].casefold()
             except (FileNotFoundError, OSError, UnicodeDecodeError, ValueError):
                 continue
-            score = sum(text.count(term) for term in terms)
-            if not score and overlap:
-                score = sum((overlap + text).count(term) for term in terms)
-            if not score:
-                score = sum(
-                    f"{entry.title} {entry.description}".casefold().count(term)
-                    for term in terms
-                )
+            haystack = (
+                f"{entry.title} {entry.description} {overlap}{text}"
+            ).casefold()
+            score = sum(haystack.count(term) for term in terms)
             if score:
                 matches.append((score, resource))
             overlap_length = max(len(term) for term in terms) - 1
