@@ -441,6 +441,11 @@ class TestCrucibleOperations(unittest.TestCase):
             self.operations.get_log_session("session-1", grep="(a+)+$")
         self.assertEqual(session_error.exception.code, "invalid_grep")
 
+        pathological = "(a|aa)" * 25 + "b"
+        with self.assertRaises(OperationError) as alternation_error:
+            self.operations.search_logs(pathological)
+        self.assertEqual(alternation_error.exception.code, "invalid_query")
+
     def test_log_responses_are_byte_bounded_and_resumable(self):
         database = self.root / "large-logs.db"
         connection = sqlite3.connect(database)

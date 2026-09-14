@@ -890,10 +890,10 @@ class CrucibleOperations:
             if character == "]" and in_character_class:
                 in_character_class = False
                 continue
-            if not in_character_class and character in "*+?{":
+            if not in_character_class and character in "*+?{|()":
                 raise OperationError(
                     "user",
-                    f"{name} pattern repetition operators are not supported",
+                    f"{name} pattern grouping and alternation operators are not supported",
                     f"invalid_{name}",
                 )
         try:
