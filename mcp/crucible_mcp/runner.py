@@ -4,6 +4,7 @@ import json
 import lzma
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -424,9 +425,27 @@ class RunManager:
         event_path = job_directory / "events.jsonl"
         environment["CRUCIBLE_MCP_SESSION_ID"] = session_id
         environment["CRUCIBLE_MCP_EVENT_FILE"] = str(event_path)
+        job = self.store.get(job_id)
+        launch_command = [*self.crucible_command, *command]
+        if job.operation in _MAINTENANCE_OPERATIONS:
+            marker = self._processing_completion_marker(job)
+            wrapper = (
+                "import pathlib, subprocess, sys; "
+                "marker = pathlib.Path(sys.argv[1]); "
+                "result = subprocess.run(sys.argv[2:], check=False); "
+                "marker.write_text('completed\\n', encoding='utf-8') if result.returncode == 0 else None; "
+                "sys.exit(result.returncode)"
+            )
+            launch_command = [
+                sys.executable,
+                "-c",
+                wrapper,
+                str(marker),
+                *launch_command,
+            ]
         try:
             process = subprocess.Popen(
-                [*self.crucible_command, *command],
+                launch_command,
                 cwd=str(self.operations.crucible_home),
                 env=environment,
                 stdin=subprocess.DEVNULL,

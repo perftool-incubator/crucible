@@ -197,6 +197,9 @@ class TestRunManager(unittest.TestCase):
         self.assertTrue(created)
         manager._threads[job.mcp_job_id].join(timeout=5)
         self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.COMPLETED)
+        self.assertTrue(
+            (self.root / "archive-jobs" / job.mcp_job_id / "processing-complete").is_file()
+        )
         duplicate, duplicate_created = manager.submit_archive_operation(
             "key-archive-local", "archive_local_run", run_path
         )
