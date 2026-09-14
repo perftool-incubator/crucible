@@ -252,12 +252,12 @@ class DocumentationCatalog:
             while start < size:
                 end = min(start + chunk_size, size)
                 if end < size:
-                    document.seek(end)
-                    while end < size:
+                    while end > start:
+                        document.seek(end)
                         byte = document.read(1)
                         if not byte or byte[0] & 0xC0 != 0x80:
                             break
-                        end += 1
+                        end -= 1
                 ranges.append((start, end))
                 start = end
         return ranges

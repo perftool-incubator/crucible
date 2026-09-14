@@ -42,6 +42,19 @@ class TestDocumentationCatalog(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertIn("/chunk/", results[0]["uri"])
 
+    def test_multibyte_character_stays_within_chunk_limit(self):
+        content = b"0123456789abcde" + "€".encode("utf-8") + b"tail"
+        (self.docs / "how-run-files-work.md").write_bytes(content)
+        catalog = DocumentationCatalog(self.root, max_document_bytes=16)
+
+        resources = catalog.list_resources()
+        self.assertTrue(all(resource["size"] <= 16 for resource in resources))
+        assembled = b"".join(
+            catalog.read_resource(resource["uri"])["text"].encode("utf-8")
+            for resource in resources
+        )
+        self.assertEqual(assembled, content)
+
 
 if __name__ == "__main__":
     unittest.main()
