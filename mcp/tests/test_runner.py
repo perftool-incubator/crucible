@@ -178,6 +178,7 @@ class TestRunManager(unittest.TestCase):
         manager._threads[job.mcp_job_id].join(timeout=5)
         completed = self.store.get(job.mcp_job_id)
         self.assertEqual(completed.state, JobState.COMPLETED)
+        self.assertIsNone(completed.run_directory)
         duplicate, duplicate_created = manager.submit_indexed_deletion("key-delete-indexed", "run-1")
         self.assertFalse(duplicate_created)
         self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)

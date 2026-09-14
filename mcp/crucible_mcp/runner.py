@@ -204,7 +204,6 @@ class RunManager:
             job.mcp_job_id,
             JobState.QUEUED,
             logger_session_id=session_id,
-            run_directory=run,
             supervision_directory=str(job_directory),
         )
         self._launch_command(
