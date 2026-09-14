@@ -145,7 +145,16 @@ class RunManager:
             return job, False
         session_id = str(uuid.uuid4())
         job_directory = self.run_root / job.mcp_job_id
-        job_directory.mkdir(mode=0o700, parents=True)
+        try:
+            job_directory.mkdir(mode=0o700, parents=True)
+        except OSError as exc:
+            failed = self.store.transition(
+                job.mcp_job_id,
+                JobState.FAILED,
+                error_category="infrastructure",
+                error_message=f"could not create processing supervision directory: {exc}",
+            )
+            return failed, True
         self.store.transition(job.mcp_job_id, JobState.QUEUED,
                               logger_session_id=session_id,
                               run_directory=str(canonical),

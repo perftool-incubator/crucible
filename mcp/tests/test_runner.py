@@ -153,6 +153,19 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
         self.assertEqual(duplicate.state, JobState.FAILED)
 
+    def test_processing_setup_failure_is_persisted_as_infrastructure_failure(self):
+        target = self.root / "run" / "result"
+        target.mkdir(parents=True)
+        with patch.object(Path, "mkdir", side_effect=OSError("no space left on device")):
+            job, created = self.manager.submit_processing(
+                "key-processing-staging-failure", "index", target
+            )
+
+        self.assertTrue(created)
+        self.assertEqual(job.state, JobState.FAILED)
+        self.assertEqual(job.error_category, "infrastructure")
+        self.assertIn("could not create processing supervision directory", job.error_message)
+
     def test_input_path_outside_approved_root_returns_authorization_error(self):
         path = self.root / "outside.json"
         path.write_text('{"benchmarks":[{"name":"example"}]}', encoding="utf-8")
