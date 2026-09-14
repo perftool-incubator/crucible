@@ -203,7 +203,7 @@ class CrucibleOperations:
         """Read a bounded summary from an approved local run artifact."""
 
         try:
-            canonical = self.run_policy.canonical_directory(run_path)
+            canonical = self._canonical_run_directory(run_path)
             summary_path = canonical / "run" / "result-summary.json"
             size = summary_path.stat().st_size
             if size > max_bytes:
@@ -233,7 +233,7 @@ class CrucibleOperations:
         """Read the bounded rickshaw run metadata from an approved local run."""
 
         try:
-            canonical = self.run_policy.canonical_directory(run_path)
+            canonical = self._canonical_run_directory(run_path)
             metadata_path = self._run_metadata_path(canonical)
             if metadata_path.stat().st_size > max_bytes:
                 raise OperationError(
@@ -307,7 +307,7 @@ class CrucibleOperations:
 
     def _load_run_metadata(self, run_directory: Path) -> tuple[Path, dict[str, Any]]:
         try:
-            canonical = self.run_policy.canonical_directory(run_directory)
+            canonical = self._canonical_run_directory(run_directory)
             path = self._run_metadata_path(canonical)
             opener = lzma.open if path.suffix == ".xz" else open
             with opener(path, "rt", encoding="utf-8") as stream:
@@ -319,6 +319,12 @@ class CrucibleOperations:
         if not isinstance(document, dict):
             raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
         return path, document
+
+    def _canonical_run_directory(self, run_directory: Path) -> Path:
+        try:
+            return self.run_policy.canonical_directory(run_directory)
+        except PolicyError as exc:
+            raise OperationError("authorization", str(exc), "run_path_rejected") from exc
 
     @staticmethod
     def _write_run_metadata(path: Path, document: dict[str, Any]) -> None:

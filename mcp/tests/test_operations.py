@@ -152,6 +152,19 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["metadata_path"], str(metadata_path))
         self.assertEqual(result["metadata"], {"run-id": "run-2", "benchmarks": []})
 
+    def test_local_run_path_rejections_are_structured_operation_errors(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        for operation in (
+            lambda: self.operations.list_local_run_tags(outside),
+            lambda: self.operations.get_local_run_summary(outside),
+            lambda: self.operations.get_local_run_metadata(outside),
+        ):
+            with self.subTest(operation=operation):
+                with self.assertRaises(OperationError) as raised:
+                    operation()
+                self.assertEqual(raised.exception.code, "run_path_rejected")
+
     def test_list_local_archives_is_bounded_and_local_only(self):
         archive_root = self.root / "archive"
         archive_root.mkdir()
