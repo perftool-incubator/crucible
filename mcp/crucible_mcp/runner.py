@@ -202,6 +202,42 @@ class RunManager:
         )
         return self.store.get(job.mcp_job_id), True
 
+    def submit_archive_operation(
+        self, idempotency_key: str, operation: str, path: Path
+    ) -> tuple[Job, bool]:
+        """Run one local archive operation through the existing CLI."""
+
+        commands = {
+            "archive_local_run": ["archive", str(path)],
+            "unarchive_local_run": ["unarchive", str(path)],
+        }
+        if operation not in commands:
+            raise OperationError("user", "unsupported archive operation", "invalid_operation")
+        request = {"operation": operation, "path": str(path)}
+        job, created = self.store.create_or_get(idempotency_key, request, operation)
+        if not created:
+            return job, False
+        session_id = str(uuid.uuid4())
+        job_directory = self.run_root / job.mcp_job_id
+        try:
+            job_directory.mkdir(mode=0o700, parents=True)
+        except OSError as exc:
+            failed = self.store.transition(
+                job.mcp_job_id,
+                JobState.FAILED,
+                error_category="infrastructure",
+                error_message=f"could not create archive supervision directory: {exc}",
+            )
+            return failed, True
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.QUEUED,
+            logger_session_id=session_id,
+            supervision_directory=str(job_directory),
+        )
+        self._launch_command(job.mcp_job_id, session_id, job_directory, commands[operation])
+        return self.store.get(job.mcp_job_id), True
+
     def _fail_recovery_job(self, job: Job, message: str) -> Job:
         return self.store.transition(
             job.mcp_job_id,

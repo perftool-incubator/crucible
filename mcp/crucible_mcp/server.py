@@ -31,6 +31,9 @@ TOOL_NAMES = (
     "list_local_runs",
     "get_local_run_summary",
     "get_local_run_metadata",
+    "list_local_archives",
+    "archive_local_run",
+    "unarchive_local_run",
     "list_indexed_results",
     "get_indexed_result",
     "list_indexed_periods",
@@ -95,6 +98,31 @@ TOOL_DEFINITIONS = (
             "required": ["run_path"],
             "additionalProperties": False,
         },
+    },
+    {
+        "name": "list_local_archives",
+        "description": "List local run archives without accessing remote archive backends.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "archive_local_run",
+        "description": "Archive an approved local run and remove the live run after success.",
+        "inputSchema": {"type": "object", "properties": {
+            "idempotency_key": {"type": "string", "minLength": 1},
+            "run_path": {"type": "string", "minLength": 1}},
+            "required": ["idempotency_key", "run_path"], "additionalProperties": False},
+    },
+    {
+        "name": "unarchive_local_run",
+        "description": "Restore a local run archive into the approved run root.",
+        "inputSchema": {"type": "object", "properties": {
+            "idempotency_key": {"type": "string", "minLength": 1},
+            "archive_path": {"type": "string", "minLength": 1}},
+            "required": ["idempotency_key", "archive_path"], "additionalProperties": False},
     },
     {
         "name": "list_indexed_results",
@@ -527,6 +555,24 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = self.server.operations.get_local_run_summary(Path(arguments["run_path"]))
             elif name == "get_local_run_metadata":
                 value = self.server.operations.get_local_run_metadata(Path(arguments["run_path"]))
+            elif name == "list_local_archives":
+                value = self.server.operations.list_local_archives(arguments.get("limit", 1000))
+            elif name in {"archive_local_run", "unarchive_local_run"}:
+                if name == "archive_local_run":
+                    try:
+                        path = self.server.operations.run_policy.canonical_directory(
+                            Path(arguments["run_path"])
+                        )
+                    except PolicyError as exc:
+                        raise OperationError("authorization", str(exc), "run_path_rejected") from exc
+                else:
+                    path = self.server.operations.canonical_local_archive(
+                        Path(arguments["archive_path"])
+                    )
+                job, created = self.server.run_manager.submit_archive_operation(
+                    arguments["idempotency_key"], name, path
+                )
+                value = {"created": created, "job": _job_status(job)}
             elif name == "list_indexed_results":
                 value = self.server.operations.list_indexed_results(
                     **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}

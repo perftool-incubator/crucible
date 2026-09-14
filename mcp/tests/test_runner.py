@@ -182,6 +182,27 @@ class TestRunManager(unittest.TestCase):
         self.assertFalse(duplicate_created)
         self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
 
+    def test_local_archive_operation_is_idempotent(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "archive-jobs",
+            [sys.executable, "-c", "import sys; sys.exit(0)"],
+        )
+        run_path = self.root / "run" / "archive-me"
+        run_path.mkdir(parents=True)
+        job, created = manager.submit_archive_operation(
+            "key-archive-local", "archive_local_run", run_path
+        )
+        self.assertTrue(created)
+        manager._threads[job.mcp_job_id].join(timeout=5)
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.COMPLETED)
+        duplicate, duplicate_created = manager.submit_archive_operation(
+            "key-archive-local", "archive_local_run", run_path
+        )
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
+
     def test_processing_jobs_report_operation_lifecycle_state(self):
         manager = RunManager(
             self.store,

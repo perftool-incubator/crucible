@@ -143,6 +143,17 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["metadata_path"], str(metadata_path))
         self.assertEqual(result["metadata"], {"run-id": "run-2", "benchmarks": []})
 
+    def test_list_local_archives_is_bounded_and_local_only(self):
+        archive_root = self.root / "archive"
+        archive_root.mkdir()
+        (archive_root / "run-1.tar.xz").write_bytes(b"archive")
+        (archive_root / "not-an-archive.txt").write_text("ignore", encoding="utf-8")
+
+        result = self.operations.list_local_archives()
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["archives"][0]["name"], "run-1.tar.xz")
+
     def test_list_indexed_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},

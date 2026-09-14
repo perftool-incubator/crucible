@@ -53,6 +53,7 @@ class CrucibleOperations:
         self.cdm_base_url = cdm_base_url.rstrip("/")
         self.log_db = Path(log_db) if log_db else None
         self.documentation = DocumentationCatalog(self.crucible_home)
+        self.archive_root = (Path(run_root) if run_root else self.crucible_home / "run").resolve().parent / "archive"
         self.input_policy = input_policy or InputPolicy(
             [self.crucible_home / "mcp" / "inputs"]
         )
@@ -71,6 +72,7 @@ class CrucibleOperations:
                 "list_local_runs",
                 "get_local_run_summary",
                 "get_local_run_metadata",
+                "list_local_archives",
                 "list_indexed_results",
                 "get_indexed_result",
                 "list_indexed_periods",
@@ -258,6 +260,39 @@ class CrucibleOperations:
             "metadata_path": str(metadata_path),
             "metadata": metadata,
         }
+
+    def list_local_archives(self, limit: int = 1000) -> dict[str, Any]:
+        """List local archives without accessing configured remote backends."""
+
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        if not self.archive_root.is_dir():
+            return {"archives": [], "count": 0}
+        archives = []
+        for path in sorted(self.archive_root.glob("*.tar.xz"), key=lambda item: item.name):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                archives.append({"name": path.name, "path": str(path.resolve()), "size": path.stat().st_size})
+            except OSError:
+                continue
+            if len(archives) >= limit:
+                break
+        return {"archives": archives, "count": len(archives)}
+
+    def canonical_local_archive(self, requested_path: Path) -> Path:
+        """Resolve an archive path while keeping it inside the local archive root."""
+
+        candidate = requested_path if requested_path.is_absolute() else self.archive_root / requested_path
+        try:
+            resolved = candidate.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise OperationError("user", "archive does not exist", "not_found") from exc
+        if not resolved.is_file() or resolved.suffixes[-2:] != [".tar", ".xz"]:
+            raise OperationError("user", "archive must be a .tar.xz file", "invalid_archive")
+        if self.archive_root not in resolved.parents:
+            raise OperationError("authorization", "archive is outside the local archive root", "path_rejected")
+        return resolved
 
     @staticmethod
     def _run_metadata_path(run_directory: Path) -> Path:

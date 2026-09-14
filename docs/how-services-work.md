@@ -139,6 +139,9 @@ through the standard `tools/list` request; the current interface is:
 | `list_local_runs` | List local run artifacts from approved run roots. |
 | `get_local_run_summary` | Read a completed result summary from an approved local run artifact. |
 | `get_local_run_metadata` | Read rickshaw run metadata from an approved local run artifact. |
+| `list_local_archives` | List local run archives without accessing remote archive backends. |
+| `archive_local_run` | Archive an approved local run and remove the live run after success. |
+| `unarchive_local_run` | Restore a local run archive into the approved run root. |
 | `describe_benchmark` | Return metadata for one installed benchmark. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `start_run` | Submit an asynchronous, idempotent Crucible run. |
@@ -194,6 +197,8 @@ configured OpenSearch/CDM result; it does not remove local run files.
 does not query CDM.
 `get_local_run_metadata` reads the local `rickshaw-run.json[.xz]` artifact and
 does not query CDM.
+Local archive management is limited to the configured local archive directory;
+remote archive backends are not exposed through MCP.
 Tag operations accept an approved run directory or a completed MCP job ID and
 update the local `rickshaw-run.json[.xz]` artifact. They do not automatically
 re-index the result in CDM; run `index_local_run` separately when the indexed result
