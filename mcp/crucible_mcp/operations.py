@@ -185,6 +185,8 @@ class CrucibleOperations:
                     _, metadata = self._load_run_metadata(canonical)
                 except OperationError:
                     entries.append(entry)
+                    if len(entries) >= limit:
+                        break
                     continue
                 entry["status"] = "complete"
                 entry["run_id"] = metadata.get("run-id") or metadata.get("id")

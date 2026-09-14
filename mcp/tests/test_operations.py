@@ -121,6 +121,15 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["runs"][0]["status"], "complete")
         self.assertEqual(result["runs"][1]["status"], "incomplete")
 
+    def test_list_local_runs_limit_includes_incomplete_artifacts(self):
+        run_root = self.root / "run"
+        for name in ("partial-one", "partial-two", "partial-three"):
+            (run_root / name).mkdir(parents=True)
+
+        result = self.operations.list_local_runs(limit=1)
+
+        self.assertEqual(result["count"], 1)
+
     def test_get_local_run_summary_reads_local_artifact(self):
         run_directory = self.root / "run" / "completed-run"
         summary_path = run_directory / "run" / "result-summary.json"
