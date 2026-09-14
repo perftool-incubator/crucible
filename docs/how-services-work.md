@@ -141,6 +141,7 @@ through the standard `tools/list` request; the current interface is:
 | `start_run` | Submit an asynchronous, idempotent Crucible run. |
 | `postprocess_local_run` | Post-process an approved local run directory asynchronously. |
 | `index_local_run` | Generate CDM documents and index an approved local run directory asynchronously. |
+| `delete_indexed_result` | Delete one indexed CDM result without deleting its local run artifacts. |
 | `list_local_run_tags` | List tags from an approved local run result. |
 | `add_local_run_tags` | Add or replace tags in an approved local run result. |
 | `remove_local_run_tags` | Remove named tags from an approved local run result. |
@@ -181,9 +182,11 @@ resource browser. It returns matching resource metadata, after which the client
 can retrieve the selected document with `resources/read`.
 
 The discovery, result, metric, log, and documentation tools are read-only.
-`start_run`, `postprocess_local_run`, and `index_local_run` create asynchronous jobs;
-the latter two accept either an approved run directory or a completed MCP job
-ID as their source.
+`start_run`, `postprocess_local_run`, `index_local_run`, and `delete_indexed_result` create asynchronous jobs.
+The postprocessing and indexing tools accept either an approved run directory
+or a completed MCP job ID as their source.
+`delete_indexed_result` accepts an indexed run ID and operates only on the
+configured OpenSearch/CDM result; it does not remove local run files.
 Tag operations accept an approved run directory or a completed MCP job ID and
 update the local `rickshaw-run.json[.xz]` artifact. They do not automatically
 re-index the result in CDM; run `index_local_run` separately when the indexed result

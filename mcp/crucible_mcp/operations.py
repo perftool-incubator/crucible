@@ -83,6 +83,7 @@ class CrucibleOperations:
                 "get_run_summary",
                 "postprocess_local_run",
                 "index_local_run",
+                "delete_indexed_result",
                 "list_local_run_tags",
                 "add_local_run_tags",
                 "remove_local_run_tags",

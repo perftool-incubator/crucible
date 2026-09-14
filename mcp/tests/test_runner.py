@@ -166,6 +166,22 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(job.error_category, "infrastructure")
         self.assertIn("could not create processing supervision directory", job.error_message)
 
+    def test_indexed_deletion_is_idempotent_and_uses_cli_arguments(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "delete-indexed",
+            [sys.executable, "-c", "import sys; sys.exit(0)"],
+        )
+        job, created = manager.submit_indexed_deletion("key-delete-indexed", "run-1")
+        self.assertTrue(created)
+        manager._threads[job.mcp_job_id].join(timeout=5)
+        completed = self.store.get(job.mcp_job_id)
+        self.assertEqual(completed.state, JobState.COMPLETED)
+        duplicate, duplicate_created = manager.submit_indexed_deletion("key-delete-indexed", "run-1")
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
+
     def test_processing_jobs_report_operation_lifecycle_state(self):
         manager = RunManager(
             self.store,

@@ -135,6 +135,7 @@ class TestServer(unittest.TestCase):
             "get_log_session",
             "search_logs",
             "list_local_run_tags", "add_local_run_tags", "remove_local_run_tags",
+            "delete_indexed_result",
         ):
             self.assertIn(tool_name, tools)
             self.assertIn("inputSchema", tools[tool_name])

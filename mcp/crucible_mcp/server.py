@@ -44,6 +44,7 @@ TOOL_NAMES = (
     "get_run_summary",
     "postprocess_local_run",
     "index_local_run",
+    "delete_indexed_result",
     "list_local_run_tags",
     "add_local_run_tags",
     "remove_local_run_tags",
@@ -227,6 +228,14 @@ TOOL_DEFINITIONS = (
             "mcp_job_id": {"type": "string", "minLength": 1}},
             "required": ["idempotency_key"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
             "additionalProperties": False},
+    },
+    {
+        "name": "delete_indexed_result",
+        "description": "Delete one indexed CDM result without removing local run artifacts.",
+        "inputSchema": {"type": "object", "properties": {
+            "idempotency_key": {"type": "string", "minLength": 1},
+            "run": {"type": "string", "minLength": 1}},
+            "required": ["idempotency_key", "run"], "additionalProperties": False},
     },
     {
         "name": "list_local_run_tags",
@@ -580,6 +589,11 @@ class MCPHandler(BaseHTTPRequestHandler):
                     arguments["idempotency_key"],
                     "postprocess" if name == "postprocess_local_run" else "index",
                     processing_path,
+                )
+                value = {"created": created, "job": _job_status(job)}
+            elif name == "delete_indexed_result":
+                job, created = self.server.run_manager.submit_indexed_deletion(
+                    arguments["idempotency_key"], arguments["run"]
                 )
                 value = {"created": created, "job": _job_status(job)}
             elif name in {"list_local_run_tags", "add_local_run_tags", "remove_local_run_tags"}:

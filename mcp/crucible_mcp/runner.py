@@ -163,6 +163,45 @@ class RunManager:
                               [operation, str(canonical)])
         return self.store.get(job.mcp_job_id), True
 
+    def submit_indexed_deletion(self, idempotency_key: str, run: str) -> tuple[Job, bool]:
+        """Delete one indexed result through Crucible's existing CLI path."""
+
+        if not isinstance(run, str) or not run:
+            raise OperationError("user", "run is required", "missing_argument")
+        if "\x00" in run:
+            raise OperationError("user", "run contains an invalid character", "invalid_argument")
+        request = {"operation": "delete_indexed_result", "run": run}
+        job, created = self.store.create_or_get(
+            idempotency_key, request, "delete_indexed_result"
+        )
+        if not created:
+            return job, False
+        session_id = str(uuid.uuid4())
+        job_directory = self.run_root / job.mcp_job_id
+        try:
+            job_directory.mkdir(mode=0o700, parents=True)
+        except OSError as exc:
+            failed = self.store.transition(
+                job.mcp_job_id,
+                JobState.FAILED,
+                error_category="infrastructure",
+                error_message=f"could not create deletion supervision directory: {exc}",
+            )
+            return failed, True
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.QUEUED,
+            logger_session_id=session_id,
+            supervision_directory=str(job_directory),
+        )
+        self._launch_command(
+            job.mcp_job_id,
+            session_id,
+            job_directory,
+            ["rm", "--run", run],
+        )
+        return self.store.get(job.mcp_job_id), True
+
     def _fail_recovery_job(self, job: Job, message: str) -> Job:
         return self.store.transition(
             job.mcp_job_id,
