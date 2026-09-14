@@ -30,6 +30,7 @@ TOOL_NAMES = (
     "list_benchmarks",
     "list_local_runs",
     "get_local_run_summary",
+    "get_local_run_metadata",
     "list_indexed_results",
     "get_indexed_result",
     "list_indexed_periods",
@@ -78,6 +79,16 @@ TOOL_DEFINITIONS = (
     {
         "name": "get_local_run_summary",
         "description": "Read a completed result summary from an approved local run artifact.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"run_path": {"type": "string", "minLength": 1}},
+            "required": ["run_path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_local_run_metadata",
+        "description": "Read rickshaw run metadata from an approved local run artifact.",
         "inputSchema": {
             "type": "object",
             "properties": {"run_path": {"type": "string", "minLength": 1}},
@@ -514,6 +525,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = self.server.operations.list_local_runs(arguments.get("limit", 1000))
             elif name == "get_local_run_summary":
                 value = self.server.operations.get_local_run_summary(Path(arguments["run_path"]))
+            elif name == "get_local_run_metadata":
+                value = self.server.operations.get_local_run_metadata(Path(arguments["run_path"]))
             elif name == "list_indexed_results":
                 value = self.server.operations.list_indexed_results(
                     **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}

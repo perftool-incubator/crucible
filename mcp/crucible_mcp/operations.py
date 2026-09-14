@@ -70,6 +70,7 @@ class CrucibleOperations:
                 "list_tools",
                 "list_local_runs",
                 "get_local_run_summary",
+                "get_local_run_metadata",
                 "list_indexed_results",
                 "get_indexed_result",
                 "list_indexed_periods",
@@ -222,6 +223,40 @@ class CrucibleOperations:
             "run_path": str(canonical),
             "result_status": "available",
             "summary": summary,
+        }
+
+    def get_local_run_metadata(self, run_path: Path, max_bytes: int = 1_048_576) -> dict[str, Any]:
+        """Read the bounded rickshaw run metadata from an approved local run."""
+
+        try:
+            canonical = self.run_policy.canonical_directory(run_path)
+            metadata_path = self._run_metadata_path(canonical)
+            if metadata_path.stat().st_size > max_bytes:
+                raise OperationError(
+                    "framework", "run metadata exceeds size limit", "result_too_large"
+                )
+            if metadata_path.suffix == ".xz":
+                with lzma.open(metadata_path, "rt", encoding="utf-8") as stream:
+                    encoded = stream.read(max_bytes + 1)
+                    if len(encoded.encode("utf-8")) > max_bytes:
+                        raise OperationError(
+                            "framework", "run metadata exceeds size limit", "result_too_large"
+                        )
+                    metadata = json.loads(encoded)
+            else:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except OperationError:
+            raise
+        except (OSError, lzma.LZMAError, json.JSONDecodeError) as exc:
+            raise OperationError(
+                "user", "run metadata is not valid JSON", "invalid_run"
+            ) from exc
+        if not isinstance(metadata, dict):
+            raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
+        return {
+            "run_path": str(canonical),
+            "metadata_path": str(metadata_path),
+            "metadata": metadata,
         }
 
     @staticmethod

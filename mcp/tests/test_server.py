@@ -130,7 +130,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("inputSchema", tools["get_run_logs"])
         for tool_name in (
-            "list_tools", "list_local_runs", "get_local_run_summary", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
+            "list_tools", "list_local_runs", "get_local_run_summary", "get_local_run_metadata", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
             "get_log_session",
             "search_logs",
