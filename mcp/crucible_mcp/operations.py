@@ -74,6 +74,8 @@ class CrucibleOperations:
                 "get_local_run_summary",
                 "get_local_run_metadata",
                 "list_local_archives",
+                "archive_local_run",
+                "unarchive_local_run",
                 "list_indexed_results",
                 "get_indexed_result",
                 "list_indexed_periods",

@@ -202,6 +202,8 @@ class TestServer(unittest.TestCase):
         self.assertIn("start_run", info["capabilities"])
         self.assertIn("get_run_logs", info["capabilities"])
         self.assertIn("get_run_summary", info["capabilities"])
+        self.assertIn("archive_local_run", info["capabilities"])
+        self.assertIn("unarchive_local_run", info["capabilities"])
 
     def test_invalid_parameter_shapes_return_json_rpc_errors(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": []})
