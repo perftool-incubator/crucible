@@ -68,6 +68,7 @@ class CrucibleOperations:
                 "list_benchmarks",
                 "describe_benchmark",
                 "list_tools",
+                "list_local_runs",
                 "list_indexed_results",
                 "get_indexed_result",
                 "list_indexed_periods",
@@ -148,6 +149,49 @@ class CrucibleOperations:
             raise OperationError("user", "no matching tags were found", "tag_not_found")
         self._write_run_metadata(path, document)
         return {"run_path": str(run_directory), "tags": document["tags"]}
+
+    def list_local_runs(self, limit: int = 1000) -> dict[str, Any]:
+        """List local run directories without querying indexed result data."""
+
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        entries: list[dict[str, Any]] = []
+        seen: set[Path] = set()
+        for root in self.run_policy.roots:
+            if not root.is_dir():
+                continue
+            for directory in sorted(root.iterdir(), key=lambda path: path.name):
+                if directory.is_symlink() or not directory.is_dir():
+                    continue
+                try:
+                    canonical = directory.resolve(strict=True)
+                except OSError:
+                    continue
+                if canonical in seen:
+                    continue
+                seen.add(canonical)
+                entry: dict[str, Any] = {
+                    "name": directory.name,
+                    "path": str(canonical),
+                    "status": "incomplete",
+                    "run_id": None,
+                    "tags": [],
+                }
+                try:
+                    _, metadata = self._load_run_metadata(canonical)
+                except OperationError:
+                    entries.append(entry)
+                    continue
+                entry["status"] = "complete"
+                entry["run_id"] = metadata.get("run-id") or metadata.get("id")
+                tags = metadata.get("tags", [])
+                entry["tags"] = tags if isinstance(tags, list) else []
+                entries.append(entry)
+                if len(entries) >= limit:
+                    break
+            if len(entries) >= limit:
+                break
+        return {"runs": entries, "count": len(entries)}
 
     @staticmethod
     def _run_metadata_path(run_directory: Path) -> Path:

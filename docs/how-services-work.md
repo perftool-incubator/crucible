@@ -136,6 +136,7 @@ through the standard `tools/list` request; the current interface is:
 | `crucible_info` | Report the MCP contract version and supported capabilities. |
 | `list_tools` | List installed Crucible tools and their metadata. |
 | `list_benchmarks` | List installed benchmarks. |
+| `list_local_runs` | List local run artifacts from approved run roots. |
 | `describe_benchmark` | Return metadata for one installed benchmark. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `start_run` | Submit an asynchronous, idempotent Crucible run. |

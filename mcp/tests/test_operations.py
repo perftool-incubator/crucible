@@ -103,6 +103,24 @@ class TestCrucibleOperations(unittest.TestCase):
         removed = self.operations.remove_local_run_tags(run_directory, ["old"])
         self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
 
+    def test_list_local_runs_reports_artifacts_without_latest_alias(self):
+        run_root = self.root / "run"
+        complete = run_root / "fio--2026-09-14--run-1"
+        incomplete = run_root / "partial-run"
+        (complete / "run").mkdir(parents=True)
+        (incomplete / "run").mkdir(parents=True)
+        (complete / "run" / "rickshaw-run.json").write_text(
+            json.dumps({"run-id": "run-1", "tags": [{"name": "nightly", "val": "yes"}]}),
+            encoding="utf-8",
+        )
+        (run_root / "latest").symlink_to(complete, target_is_directory=True)
+        result = self.operations.list_local_runs()
+
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["runs"][0]["run_id"], "run-1")
+        self.assertEqual(result["runs"][0]["status"], "complete")
+        self.assertEqual(result["runs"][1]["status"], "incomplete")
+
     def test_list_indexed_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},

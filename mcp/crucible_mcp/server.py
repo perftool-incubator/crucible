@@ -28,6 +28,7 @@ TOOL_NAMES = (
     "crucible_info",
     "list_tools",
     "list_benchmarks",
+    "list_local_runs",
     "list_indexed_results",
     "get_indexed_result",
     "list_indexed_periods",
@@ -64,6 +65,15 @@ TOOL_DEFINITIONS = (
         },
     },
     {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
+    {
+        "name": "list_local_runs",
+        "description": "List local run artifacts from approved run roots.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000}},
+            "additionalProperties": False,
+        },
+    },
     {
         "name": "list_indexed_results",
         "description": "List historical run IDs from the configured CDM service.",
@@ -489,6 +499,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = {"tools": self.server.operations.list_tools(arguments.get("name"))}
             elif name == "list_benchmarks":
                 value = {"benchmarks": self.server.operations.list_benchmarks()}
+            elif name == "list_local_runs":
+                value = self.server.operations.list_local_runs(arguments.get("limit", 1000))
             elif name == "list_indexed_results":
                 value = self.server.operations.list_indexed_results(
                     **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}

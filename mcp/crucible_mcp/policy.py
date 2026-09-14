@@ -97,6 +97,12 @@ class InputPolicy:
             raise PolicyError("run-file is outside the configured input roots")
         return candidate
 
+    @property
+    def roots(self) -> tuple[Path, ...]:
+        """Return the administrator-approved roots for bounded enumeration."""
+
+        return self._roots
+
     def canonical_directory(self, requested_path: Path) -> Path:
         try:
             candidate = requested_path.resolve(strict=True)
