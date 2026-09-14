@@ -1,7 +1,9 @@
 import json
 import sqlite3
 import tempfile
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -102,6 +104,28 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual({tag["name"]: tag["val"] for tag in added["tags"]}, {"old": "2", "new": "value"})
         removed = self.operations.remove_local_run_tags(run_directory, ["old"])
         self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
+
+    def test_concurrent_run_tag_updates_preserve_both_changes(self):
+        run_directory = self.root / "run" / "concurrent"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(json.dumps({"tags": []}), encoding="utf-8")
+        original_write = self.operations._write_run_metadata
+
+        def delayed_write(path, document):
+            time.sleep(0.05)
+            original_write(path, document)
+
+        with patch.object(self.operations, "_write_run_metadata", side_effect=delayed_write):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [
+                    executor.submit(self.operations.add_local_run_tags, run_directory, ["one:1"]),
+                    executor.submit(self.operations.add_local_run_tags, run_directory, ["two:2"]),
+                ]
+                [future.result() for future in futures]
+
+        tags = self.operations.list_local_run_tags(run_directory)["tags"]
+        self.assertEqual({tag["name"] for tag in tags}, {"one", "two"})
 
     def test_list_local_runs_reports_artifacts_without_latest_alias(self):
         run_root = self.root / "run"

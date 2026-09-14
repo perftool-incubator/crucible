@@ -7,6 +7,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,8 @@ class CrucibleOperations:
             [self.crucible_home / "mcp" / "inputs"]
         )
         self.run_policy = InputPolicy([run_root or self.crucible_home / "run"])
+        self._tag_locks: dict[Path, threading.Lock] = {}
+        self._tag_locks_guard = threading.Lock()
 
     def crucible_info(self) -> dict[str, Any]:
         return {
@@ -132,30 +135,38 @@ class CrucibleOperations:
         return {"run_path": str(run_directory), "tags": document.get("tags", [])}
 
     def add_local_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
-        path, document = self._load_run_metadata(run_directory)
-        current = document.setdefault("tags", [])
-        for raw_tag in tags:
-            match = re.fullmatch(r"([a-zA-Z0-9-_\s]+):([a-zA-Z0-9-_:\s\\/\.]+)", raw_tag)
-            if match is None:
-                raise OperationError("user", f"invalid tag: {raw_tag}", "invalid_tag")
-            existing = next((tag for tag in current if tag.get("name") == match.group(1)), None)
-            if existing is None:
-                current.append({"name": match.group(1), "val": match.group(2)})
-            else:
-                existing["val"] = match.group(2)
-        self._write_run_metadata(path, document)
-        return {"run_path": str(run_directory), "tags": current}
+        canonical = self._canonical_run_directory(run_directory)
+        with self._tag_lock(canonical):
+            path, document = self._load_run_metadata(canonical)
+            current = document.setdefault("tags", [])
+            for raw_tag in tags:
+                match = re.fullmatch(r"([a-zA-Z0-9-_\s]+):([a-zA-Z0-9-_:\s\\/\.]+)", raw_tag)
+                if match is None:
+                    raise OperationError("user", f"invalid tag: {raw_tag}", "invalid_tag")
+                existing = next((tag for tag in current if tag.get("name") == match.group(1)), None)
+                if existing is None:
+                    current.append({"name": match.group(1), "val": match.group(2)})
+                else:
+                    existing["val"] = match.group(2)
+            self._write_run_metadata(path, document)
+            return {"run_path": str(run_directory), "tags": current}
 
     def remove_local_run_tags(self, run_directory: Path, names: list[str]) -> dict[str, Any]:
-        path, document = self._load_run_metadata(run_directory)
-        if any(not re.fullmatch(r"[a-zA-Z0-9-_\s]+", name) for name in names):
-            raise OperationError("user", "tag names must not include values", "invalid_tag")
-        existing = document.get("tags", [])
-        document["tags"] = [tag for tag in existing if tag.get("name") not in names]
-        if len(document["tags"]) == len(existing):
-            raise OperationError("user", "no matching tags were found", "tag_not_found")
-        self._write_run_metadata(path, document)
-        return {"run_path": str(run_directory), "tags": document["tags"]}
+        canonical = self._canonical_run_directory(run_directory)
+        with self._tag_lock(canonical):
+            path, document = self._load_run_metadata(canonical)
+            if any(not re.fullmatch(r"[a-zA-Z0-9-_\s]+", name) for name in names):
+                raise OperationError("user", "tag names must not include values", "invalid_tag")
+            existing = document.get("tags", [])
+            document["tags"] = [tag for tag in existing if tag.get("name") not in names]
+            if len(document["tags"]) == len(existing):
+                raise OperationError("user", "no matching tags were found", "tag_not_found")
+            self._write_run_metadata(path, document)
+            return {"run_path": str(run_directory), "tags": document["tags"]}
+
+    def _tag_lock(self, run_directory: Path) -> threading.Lock:
+        with self._tag_locks_guard:
+            return self._tag_locks.setdefault(run_directory, threading.Lock())
 
     def list_local_runs(self, limit: int = 1000) -> dict[str, Any]:
         """List local run directories without querying indexed result data."""
