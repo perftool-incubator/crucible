@@ -188,7 +188,8 @@ resource browser. It returns matching resource metadata, after which the client
 can retrieve the selected document with `resources/read`.
 
 The discovery, result, metric, log, and documentation tools are read-only.
-`start_run`, `postprocess_local_run`, `index_local_run`, and `delete_indexed_result` create asynchronous jobs.
+`start_run`, `postprocess_local_run`, `index_local_run`, `delete_indexed_result`,
+`archive_local_run`, and `unarchive_local_run` create asynchronous jobs.
 The postprocessing and indexing tools accept either an approved run directory
 or a completed MCP job ID as their source.
 `delete_indexed_result` accepts an indexed run ID and operates only on the
