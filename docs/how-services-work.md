@@ -152,6 +152,13 @@ through the standard `tools/list` request; the current interface is:
 | `get_log_info` | Return aggregate counts from the logger database. |
 | `search_documentation` | Search the curated user-facing Crucible documentation catalog. |
 
+`validate_run` is intentionally limited to Crucible run documents: clients can
+validate an inline run document or an approved run-file path. The CLI's other
+validation types—such as multiplex, workshop, tool metadata, repository,
+service, and registry configuration—remain CLI-only because they support
+benchmark/tool development or host administration rather than normal MCP run
+execution.
+
 #### MCP documentation resources
 
 The MCP server also exposes curated user-facing documentation through the
