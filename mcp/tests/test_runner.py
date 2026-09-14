@@ -203,6 +203,46 @@ class TestRunManager(unittest.TestCase):
         self.assertFalse(duplicate_created)
         self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
 
+    def test_maintenance_jobs_persist_identity_for_recovery(self):
+        job, _ = self.store.create_or_get(
+            "key-maintenance-recovery", {"run": "run-1"}, "delete_indexed_result"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            runner_pid=1234,
+            run_directory="run-1",
+            supervision_directory=str(self.root / "maintenance-job"),
+        )
+        with (
+            patch.object(self.manager, "_process_exists", return_value=True),
+            patch.object(self.manager, "_runner_identity_matches", return_value=True),
+            patch.object(self.manager, "_reattach") as reattach,
+        ):
+            changed = self.manager.reconcile()
+        self.assertEqual(changed, [])
+        reattach.assert_called_once_with(self.store.get(job.mcp_job_id))
+
+    def test_maintenance_completion_marker_resolves_recovery(self):
+        job, _ = self.store.create_or_get(
+            "key-maintenance-marker", {"run": "run-2"}, "delete_indexed_result"
+        )
+        supervision = self.root / "maintenance-marker"
+        supervision.mkdir()
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            runner_pid=1234,
+            run_directory="run-2",
+            supervision_directory=str(supervision),
+        )
+        self.store.transition(job.mcp_job_id, JobState.RUNNING)
+        (supervision / "processing-complete").write_text("delete_indexed_result\n")
+
+        recovered = self.manager._resolve_or_fail(self.store.get(job.mcp_job_id))
+
+        self.assertEqual(recovered.state, JobState.COMPLETED)
+
     def test_processing_jobs_report_operation_lifecycle_state(self):
         manager = RunManager(
             self.store,

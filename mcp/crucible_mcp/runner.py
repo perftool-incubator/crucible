@@ -16,6 +16,17 @@ from .operations import CrucibleOperations, OperationError
 from .policy import PolicyError
 
 
+_MAINTENANCE_OPERATIONS = frozenset(
+    {
+        "postprocess",
+        "index",
+        "delete_indexed_result",
+        "archive_local_run",
+        "unarchive_local_run",
+    }
+)
+
+
 class RunManager:
     """Submit and supervise Crucible runs without shell interpolation.
 
@@ -192,6 +203,7 @@ class RunManager:
             job.mcp_job_id,
             JobState.QUEUED,
             logger_session_id=session_id,
+            run_directory=run,
             supervision_directory=str(job_directory),
         )
         self._launch_command(
@@ -233,6 +245,7 @@ class RunManager:
             job.mcp_job_id,
             JobState.QUEUED,
             logger_session_id=session_id,
+            run_directory=str(path),
             supervision_directory=str(job_directory),
         )
         self._launch_command(job.mcp_job_id, session_id, job_directory, commands[operation])
@@ -248,7 +261,7 @@ class RunManager:
         )
 
     def _resolve_or_fail(self, job: Job) -> Job:
-        if job.operation in {"postprocess", "index"}:
+        if job.operation in _MAINTENANCE_OPERATIONS:
             marker = self._processing_completion_marker(job)
             if marker.is_file():
                 return self.store.transition(
@@ -455,7 +468,7 @@ class RunManager:
         self._threads.pop(job_id, None)
         current = self.store.get(job_id)
         if exit_code == 0:
-            if current.operation in {"postprocess", "index"}:
+            if current.operation in _MAINTENANCE_OPERATIONS:
                 try:
                     marker = self._processing_completion_marker(current)
                     marker.write_text(current.operation + "\n", encoding="utf-8")
