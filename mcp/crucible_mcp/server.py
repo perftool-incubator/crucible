@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from jsonschema import Draft201909Validator
 
 from .jobs import JobConflictError, JobNotFoundError, JobStore
-from .models import Job
+from .models import Job, JobState
 from .operations import CrucibleOperations, OperationError
 from .policy import InputPolicy, PolicyError, read_token, token_matches
 from .runner import RunManager
