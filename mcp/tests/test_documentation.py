@@ -59,6 +59,13 @@ class TestDocumentationCatalog(unittest.TestCase):
         with self.assertRaises(ValueError):
             DocumentationCatalog(self.root, max_document_bytes=1)
 
+    def test_rejects_unbounded_search_queries(self):
+        catalog = DocumentationCatalog(self.root)
+        with self.assertRaises(ValueError):
+            catalog.search(" ".join(f"term{index}" for index in range(65)))
+        with self.assertRaises(ValueError):
+            catalog.search("x" * 4097)
+
 
 if __name__ == "__main__":
     unittest.main()

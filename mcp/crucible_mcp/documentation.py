@@ -8,6 +8,8 @@ from typing import Any
 
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 DOCUMENT_CHUNK_BYTES = 512 * 1024
+MAX_SEARCH_QUERY_BYTES = 4096
+MAX_SEARCH_TERMS = 64
 _RESOURCE_URI = re.compile(r"^crucible://docs/([^/]+)(?:/chunk/([1-9][0-9]*))?$")
 
 
@@ -186,7 +188,13 @@ class DocumentationCatalog:
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query is required")
+        if len(query.encode("utf-8")) > MAX_SEARCH_QUERY_BYTES:
+            raise ValueError(
+                f"query must be at most {MAX_SEARCH_QUERY_BYTES} bytes"
+            )
         terms = tuple(dict.fromkeys(query.casefold().split()))
+        if len(terms) > MAX_SEARCH_TERMS:
+            raise ValueError(f"query must contain at most {MAX_SEARCH_TERMS} terms")
         matches = []
         previous_document = None
         overlap = ""

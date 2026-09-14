@@ -183,7 +183,7 @@ TOOL_DEFINITIONS = (
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "minLength": 1, "maxLength": 4096},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20},
             },
             "required": ["query"],
