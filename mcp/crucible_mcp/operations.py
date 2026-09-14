@@ -20,6 +20,8 @@ from jsonschema import Draft201909Validator
 from .documentation import DocumentationCatalog
 from .policy import InputPolicy, PolicyError
 
+MAX_LOG_RESPONSE_BYTES = 1_048_576
+
 
 class OperationError(RuntimeError):
     """A structured operation failure safe to return to an MCP client."""
@@ -709,6 +711,7 @@ class CrucibleOperations:
                 rows = connection.execute(query, params)
                 lines = []
                 matched = 0
+                response_bytes = 0
                 complete = True
                 for timestamp, line_stream, line in rows:
                     line = line or ""
@@ -720,7 +723,19 @@ class CrucibleOperations:
                     if len(lines) >= limit:
                         complete = False
                         break
-                    lines.append({"timestamp": timestamp, "stream": line_stream, "line": line})
+                    candidate = {"timestamp": timestamp, "stream": line_stream, "line": line}
+                    candidate_bytes = len(json.dumps(candidate, separators=(",", ":")).encode("utf-8"))
+                    if response_bytes + candidate_bytes > MAX_LOG_RESPONSE_BYTES:
+                        if not lines:
+                            raise OperationError(
+                                "framework",
+                                "log response contains a line larger than the response limit",
+                                "result_too_large",
+                            )
+                        complete = False
+                        break
+                    lines.append(candidate)
+                    response_bytes += candidate_bytes
                     matched += 1
         except OperationError:
             raise
@@ -784,6 +799,7 @@ class CrucibleOperations:
                 sql += " ORDER BY lines.id"
                 matches = []
                 matched = 0
+                response_bytes = 0
                 complete = True
                 for row in connection.execute(sql, params):
                     line = row[3] or ""
@@ -795,12 +811,26 @@ class CrucibleOperations:
                     if len(matches) >= limit:
                         complete = False
                         break
-                    matches.append({
+                    candidate = {
                         "session_id": row[0], "timestamp": row[1],
                         "stream": row[2], "line": line,
                         "source": row[4], "command": row[5],
-                    })
+                    }
+                    candidate_bytes = len(json.dumps(candidate, separators=(",", ":")).encode("utf-8"))
+                    if response_bytes + candidate_bytes > MAX_LOG_RESPONSE_BYTES:
+                        if not matches:
+                            raise OperationError(
+                                "framework",
+                                "log response contains a line larger than the response limit",
+                                "result_too_large",
+                            )
+                        complete = False
+                        break
+                    matches.append(candidate)
+                    response_bytes += candidate_bytes
                     matched += 1
+        except OperationError:
+            raise
         except sqlite3.Error as exc:
             raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
         return {

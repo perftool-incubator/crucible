@@ -367,6 +367,41 @@ class TestCrucibleOperations(unittest.TestCase):
             self.operations.get_log_session("session-1", grep="(a+)+$")
         self.assertEqual(session_error.exception.code, "invalid_grep")
 
+    def test_log_responses_are_byte_bounded_and_resumable(self):
+        database = self.root / "large-logs.db"
+        connection = sqlite3.connect(database)
+        connection.executescript(
+            """
+            CREATE TABLE sources (id INTEGER PRIMARY KEY, source TEXT);
+            CREATE TABLE commands (id INTEGER PRIMARY KEY, command TEXT);
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT,
+                source INTEGER, command INTEGER
+            );
+            CREATE TABLE streams (id INTEGER PRIMARY KEY, stream TEXT);
+            CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER, stream INTEGER, timestamp TEXT, line TEXT);
+            INSERT INTO streams VALUES (1, 'STDOUT');
+            INSERT INTO sources VALUES (1, 'runner');
+            INSERT INTO commands VALUES (1, 'crucible run example.json');
+            INSERT INTO sessions VALUES (1, 'large-session', '2026-09-09T00:00:00Z', 1, 1);
+            """
+        )
+        large_line = "x" * 700_000
+        connection.execute("INSERT INTO lines VALUES (?, ?, ?, ?, ?)", (1, 1, 1, "t1", large_line))
+        connection.execute("INSERT INTO lines VALUES (?, ?, ?, ?, ?)", (2, 1, 1, "t2", large_line))
+        connection.commit()
+        connection.close()
+
+        operations = CrucibleOperations(self.root, log_db=database)
+        session = operations.get_log_session("large-session", grep="x")
+        self.assertEqual(len(session["lines"]), 1)
+        self.assertEqual(session["next_offset"], 1)
+        self.assertFalse(session["complete"])
+        search = operations.search_logs("x", session_id="large-session")
+        self.assertEqual(len(search["matches"]), 1)
+        self.assertEqual(search["next_offset"], 1)
+        self.assertFalse(search["complete"])
+
     def test_validate_run_reports_schema_and_installed_benchmark_errors(self):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})
         self.assertFalse(result["valid"])
