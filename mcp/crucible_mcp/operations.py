@@ -53,7 +53,8 @@ class CrucibleOperations:
         self.cdm_base_url = cdm_base_url.rstrip("/")
         self.log_db = Path(log_db) if log_db else None
         self.documentation = DocumentationCatalog(self.crucible_home)
-        self.archive_root = (Path(run_root) if run_root else self.crucible_home / "run").resolve().parent / "archive"
+        self.local_run_root = (Path(run_root) if run_root else self.crucible_home / "run").resolve()
+        self.archive_root = self.local_run_root.parent / "archive"
         self.input_policy = input_policy or InputPolicy(
             [self.crucible_home / "mcp" / "inputs"]
         )
@@ -161,40 +162,38 @@ class CrucibleOperations:
             raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
         entries: list[dict[str, Any]] = []
         seen: set[Path] = set()
-        for root in self.run_policy.roots:
-            if not root.is_dir():
+        root = self.local_run_root
+        if not root.is_dir():
+            return {"runs": [], "count": 0}
+        for directory in sorted(root.iterdir(), key=lambda path: path.name):
+            if directory.is_symlink() or not directory.is_dir():
                 continue
-            for directory in sorted(root.iterdir(), key=lambda path: path.name):
-                if directory.is_symlink() or not directory.is_dir():
-                    continue
-                try:
-                    canonical = directory.resolve(strict=True)
-                except OSError:
-                    continue
-                if canonical in seen:
-                    continue
-                seen.add(canonical)
-                entry: dict[str, Any] = {
-                    "name": directory.name,
-                    "path": str(canonical),
-                    "status": "incomplete",
-                    "run_id": None,
-                    "tags": [],
-                }
-                try:
-                    _, metadata = self._load_run_metadata(canonical)
-                except OperationError:
-                    entries.append(entry)
-                    if len(entries) >= limit:
-                        break
-                    continue
-                entry["status"] = "complete"
-                entry["run_id"] = metadata.get("run-id") or metadata.get("id")
-                tags = metadata.get("tags", [])
-                entry["tags"] = tags if isinstance(tags, list) else []
+            try:
+                canonical = directory.resolve(strict=True)
+            except OSError:
+                continue
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            entry: dict[str, Any] = {
+                "name": directory.name,
+                "path": str(canonical),
+                "status": "incomplete",
+                "run_id": None,
+                "tags": [],
+            }
+            try:
+                _, metadata = self._load_run_metadata(canonical)
+            except OperationError:
                 entries.append(entry)
                 if len(entries) >= limit:
                     break
+                continue
+            entry["status"] = "complete"
+            entry["run_id"] = metadata.get("run-id") or metadata.get("id")
+            tags = metadata.get("tags", [])
+            entry["tags"] = tags if isinstance(tags, list) else []
+            entries.append(entry)
             if len(entries) >= limit:
                 break
         return {"runs": entries, "count": len(entries)}

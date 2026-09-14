@@ -130,6 +130,15 @@ class TestCrucibleOperations(unittest.TestCase):
 
         self.assertEqual(result["count"], 1)
 
+    def test_list_local_runs_excludes_mcp_supervision_root(self):
+        supervision_root = self.root / "mcp-runs"
+        (supervision_root / "job-1").mkdir(parents=True)
+        self.operations.run_policy = InputPolicy([self.root / "run", supervision_root])
+
+        result = self.operations.list_local_runs()
+
+        self.assertEqual(result["count"], 0)
+
     def test_get_local_run_summary_reads_local_artifact(self):
         run_directory = self.root / "run" / "completed-run"
         summary_path = run_directory / "run" / "result-summary.json"
