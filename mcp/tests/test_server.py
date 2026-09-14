@@ -201,6 +201,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         info = payload["result"]["structuredContent"]
         self.assertTrue(info["execution_supported"])
+        self.assertEqual(info["mcp_contract_version"], "2")
         self.assertIn("start_run", info["capabilities"])
         self.assertIn("get_run_logs", info["capabilities"])
         self.assertIn("get_run_summary", info["capabilities"])
