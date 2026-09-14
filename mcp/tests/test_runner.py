@@ -204,6 +204,21 @@ class TestRunManager(unittest.TestCase):
         recovered = self.manager._resolve_or_fail(self.store.get(job.mcp_job_id))
         self.assertEqual(recovered.state, JobState.FAILED)
 
+    def test_failed_standalone_index_is_not_reported_completed(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "failed-index",
+            [sys.executable, "-c", "import sys; sys.exit(7)"],
+        )
+        target = self.root / "run" / "failed-index-result"
+        target.mkdir(parents=True)
+        job, _ = manager.submit_processing("key-failed-index", "index", target)
+        manager._threads[job.mcp_job_id].join(timeout=5)
+        failed = self.store.get(job.mcp_job_id)
+        self.assertEqual(failed.state, JobState.FAILED)
+        self.assertEqual(failed.exit_code, 7)
+
     def test_input_path_outside_approved_root_returns_authorization_error(self):
         path = self.root / "outside.json"
         path.write_text('{"benchmarks":[{"name":"example"}]}', encoding="utf-8")

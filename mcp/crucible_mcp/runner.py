@@ -403,7 +403,7 @@ class RunManager:
                 result_status=result_status.value,
                 exit_code=exit_code,
             )
-        elif current.state == JobState.INDEXING:
+        elif current.state == JobState.INDEXING and current.operation == "run":
             if self._wait_for_result_summary(current):
                 self.store.transition(
                     job_id,
