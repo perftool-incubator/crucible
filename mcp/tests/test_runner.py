@@ -247,6 +247,24 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(changed, [])
         reattach.assert_called_once_with(self.store.get(job.mcp_job_id))
 
+    def test_indexed_deletion_recovery_identity_uses_supervision_marker(self):
+        job, _ = self.store.create_or_get(
+            "key-delete-recovery-identity", {"run": "run-1"}, "delete_indexed_result"
+        )
+        supervision = self.root / "delete-recovery-identity"
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            runner_pid=1234,
+            supervision_directory=str(supervision),
+        )
+        command_line = (
+            f"python\0-c\0wrapper\0{supervision / 'processing-complete'}\0"
+            "crucible\0rm\0--run\0run-1\0"
+        ).encode()
+        with patch("pathlib.Path.read_bytes", return_value=command_line):
+            self.assertTrue(self.manager._runner_identity_matches(self.store.get(job.mcp_job_id)))
+
     def test_maintenance_completion_marker_resolves_recovery(self):
         job, _ = self.store.create_or_get(
             "key-maintenance-marker", {"run": "run-2"}, "delete_indexed_result"

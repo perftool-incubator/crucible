@@ -307,13 +307,21 @@ class RunManager:
         return Path(supervision_directory) / "processing-complete"
 
     def _runner_identity_matches(self, job: Job) -> bool:
-        if job.runner_pid is None or not job.run_directory:
+        if job.runner_pid is None:
             return False
-        identity_path = (
-            Path(job.run_directory) / "input" / "run-file.json"
-            if job.operation == "run"
-            else Path(job.run_directory)
-        )
+        if job.operation == "delete_indexed_result":
+            supervision_directory = job.supervision_directory or str(
+                self.run_root / job.mcp_job_id
+            )
+            identity_path = Path(supervision_directory) / "processing-complete"
+        elif job.run_directory:
+            identity_path = (
+                Path(job.run_directory) / "input" / "run-file.json"
+                if job.operation == "run"
+                else Path(job.run_directory)
+            )
+        else:
+            return False
         try:
             command_line = Path(f"/proc/{job.runner_pid}/cmdline").read_bytes()
         except OSError:
