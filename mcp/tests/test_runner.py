@@ -180,6 +180,30 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.INDEXING)
         manager._threads[job.mcp_job_id].join(timeout=5)
 
+    def test_processing_recovery_does_not_trust_existing_summary(self):
+        job, _ = self.store.create_or_get(
+            "key-processing-recovery-summary", {"operation": "index"}, "index"
+        )
+        target = self.root / "run" / "existing-result"
+        (target / "run").mkdir(parents=True)
+        (target / "run" / "result-summary.json").write_text("{}", encoding="utf-8")
+        supervision = self.root / "processing-recovery-job"
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(target),
+            supervision_directory=str(supervision),
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.INDEXING,
+            run_directory=str(target),
+            supervision_directory=str(supervision),
+        )
+
+        recovered = self.manager._resolve_or_fail(self.store.get(job.mcp_job_id))
+        self.assertEqual(recovered.state, JobState.FAILED)
+
     def test_input_path_outside_approved_root_returns_authorization_error(self):
         path = self.root / "outside.json"
         path.write_text('{"benchmarks":[{"name":"example"}]}', encoding="utf-8")

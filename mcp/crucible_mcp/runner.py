@@ -173,6 +173,18 @@ class RunManager:
         )
 
     def _resolve_or_fail(self, job: Job) -> Job:
+        if job.operation in {"postprocess", "index"}:
+            marker = self._processing_completion_marker(job)
+            if marker.is_file():
+                return self.store.transition(
+                    job.mcp_job_id,
+                    JobState.COMPLETED,
+                    result_status=ResultStatus.PENDING.value,
+                    exit_code=0,
+                )
+            return self._fail_recovery_job(
+                job, "processing runner was lost before completion was recorded"
+            )
         if job.run_directory:
             summary_path = Path(job.run_directory) / "run" / "result-summary.json"
             if summary_path.is_file() and job.state == JobState.RUNNING:
@@ -185,6 +197,12 @@ class RunManager:
         return self._fail_recovery_job(
             job, "runner was not present or could not be verified during reconciliation"
         )
+
+    def _processing_completion_marker(self, job: Job) -> Path:
+        supervision_directory = job.supervision_directory or str(
+            self.run_root / job.mcp_job_id
+        )
+        return Path(supervision_directory) / "processing-complete"
 
     def _runner_identity_matches(self, job: Job) -> bool:
         if job.runner_pid is None or not job.run_directory:
@@ -362,6 +380,20 @@ class RunManager:
         self._threads.pop(job_id, None)
         current = self.store.get(job_id)
         if exit_code == 0:
+            if current.operation in {"postprocess", "index"}:
+                try:
+                    marker = self._processing_completion_marker(current)
+                    marker.write_text(current.operation + "\n", encoding="utf-8")
+                except OSError as exc:
+                    self.store.transition(
+                        job_id,
+                        JobState.FAILED,
+                        result_status=ResultStatus.UNAVAILABLE.value,
+                        exit_code=exit_code,
+                        error_category="infrastructure",
+                        error_message=f"could not record processing completion: {exc}",
+                    )
+                    return
             result_status = current.result_status
             if result_status == ResultStatus.NOT_AVAILABLE:
                 result_status = ResultStatus.PENDING
