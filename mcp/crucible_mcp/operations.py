@@ -255,7 +255,7 @@ class CrucibleOperations:
             raise OperationError(
                 "user", "local run summary is unavailable", "result_unavailable"
             ) from exc
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise OperationError(
                 "user", "local run summary is not valid JSON", "invalid_result"
             ) from exc
@@ -289,7 +289,7 @@ class CrucibleOperations:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         except OperationError:
             raise
-        except (OSError, lzma.LZMAError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, lzma.LZMAError, json.JSONDecodeError) as exc:
             raise OperationError(
                 "user", "run metadata is not valid JSON", "invalid_run"
             ) from exc

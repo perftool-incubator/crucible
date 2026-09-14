@@ -234,6 +234,23 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["metadata_path"], str(metadata_path))
         self.assertEqual(result["metadata"], {"run-id": "run-2", "benchmarks": []})
 
+    def test_local_artifact_invalid_utf8_is_a_structured_artifact_error(self):
+        summary_run = self.root / "run" / "invalid-summary"
+        summary_path = summary_run / "run" / "result-summary.json"
+        summary_path.parent.mkdir(parents=True)
+        summary_path.write_bytes(b"{\xff}")
+        with self.assertRaises(OperationError) as summary_error:
+            self.operations.get_local_run_summary(summary_run)
+        self.assertEqual(summary_error.exception.code, "invalid_result")
+
+        metadata_run = self.root / "run" / "invalid-metadata"
+        metadata_path = metadata_run / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_bytes(b"{\xff}")
+        with self.assertRaises(OperationError) as metadata_error:
+            self.operations.get_local_run_metadata(metadata_run)
+        self.assertEqual(metadata_error.exception.code, "invalid_run")
+
     def test_local_run_path_rejections_are_structured_operation_errors(self):
         outside = self.root / "outside"
         outside.mkdir()
