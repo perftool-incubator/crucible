@@ -115,6 +115,7 @@ class JobStore:
                         mcp_job_id TEXT PRIMARY KEY,
                         idempotency_key TEXT NOT NULL UNIQUE,
                         request_hash TEXT NOT NULL,
+                        operation TEXT NOT NULL DEFAULT 'run',
                         state TEXT NOT NULL,
                         result_status TEXT NOT NULL,
                         logger_session_id TEXT,
@@ -131,7 +132,11 @@ class JobStore:
                     )
                     """
                 )
-            elif version[0] != 1:
+                connection.execute("UPDATE schema_version SET version = 2")
+            elif version[0] == 1:
+                connection.execute("ALTER TABLE jobs ADD COLUMN operation TEXT NOT NULL DEFAULT 'run'")
+                connection.execute("UPDATE schema_version SET version = 2")
+            elif version[0] != 2:
                 raise JobError(f"unsupported MCP job database schema: {version[0]}")
 
     @contextmanager
@@ -147,7 +152,7 @@ class JobStore:
             else:
                 connection.commit()
 
-    def create_or_get(self, idempotency_key: str, request: Any) -> tuple[Job, bool]:
+    def create_or_get(self, idempotency_key: str, request: Any, operation: str = "run") -> tuple[Job, bool]:
         if not idempotency_key:
             raise ValueError("idempotency_key is required")
         hashed_request = request_hash(request)
@@ -167,14 +172,15 @@ class JobStore:
             connection.execute(
                 """
                 INSERT INTO jobs(
-                    mcp_job_id, idempotency_key, request_hash, state, result_status,
+                    mcp_job_id, idempotency_key, request_hash, operation, state, result_status,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
                     idempotency_key,
                     hashed_request,
+                    operation,
                     JobState.QUEUED.value,
                     ResultStatus.NOT_AVAILABLE.value,
                     now,

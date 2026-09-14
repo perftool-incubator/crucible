@@ -733,6 +733,7 @@ function start_mcp_server() {
             --max-request-bytes "${mcp_max_inline_bytes}"
             --crucible-home "${CRUCIBLE_HOME}"
             --input-root "${mcp_input_root}"
+            --run-root "${var_run_crucible}"
             --max-run-file-bytes "${mcp_max_run_file_bytes}"
             --cdm-readiness-timeout "${mcp_cdm_readiness_timeout}"
             --cdm-url "http://127.0.0.1:${mcp_cdm_port}"
@@ -745,12 +746,13 @@ function start_mcp_server() {
         mcp_data_mounts=()
         mcp_data_paths=()
         mcp_data_readonly_flags=()
-        for mcp_data_index in 0 1 2 3; do
+        for mcp_data_index in 0 1 2 3 4; do
             case ${mcp_data_index} in
                 0) mcp_data_path=$(dirname "${mcp_database}"); mcp_data_readonly=false ;;
                 1) mcp_data_path=${mcp_input_root}; mcp_data_readonly=true ;;
                 2) mcp_data_path=$(dirname "${mcp_audit_log}"); mcp_data_readonly=false ;;
                 3) mcp_data_path=$(dirname "${LOG_DB}"); mcp_data_readonly=true ;;
+                4) mcp_data_path=${var_run_crucible}; mcp_data_readonly=false ;;
             esac
             case "${mcp_data_path}" in
                 /var/lib/crucible|/var/lib/crucible/*|/root|/root/*|/home|/home/*|"${CRUCIBLE_HOME}"|"${CRUCIBLE_HOME}"/*)

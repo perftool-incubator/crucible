@@ -96,3 +96,14 @@ class InputPolicy:
         if not any(candidate == root or root in candidate.parents for root in self._roots):
             raise PolicyError("run-file is outside the configured input roots")
         return candidate
+
+    def canonical_directory(self, requested_path: Path) -> Path:
+        try:
+            candidate = requested_path.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise PolicyError("run directory does not exist") from exc
+        if not candidate.is_dir():
+            raise PolicyError("run path must be a directory")
+        if not any(candidate == root or root in candidate.parents for root in self._roots):
+            raise PolicyError("run directory is outside the configured run roots")
+        return candidate

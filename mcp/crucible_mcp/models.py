@@ -52,6 +52,7 @@ class Job:
     request_hash: str
     state: JobState
     result_status: ResultStatus
+    operation: str = "run"
     logger_session_id: Optional[str] = None
     rickshaw_run_id: Optional[str] = None
     cdm_run_id: Optional[str] = None

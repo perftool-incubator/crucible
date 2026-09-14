@@ -41,6 +41,7 @@ class CrucibleOperations:
         input_policy: InputPolicy | None = None,
         cdm_base_url: str = "http://127.0.0.1:3000",
         log_db: Path | None = None,
+        run_root: Path | None = None,
     ):
         self.crucible_home = Path(crucible_home).resolve()
         self.cdm_base_url = cdm_base_url.rstrip("/")
@@ -49,6 +50,7 @@ class CrucibleOperations:
         self.input_policy = input_policy or InputPolicy(
             [self.crucible_home / "mcp" / "inputs"]
         )
+        self.run_policy = InputPolicy([run_root or self.crucible_home / "run"])
 
     def crucible_info(self) -> dict[str, Any]:
         return {
@@ -71,6 +73,8 @@ class CrucibleOperations:
                 "get_run_status",
                 "get_run_logs",
                 "get_run_summary",
+                "postprocess_run",
+                "index_run",
                 "search_documentation",
             ],
         }

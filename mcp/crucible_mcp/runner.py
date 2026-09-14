@@ -131,6 +131,27 @@ class RunManager:
             changed.append(self._resolve_or_fail(job))
         return changed
 
+    def submit_processing(self, idempotency_key: str, operation: str, run_directory: Path) -> tuple[Job, bool]:
+        if operation not in {"postprocess", "index"}:
+            raise OperationError("user", "unsupported processing operation", "invalid_operation")
+        try:
+            canonical = self.operations.run_policy.canonical_directory(run_directory)
+        except PolicyError as exc:
+            raise OperationError("authorization", str(exc), "run_path_rejected") from exc
+        request = {"operation": operation, "run_directory": str(canonical)}
+        job, created = self.store.create_or_get(idempotency_key, request, operation)
+        if not created:
+            return job, False
+        session_id = str(uuid.uuid4())
+        job_directory = self.run_root / job.mcp_job_id
+        job_directory.mkdir(mode=0o700, parents=True)
+        self.store.transition(job.mcp_job_id, JobState.QUEUED,
+                              logger_session_id=session_id,
+                              run_directory=str(canonical))
+        self._launch_command(job.mcp_job_id, session_id, job_directory,
+                              [operation, str(canonical)])
+        return self.store.get(job.mcp_job_id), True
+
     def _fail_recovery_job(self, job: Job, message: str) -> Job:
         return self.store.transition(
             job.mcp_job_id,
@@ -157,12 +178,16 @@ class RunManager:
     def _runner_identity_matches(self, job: Job) -> bool:
         if job.runner_pid is None or not job.run_directory:
             return False
-        run_file = Path(job.run_directory) / "input" / "run-file.json"
+        identity_path = (
+            Path(job.run_directory) / "input" / "run-file.json"
+            if job.operation == "run"
+            else Path(job.run_directory)
+        )
         try:
             command_line = Path(f"/proc/{job.runner_pid}/cmdline").read_bytes()
         except OSError:
             return False
-        return str(run_file).encode("utf-8") in command_line.split(b"\0")
+        return str(identity_path).encode("utf-8") in command_line.split(b"\0")
 
     def _reattach(self, job: Job) -> None:
         if job.mcp_job_id in self._threads:
@@ -258,6 +283,9 @@ class RunManager:
         )
 
     def _launch(self, job_id: str, session_id: str, run_file: Path, job_directory: Path) -> None:
+        self._launch_command(job_id, session_id, job_directory, ["run", str(run_file)])
+
+    def _launch_command(self, job_id: str, session_id: str, job_directory: Path, command: list[str]) -> None:
         log_path = job_directory / "runner.log"
         log = log_path.open("ab")
         environment = os.environ.copy()
@@ -266,7 +294,7 @@ class RunManager:
         environment["CRUCIBLE_MCP_EVENT_FILE"] = str(event_path)
         try:
             process = subprocess.Popen(
-                [*self.crucible_command, "run", str(run_file)],
+                [*self.crucible_command, *command],
                 cwd=str(self.operations.crucible_home),
                 env=environment,
                 stdin=subprocess.DEVNULL,

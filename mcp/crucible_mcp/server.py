@@ -40,6 +40,8 @@ TOOL_NAMES = (
     "get_run_status",
     "get_run_logs",
     "get_run_summary",
+    "postprocess_run",
+    "index_run",
     "search_documentation",
 )
 
@@ -176,6 +178,26 @@ TOOL_DEFINITIONS = (
             "required": ["mcp_job_id"],
             "additionalProperties": False,
         },
+    },
+    {
+        "name": "postprocess_run",
+        "description": "Post-process an approved Crucible run directory.",
+        "inputSchema": {"type": "object", "properties": {
+            "idempotency_key": {"type": "string", "minLength": 1},
+            "run_path": {"type": "string", "minLength": 1},
+            "mcp_job_id": {"type": "string", "minLength": 1}},
+            "required": ["idempotency_key"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
+            "additionalProperties": False},
+    },
+    {
+        "name": "index_run",
+        "description": "Index an approved Crucible run directory into CDM.",
+        "inputSchema": {"type": "object", "properties": {
+            "idempotency_key": {"type": "string", "minLength": 1},
+            "run_path": {"type": "string", "minLength": 1},
+            "mcp_job_id": {"type": "string", "minLength": 1}},
+            "required": ["idempotency_key"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
+            "additionalProperties": False},
     },
     {
         "name": "search_documentation",
@@ -473,6 +495,22 @@ class MCPHandler(BaseHTTPRequestHandler):
                 if "mcp_job_id" not in arguments:
                     return self._error(request_id, -32602, "mcp_job_id is required")
                 value = self.server.run_manager.get_summary(arguments["mcp_job_id"])
+            elif name in {"postprocess_run", "index_run"}:
+                if "run_path" in arguments:
+                    processing_path = Path(arguments["run_path"])
+                else:
+                    source_job = self.server.jobs.get(arguments["mcp_job_id"])
+                    if source_job.state != JobState.COMPLETED:
+                        return self._error(request_id, -32000, "source job has not completed")
+                    if not source_job.run_directory:
+                        return self._error(request_id, -32000, "source job has no run directory")
+                    processing_path = Path(source_job.run_directory)
+                job, created = self.server.run_manager.submit_processing(
+                    arguments["idempotency_key"],
+                    "postprocess" if name == "postprocess_run" else "index",
+                    processing_path,
+                )
+                value = {"created": created, "job": _job_status(job)}
             elif name == "search_documentation":
                 value = self.server.operations.search_documentation(
                     arguments["query"], arguments.get("limit", 10)
@@ -504,6 +542,7 @@ def main() -> None:
     parser.add_argument("--max-request-bytes", type=int, default=1_048_576)
     parser.add_argument("--crucible-home", type=Path, required=True)
     parser.add_argument("--input-root", type=Path, required=True)
+    parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--max-run-file-bytes", type=int, default=1_048_576)
     parser.add_argument("--cdm-readiness-timeout", type=int, default=60)
     parser.add_argument("--cdm-url", default="http://127.0.0.1:3000")
@@ -521,7 +560,11 @@ def main() -> None:
         args.crucible_home,
         InputPolicy([args.input_root], args.max_run_file_bytes),
         cdm_base_url=args.cdm_url,
+        run_root=args.run_root,
         log_db=args.log_db,
+    )
+    server.operations.run_policy = InputPolicy(
+        [args.run_root, args.database.parent / "runs"]
     )
     server.run_manager = RunManager(
         server.jobs,
