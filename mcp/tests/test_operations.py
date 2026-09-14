@@ -1,4 +1,5 @@
 import json
+import lzma
 import sqlite3
 import tempfile
 import time
@@ -163,6 +164,19 @@ class TestCrucibleOperations(unittest.TestCase):
         result = self.operations.list_local_runs()
 
         self.assertEqual(result["runs"][0]["status"], "incomplete")
+
+    def test_compressed_metadata_is_bounded_after_decompression(self):
+        run_directory = self.root / "run" / "large-metadata"
+        metadata_path = run_directory / "run" / "rickshaw-run.json.xz"
+        metadata_path.parent.mkdir(parents=True)
+        with lzma.open(metadata_path, "wt", encoding="utf-8") as stream:
+            json.dump({"tags": [], "padding": "x" * 1_048_576}, stream)
+
+        result = self.operations.list_local_runs()
+        self.assertEqual(result["runs"][0]["status"], "incomplete")
+        with self.assertRaises(OperationError) as raised:
+            self.operations.list_local_run_tags(run_directory)
+        self.assertEqual(raised.exception.code, "result_too_large")
 
     def test_list_local_runs_excludes_mcp_supervision_root(self):
         supervision_root = self.root / "mcp-runs"

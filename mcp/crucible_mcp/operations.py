@@ -358,16 +358,25 @@ class CrucibleOperations:
         try:
             canonical = self._canonical_run_directory(run_directory)
             path = self._run_metadata_path(canonical)
-            opener = lzma.open if path.suffix == ".xz" else open
-            with opener(path, "rt", encoding="utf-8") as stream:
-                document = json.load(stream)
+            document = self._read_bounded_json(path, 1_048_576)
         except OperationError:
             raise
-        except (OSError, lzma.LZMAError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, lzma.LZMAError, json.JSONDecodeError) as exc:
             raise OperationError("user", "run metadata is not valid JSON", "invalid_run") from exc
         if not isinstance(document, dict):
             raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
         return path, document
+
+    @staticmethod
+    def _read_bounded_json(path: Path, max_bytes: int) -> Any:
+        opener = lzma.open if path.suffix == ".xz" else open
+        with opener(path, "rb") as stream:
+            encoded = stream.read(max_bytes + 1)
+        if len(encoded) > max_bytes:
+            raise OperationError(
+                "framework", "run metadata exceeds size limit", "result_too_large"
+            )
+        return json.loads(encoded.decode("utf-8"))
 
     def _canonical_run_directory(self, run_directory: Path) -> Path:
         try:
