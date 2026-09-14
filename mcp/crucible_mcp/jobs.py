@@ -35,6 +35,7 @@ _TRANSITIONS = {
     JobState.STARTING: {
         JobState.RUNNING,
         JobState.POSTPROCESSING,
+        JobState.INDEXING,
         JobState.FAILED,
         JobState.RECOVERY_REQUIRED,
         JobState.UNKNOWN_AFTER_CRASH,

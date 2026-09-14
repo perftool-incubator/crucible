@@ -166,6 +166,20 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(job.error_category, "infrastructure")
         self.assertIn("could not create processing supervision directory", job.error_message)
 
+    def test_processing_jobs_report_operation_lifecycle_state(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "processing-lifecycle",
+            [sys.executable, "-c", "import time; time.sleep(0.3)"],
+        )
+        target = self.root / "run" / "lifecycle-result"
+        target.mkdir(parents=True)
+        job, _ = manager.submit_processing("key-processing-lifecycle", "index", target)
+        time.sleep(0.05)
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.INDEXING)
+        manager._threads[job.mcp_job_id].join(timeout=5)
+
     def test_input_path_outside_approved_root_returns_authorization_error(self):
         path = self.root / "outside.json"
         path.write_text('{"benchmarks":[{"name":"example"}]}', encoding="utf-8")

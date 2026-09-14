@@ -344,7 +344,12 @@ class RunManager:
         event_path: Path,
         container_name: str,
     ) -> None:
-        self.store.transition(job_id, JobState.RUNNING)
+        job = self.store.get(job_id)
+        lifecycle_state = {
+            "postprocess": JobState.POSTPROCESSING,
+            "index": JobState.INDEXING,
+        }.get(job.operation, JobState.RUNNING)
+        self.store.transition(job_id, lifecycle_state)
         event_position = 0
         while process.poll() is None:
             event_position = self._consume_events(job_id, event_path, event_position)
