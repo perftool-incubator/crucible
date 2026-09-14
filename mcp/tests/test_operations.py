@@ -181,6 +181,8 @@ class TestCrucibleOperations(unittest.TestCase):
         session = operations.get_log_session("session-1", limit=1)
         self.assertEqual(session["lines"][0]["line"], "done")
         self.assertFalse(session["complete"])
+        search = operations.search_logs("complete")
+        self.assertEqual(search["matches"][0]["session_id"], "session-1")
 
     def test_validate_run_reports_schema_and_installed_benchmark_errors(self):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})

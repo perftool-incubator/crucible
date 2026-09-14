@@ -133,6 +133,7 @@ class TestServer(unittest.TestCase):
             "list_tools", "list_results", "get_result", "list_run_periods", "get_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
             "get_log_session",
+            "search_logs",
             "list_run_tags", "add_run_tags", "remove_run_tags",
         ):
             self.assertIn(tool_name, tools)

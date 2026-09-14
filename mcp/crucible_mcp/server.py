@@ -35,6 +35,7 @@ TOOL_NAMES = (
     "list_log_sessions",
     "get_log_info",
     "get_log_session",
+    "search_logs",
     "describe_benchmark",
     "validate_run",
     "start_run",
@@ -121,6 +122,19 @@ TOOL_DEFINITIONS = (
             "stream": {"type": "string", "enum": ["stdout", "stderr"]},
             "grep": {"type": "string", "maxLength": 256}},
             "required": ["session_id"], "additionalProperties": False},
+    },
+    {
+        "name": "search_logs",
+        "description": "Search Crucible logger lines across sessions.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string", "minLength": 1, "maxLength": 256},
+            "session_id": {"type": "string", "minLength": 1},
+            "stream": {"type": "string", "enum": ["stdout", "stderr"]},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 10000},
+            "since": {"type": "number"},
+            "until": {"type": "number"}},
+            "required": ["query"], "additionalProperties": False},
     },
     {
         "name": "describe_benchmark",
@@ -493,6 +507,13 @@ class MCPHandler(BaseHTTPRequestHandler):
                     arguments["session_id"], arguments.get("offset", 0),
                     arguments.get("limit", 1000), arguments.get("stream"),
                     arguments.get("grep"),
+                )
+            elif name == "search_logs":
+                value = self.server.operations.search_logs(
+                    arguments["query"], arguments.get("session_id"),
+                    arguments.get("stream"), arguments.get("offset", 0),
+                    arguments.get("limit", 1000), arguments.get("since"),
+                    arguments.get("until"),
                 )
             elif name == "describe_benchmark":
                 value = self.server.operations.describe_benchmark(arguments.get("name", ""))

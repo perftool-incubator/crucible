@@ -154,6 +154,7 @@ through the standard `tools/list` request; the current interface is:
 | `list_log_sessions` | List recent logger sessions without returning their full contents. |
 | `get_log_info` | Return aggregate counts from the logger database. |
 | `get_log_session` | Read a bounded, structured slice of one logger session with optional stream and regex filters. |
+| `search_logs` | Search logger lines across sessions with bounded regex, stream, and time filters. |
 | `search_documentation` | Search the curated user-facing Crucible documentation catalog. |
 
 `validate_run` is intentionally limited to Crucible run documents: clients can

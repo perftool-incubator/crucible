@@ -75,6 +75,7 @@ class CrucibleOperations:
                 "list_log_sessions",
                 "get_log_info",
                 "get_log_session",
+                "search_logs",
                 "validate_run",
                 "start_run",
                 "get_run_status",
@@ -527,6 +528,81 @@ class CrucibleOperations:
             "next_offset": offset + len(lines),
             "complete": complete,
             "lines": lines,
+        }
+
+    def search_logs(
+        self,
+        query: str,
+        session_id: str | None = None,
+        stream: str | None = None,
+        offset: int = 0,
+        limit: int = 1000,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> dict[str, Any]:
+        """Search logger lines with bounded, structured results."""
+
+        if not isinstance(query, str) or not query or len(query) > 256:
+            raise OperationError("user", "query must be 1..256 characters", "invalid_query")
+        try:
+            pattern = re.compile(query)
+        except re.error as exc:
+            raise OperationError("user", "query is not a valid regular expression", "invalid_query") from exc
+        if offset < 0 or limit < 1 or limit > 10000:
+            raise OperationError("user", "offset must be nonnegative and limit must be 1..10000", "invalid_bounds")
+        if stream is not None and stream not in {"stdout", "stderr"}:
+            raise OperationError("user", "stream must be stdout or stderr", "invalid_stream")
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                sql = """SELECT sessions.session_id, lines.timestamp, streams.stream,
+                                 lines.line, sources.source, commands.command
+                          FROM sessions JOIN lines ON lines.session = sessions.id
+                          JOIN streams ON streams.id = lines.stream
+                          JOIN sources ON sources.id = sessions.source
+                          JOIN commands ON commands.id = sessions.command
+                          WHERE 1 = 1"""
+                params: list[Any] = []
+                if session_id is not None:
+                    self._require_text(session_id, "session_id")
+                    sql += " AND sessions.session_id = ?"
+                    params.append(session_id)
+                if stream is not None:
+                    sql += " AND streams.stream = ?"
+                    params.append(stream.upper())
+                if since is not None:
+                    sql += " AND lines.timestamp >= ?"
+                    params.append(since)
+                if until is not None:
+                    sql += " AND lines.timestamp <= ?"
+                    params.append(until)
+                sql += " ORDER BY lines.id"
+                matches = []
+                matched = 0
+                complete = True
+                for row in connection.execute(sql, params):
+                    line = row[3] or ""
+                    if pattern.search(line) is None:
+                        continue
+                    if matched < offset:
+                        matched += 1
+                        continue
+                    if len(matches) >= limit:
+                        complete = False
+                        break
+                    matches.append({
+                        "session_id": row[0], "timestamp": row[1],
+                        "stream": row[2], "line": line,
+                        "source": row[4], "command": row[5],
+                    })
+                    matched += 1
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        return {
+            "query": query, "offset": offset,
+            "next_offset": offset + len(matches),
+            "complete": complete, "matches": matches,
         }
 
     def _cdm_request(
