@@ -771,15 +771,21 @@ class CrucibleOperations:
             raise
         except sqlite3.Error as exc:
             raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        def build_session_result(selected: list[dict[str, Any]], result_complete: bool) -> dict[str, Any]:
+            return {
+                "session_id": session_id,
+                "timestamp": metadata[0],
+                "source": metadata[1],
+                "command": metadata[2],
+                "offset": offset,
+                "next_offset": offset + len(selected),
+                "complete": result_complete,
+                "lines": selected,
+            }
+
+        lines, trimmed = self._bound_log_items(lines, build_session_result, complete)
         return {
-            "session_id": session_id,
-            "timestamp": metadata[0],
-            "source": metadata[1],
-            "command": metadata[2],
-            "offset": offset,
-            "next_offset": offset + len(lines),
-            "complete": complete,
-            "lines": lines,
+            **build_session_result(lines, complete and not trimmed),
         }
 
     def search_logs(
@@ -863,10 +869,18 @@ class CrucibleOperations:
             raise
         except sqlite3.Error as exc:
             raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        def build_search_result(selected: list[dict[str, Any]], result_complete: bool) -> dict[str, Any]:
+            return {
+                "query": query,
+                "offset": offset,
+                "next_offset": offset + len(selected),
+                "complete": result_complete,
+                "matches": selected,
+            }
+
+        matches, trimmed = self._bound_log_items(matches, build_search_result, complete)
         return {
-            "query": query, "offset": offset,
-            "next_offset": offset + len(matches),
-            "complete": complete, "matches": matches,
+            **build_search_result(matches, complete and not trimmed),
         }
 
     @staticmethod
@@ -900,6 +914,47 @@ class CrucibleOperations:
             return re.compile(value)
         except re.error as exc:
             raise OperationError("user", f"{name} pattern is invalid", f"invalid_{name}") from exc
+
+    @staticmethod
+    def _mcp_response_size(value: dict[str, Any]) -> int:
+        text = json.dumps(value)
+        payload = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "result": {
+                "content": [{"type": "text", "text": text}],
+                "structuredContent": value,
+            },
+        }
+        return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+    @classmethod
+    def _bound_log_items(
+        cls,
+        items: list[dict[str, Any]],
+        build: Any,
+        complete: bool,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        if cls._mcp_response_size(build(items, complete)) <= MAX_LOG_RESPONSE_BYTES:
+            return items, False
+        if not items:
+            raise OperationError(
+                "framework", "log response exceeds size limit", "result_too_large"
+            )
+        low, high = 0, len(items)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if cls._mcp_response_size(build(items[:middle], False)) <= MAX_LOG_RESPONSE_BYTES:
+                low = middle
+            else:
+                high = middle - 1
+        if low == 0:
+            raise OperationError(
+                "framework",
+                "log response contains a line larger than the response limit",
+                "result_too_large",
+            )
+        return items[:low], True
 
     def _cdm_request(
         self, path: str, *, method: str = "GET", body: dict[str, Any] | None = None

@@ -465,7 +465,7 @@ class TestCrucibleOperations(unittest.TestCase):
             INSERT INTO sessions VALUES (1, 'large-session', '2026-09-09T00:00:00Z', 1, 1);
             """
         )
-        large_line = "x" * 700_000
+        large_line = "x" * 300_000
         connection.execute("INSERT INTO lines VALUES (?, ?, ?, ?, ?)", (1, 1, 1, "t1", large_line))
         connection.execute("INSERT INTO lines VALUES (?, ?, ?, ?, ?)", (2, 1, 1, "t2", large_line))
         connection.commit()
@@ -476,10 +476,12 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(len(session["lines"]), 1)
         self.assertEqual(session["next_offset"], 1)
         self.assertFalse(session["complete"])
+        self.assertLessEqual(self.operations._mcp_response_size(session), 1_048_576)
         search = operations.search_logs("x", session_id="large-session")
         self.assertEqual(len(search["matches"]), 1)
         self.assertEqual(search["next_offset"], 1)
         self.assertFalse(search["complete"])
+        self.assertLessEqual(self.operations._mcp_response_size(search), 1_048_576)
 
     def test_validate_run_reports_schema_and_installed_benchmark_errors(self):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})
