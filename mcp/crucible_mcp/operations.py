@@ -68,10 +68,10 @@ class CrucibleOperations:
                 "list_benchmarks",
                 "describe_benchmark",
                 "list_tools",
-                "list_results",
-                "get_result",
-                "list_run_periods",
-                "get_metric",
+                "list_indexed_results",
+                "get_indexed_result",
+                "list_indexed_periods",
+                "get_indexed_metric",
                 "list_log_sessions",
                 "get_log_info",
                 "get_log_session",
@@ -81,11 +81,11 @@ class CrucibleOperations:
                 "get_run_status",
                 "get_run_logs",
                 "get_run_summary",
-                "postprocess_run",
-                "index_run",
-                "list_run_tags",
-                "add_run_tags",
-                "remove_run_tags",
+                "postprocess_local_run",
+                "index_local_run",
+                "list_local_run_tags",
+                "add_local_run_tags",
+                "remove_local_run_tags",
                 "search_documentation",
             ],
         }
@@ -118,11 +118,11 @@ class CrucibleOperations:
             raise OperationError("user", str(exc), "invalid_query") from exc
         return {"query": query, "resources": resources, "count": len(resources)}
 
-    def list_run_tags(self, run_directory: Path) -> dict[str, Any]:
+    def list_local_run_tags(self, run_directory: Path) -> dict[str, Any]:
         _, document = self._load_run_metadata(run_directory)
         return {"run_path": str(run_directory), "tags": document.get("tags", [])}
 
-    def add_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
+    def add_local_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
         path, document = self._load_run_metadata(run_directory)
         current = document.setdefault("tags", [])
         for raw_tag in tags:
@@ -137,7 +137,7 @@ class CrucibleOperations:
         self._write_run_metadata(path, document)
         return {"run_path": str(run_directory), "tags": current}
 
-    def remove_run_tags(self, run_directory: Path, names: list[str]) -> dict[str, Any]:
+    def remove_local_run_tags(self, run_directory: Path, names: list[str]) -> dict[str, Any]:
         path, document = self._load_run_metadata(run_directory)
         if any(not re.fullmatch(r"[a-zA-Z0-9-_\s]+", name) for name in names):
             raise OperationError("user", "tag names must not include values", "invalid_tag")
@@ -254,7 +254,7 @@ class CrucibleOperations:
             )
         return entries
 
-    def list_results(
+    def list_indexed_results(
         self,
         *,
         run: str | None = None,
@@ -288,12 +288,12 @@ class CrucibleOperations:
             )
         return {"run_ids": run_ids[:limit], "count": min(len(run_ids), limit)}
 
-    def get_result(self, run: str) -> dict[str, Any]:
+    def get_indexed_result(self, run: str) -> dict[str, Any]:
         """Return structured metadata for one historical CDM run."""
 
         self._require_text(run, "run")
         encoded_run = quote(run, safe="")
-        matches = self.list_results(run=run, limit=1)["run_ids"]
+        matches = self.list_indexed_results(run=run, limit=1)["run_ids"]
         if not matches:
             raise OperationError("user", f"unknown result run: {run}", "not_found")
         prefix = f"/api/v1/run/{encoded_run}"
@@ -304,10 +304,10 @@ class CrucibleOperations:
             "partial_status": self._cdm_request(f"{prefix}/partial-status"),
             "iterations": self._cdm_request(f"{prefix}/iterations").get("iterations", []),
             "metric_sources": self._cdm_request(f"{prefix}/metric-sources").get("sources", []),
-            "periods": self.list_run_periods(run)["periods"],
+            "periods": self.list_indexed_periods(run)["periods"],
         }
 
-    def list_run_periods(self, run: str) -> dict[str, Any]:
+    def list_indexed_periods(self, run: str) -> dict[str, Any]:
         """List every primary period and sample associated with a run."""
 
         self._require_text(run, "run")
@@ -359,7 +359,7 @@ class CrucibleOperations:
                 )
         return {"run_id": run, "periods": periods}
 
-    def get_metric(
+    def get_indexed_metric(
         self,
         *,
         run: str,

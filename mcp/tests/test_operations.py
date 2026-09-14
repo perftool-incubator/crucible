@@ -60,18 +60,18 @@ class TestCrucibleOperations(unittest.TestCase):
         )
         self.assertEqual(self.operations.list_tools("missing"), [])
 
-    def test_list_results_queries_cdm_with_bounded_filters(self):
+    def test_list_indexed_results_queries_cdm_with_bounded_filters(self):
         response = Mock()
         response.__enter__ = lambda value: response
         response.__exit__ = lambda *args: None
         response.read.return_value = b'{"runIds":["run-1","run-2"]}'
         with patch("crucible_mcp.operations.urlopen", return_value=response) as request:
-            result = self.operations.list_results(benchmark="fio", limit=1)
+            result = self.operations.list_indexed_results(benchmark="fio", limit=1)
 
         self.assertEqual(result, {"run_ids": ["run-1"], "count": 1})
         self.assertIn("benchmark=fio", request.call_args.args[0].full_url)
 
-    def test_get_result_assembles_cdm_metadata(self):
+    def test_get_indexed_result_assembles_cdm_metadata(self):
         payloads = {
             "/api/v1/run/run-1/tags": {"tags": ["nightly"]},
             "/api/v1/run/run-1/benchmark": {"benchmark": "fio"},
@@ -79,10 +79,10 @@ class TestCrucibleOperations(unittest.TestCase):
             "/api/v1/run/run-1/iterations": {"iterations": [1, 2]},
             "/api/v1/run/run-1/metric-sources": {"sources": ["latency"]},
         }
-        with patch.object(self.operations, "list_results", return_value={"run_ids": ["run-1"]}), \
-                patch.object(self.operations, "list_run_periods", return_value={"periods": []}), \
+        with patch.object(self.operations, "list_indexed_results", return_value={"run_ids": ["run-1"]}), \
+                patch.object(self.operations, "list_indexed_periods", return_value={"periods": []}), \
                 patch.object(self.operations, "_cdm_request", side_effect=payloads.get) as request:
-            result = self.operations.get_result("run-1")
+            result = self.operations.get_indexed_result("run-1")
 
         self.assertEqual(result["tags"], ["nightly"])
         self.assertEqual(result["benchmark"], "fio")
@@ -97,13 +97,13 @@ class TestCrucibleOperations(unittest.TestCase):
         metadata_path = metadata_directory / "rickshaw-run.json"
         metadata_path.write_text(json.dumps({"tags": [{"name": "old", "val": "1"}]}), encoding="utf-8")
 
-        self.assertEqual(self.operations.list_run_tags(run_directory)["tags"][0]["name"], "old")
-        added = self.operations.add_run_tags(run_directory, ["old:2", "new:value"])
+        self.assertEqual(self.operations.list_local_run_tags(run_directory)["tags"][0]["name"], "old")
+        added = self.operations.add_local_run_tags(run_directory, ["old:2", "new:value"])
         self.assertEqual({tag["name"]: tag["val"] for tag in added["tags"]}, {"old": "2", "new": "value"})
-        removed = self.operations.remove_run_tags(run_directory, ["old"])
+        removed = self.operations.remove_local_run_tags(run_directory, ["old"])
         self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
 
-    def test_list_run_periods_preserves_multiple_primary_periods(self):
+    def test_list_indexed_periods_preserves_multiple_primary_periods(self):
         payloads = {
             "/api/v1/run/run-1/iterations": {"iterations": ["iteration-1"]},
             "/api/v1/run/run-1/iterations/samples": {"samples": [["sample-1", "sample-2"]]},
@@ -121,18 +121,18 @@ class TestCrucibleOperations(unittest.TestCase):
             return payloads[path]
 
         with patch.object(self.operations, "_cdm_request", side_effect=response):
-            result = self.operations.list_run_periods("run-1")
+            result = self.operations.list_indexed_periods("run-1")
 
         self.assertEqual([period["primary_period_id"] for period in result["periods"]], ["period-1", "period-2"])
         self.assertEqual(result["periods"][1]["begin"], 30)
 
-    def test_get_metric_posts_typed_query(self):
+    def test_get_indexed_metric_posts_typed_query(self):
         response = Mock()
         response.__enter__ = lambda value: response
         response.__exit__ = lambda *args: None
         response.read.return_value = b'{"values":[]}'
         with patch("crucible_mcp.operations.urlopen", return_value=response) as request:
-            result = self.operations.get_metric(
+            result = self.operations.get_indexed_metric(
                 run="run-1", source="fio", metric_type="IOPS", period="measurement"
             )
 
@@ -145,9 +145,9 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertNotIn("distribution-stats", sent)
         self.assertNotIn("filter", sent)
 
-    def test_get_metric_requires_period_or_range(self):
+    def test_get_indexed_metric_requires_period_or_range(self):
         with self.assertRaises(OperationError) as context:
-            self.operations.get_metric(run="run-1", source="fio", metric_type="IOPS")
+            self.operations.get_indexed_metric(run="run-1", source="fio", metric_type="IOPS")
         self.assertEqual(context.exception.code, "invalid_metric_range")
 
     def test_log_queries_are_read_only(self):

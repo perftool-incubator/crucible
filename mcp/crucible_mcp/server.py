@@ -28,10 +28,10 @@ TOOL_NAMES = (
     "crucible_info",
     "list_tools",
     "list_benchmarks",
-    "list_results",
-    "get_result",
-    "list_run_periods",
-    "get_metric",
+    "list_indexed_results",
+    "get_indexed_result",
+    "list_indexed_periods",
+    "get_indexed_metric",
     "list_log_sessions",
     "get_log_info",
     "get_log_session",
@@ -42,11 +42,11 @@ TOOL_NAMES = (
     "get_run_status",
     "get_run_logs",
     "get_run_summary",
-    "postprocess_run",
-    "index_run",
-    "list_run_tags",
-    "add_run_tags",
-    "remove_run_tags",
+    "postprocess_local_run",
+    "index_local_run",
+    "list_local_run_tags",
+    "add_local_run_tags",
+    "remove_local_run_tags",
     "search_documentation",
 )
 
@@ -64,7 +64,7 @@ TOOL_DEFINITIONS = (
     },
     {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
     {
-        "name": "list_results",
+        "name": "list_indexed_results",
         "description": "List historical run IDs from the configured CDM service.",
         "inputSchema": {
             "type": "object",
@@ -80,17 +80,17 @@ TOOL_DEFINITIONS = (
         },
     },
     {
-        "name": "get_result",
+        "name": "get_indexed_result",
         "description": "Get structured metadata for a historical CDM run.",
         "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
     },
     {
-        "name": "list_run_periods",
+        "name": "list_indexed_periods",
         "description": "List the primary periods and samples associated with a historical run.",
         "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
     },
     {
-        "name": "get_metric",
+        "name": "get_indexed_metric",
         "description": "Query metric data for a historical CDM run.",
         "inputSchema": {
             "type": "object",
@@ -209,7 +209,7 @@ TOOL_DEFINITIONS = (
         },
     },
     {
-        "name": "postprocess_run",
+        "name": "postprocess_local_run",
         "description": "Post-process an approved Crucible run directory.",
         "inputSchema": {"type": "object", "properties": {
             "idempotency_key": {"type": "string", "minLength": 1},
@@ -219,7 +219,7 @@ TOOL_DEFINITIONS = (
             "additionalProperties": False},
     },
     {
-        "name": "index_run",
+        "name": "index_local_run",
         "description": "Index an approved Crucible run directory into CDM.",
         "inputSchema": {"type": "object", "properties": {
             "idempotency_key": {"type": "string", "minLength": 1},
@@ -229,7 +229,7 @@ TOOL_DEFINITIONS = (
             "additionalProperties": False},
     },
     {
-        "name": "list_run_tags",
+        "name": "list_local_run_tags",
         "description": "List tags from an approved local run result.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
@@ -238,7 +238,7 @@ TOOL_DEFINITIONS = (
             "additionalProperties": False},
     },
     {
-        "name": "add_run_tags",
+        "name": "add_local_run_tags",
         "description": "Add or replace tags on an approved local run result.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
@@ -248,7 +248,7 @@ TOOL_DEFINITIONS = (
             "additionalProperties": False},
     },
     {
-        "name": "remove_run_tags",
+        "name": "remove_local_run_tags",
         "description": "Remove named tags from an approved local run result.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
@@ -480,16 +480,16 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = {"tools": self.server.operations.list_tools(arguments.get("name"))}
             elif name == "list_benchmarks":
                 value = {"benchmarks": self.server.operations.list_benchmarks()}
-            elif name == "list_results":
-                value = self.server.operations.list_results(
+            elif name == "list_indexed_results":
+                value = self.server.operations.list_indexed_results(
                     **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}
                 )
-            elif name == "get_result":
-                value = self.server.operations.get_result(arguments.get("run", ""))
-            elif name == "list_run_periods":
-                value = self.server.operations.list_run_periods(arguments.get("run", ""))
-            elif name == "get_metric":
-                value = self.server.operations.get_metric(
+            elif name == "get_indexed_result":
+                value = self.server.operations.get_indexed_result(arguments.get("run", ""))
+            elif name == "list_indexed_periods":
+                value = self.server.operations.list_indexed_periods(arguments.get("run", ""))
+            elif name == "get_indexed_metric":
+                value = self.server.operations.get_indexed_metric(
                     run=arguments.get("run", ""), source=arguments.get("source", ""),
                     metric_type=arguments.get("type", ""), period=arguments.get("period"),
                     begin=arguments.get("begin"), end=arguments.get("end"),
@@ -566,7 +566,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                 if "mcp_job_id" not in arguments:
                     return self._error(request_id, -32602, "mcp_job_id is required")
                 value = self.server.run_manager.get_summary(arguments["mcp_job_id"])
-            elif name in {"postprocess_run", "index_run"}:
+            elif name in {"postprocess_local_run", "index_local_run"}:
                 if "run_path" in arguments:
                     processing_path = Path(arguments["run_path"])
                 else:
@@ -578,11 +578,11 @@ class MCPHandler(BaseHTTPRequestHandler):
                     processing_path = Path(source_job.run_directory)
                 job, created = self.server.run_manager.submit_processing(
                     arguments["idempotency_key"],
-                    "postprocess" if name == "postprocess_run" else "index",
+                    "postprocess" if name == "postprocess_local_run" else "index",
                     processing_path,
                 )
                 value = {"created": created, "job": _job_status(job)}
-            elif name in {"list_run_tags", "add_run_tags", "remove_run_tags"}:
+            elif name in {"list_local_run_tags", "add_local_run_tags", "remove_local_run_tags"}:
                 if "run_path" in arguments:
                     tag_path = Path(arguments["run_path"])
                 else:
@@ -592,12 +592,12 @@ class MCPHandler(BaseHTTPRequestHandler):
                     if not source_job.run_directory:
                         return self._error(request_id, -32000, "source job has no run directory")
                     tag_path = Path(source_job.run_directory)
-                if name == "list_run_tags":
-                    value = self.server.operations.list_run_tags(tag_path)
-                elif name == "add_run_tags":
-                    value = self.server.operations.add_run_tags(tag_path, arguments["tags"])
+                if name == "list_local_run_tags":
+                    value = self.server.operations.list_local_run_tags(tag_path)
+                elif name == "add_local_run_tags":
+                    value = self.server.operations.add_local_run_tags(tag_path, arguments["tags"])
                 else:
-                    value = self.server.operations.remove_run_tags(tag_path, arguments["names"])
+                    value = self.server.operations.remove_local_run_tags(tag_path, arguments["names"])
             elif name == "search_documentation":
                 value = self.server.operations.search_documentation(
                     arguments["query"], arguments.get("limit", 10)

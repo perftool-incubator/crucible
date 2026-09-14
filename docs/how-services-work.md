@@ -139,18 +139,18 @@ through the standard `tools/list` request; the current interface is:
 | `describe_benchmark` | Return metadata for one installed benchmark. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `start_run` | Submit an asynchronous, idempotent Crucible run. |
-| `postprocess_run` | Post-process an approved run directory asynchronously. |
-| `index_run` | Generate CDM documents and index an approved run directory asynchronously. |
-| `list_run_tags` | List tags from an approved local run result. |
-| `add_run_tags` | Add or replace tags in an approved local run result. |
-| `remove_run_tags` | Remove named tags from an approved local run result. |
+| `postprocess_local_run` | Post-process an approved local run directory asynchronously. |
+| `index_local_run` | Generate CDM documents and index an approved local run directory asynchronously. |
+| `list_local_run_tags` | List tags from an approved local run result. |
+| `add_local_run_tags` | Add or replace tags in an approved local run result. |
+| `remove_local_run_tags` | Remove named tags from an approved local run result. |
 | `get_run_status` | Poll the lifecycle and result-readiness state of a submitted run. |
 | `get_run_logs` | Read a bounded slice of runner output for a submitted run. |
 | `get_run_summary` | Retrieve the summary of a completed submitted run. |
-| `list_results` | Search historical result run IDs through CDM. |
-| `get_result` | Retrieve structured metadata for one historical run. |
-| `list_run_periods` | List every primary period and sample associated with a historical run. |
-| `get_metric` | Query metric data for a historical run with bounded range and resolution options. |
+| `list_indexed_results` | Search historical indexed result run IDs through CDM. |
+| `get_indexed_result` | Retrieve structured metadata for one historical indexed run. |
+| `list_indexed_periods` | List every primary period and sample associated with an indexed run. |
+| `get_indexed_metric` | Query indexed metric data for a historical run with bounded range and resolution options. |
 | `list_log_sessions` | List recent logger sessions without returning their full contents. |
 | `get_log_info` | Return aggregate counts from the logger database. |
 | `get_log_session` | Read a bounded, structured slice of one logger session with optional stream and regex filters. |
@@ -181,15 +181,15 @@ resource browser. It returns matching resource metadata, after which the client
 can retrieve the selected document with `resources/read`.
 
 The discovery, result, metric, log, and documentation tools are read-only.
-`start_run`, `postprocess_run`, and `index_run` create asynchronous jobs;
+`start_run`, `postprocess_local_run`, and `index_local_run` create asynchronous jobs;
 the latter two accept either an approved run directory or a completed MCP job
 ID as their source.
 Tag operations accept an approved run directory or a completed MCP job ID and
 update the local `rickshaw-run.json[.xz]` artifact. They do not automatically
-re-index the result in CDM; run `index_run` separately when the indexed result
+re-index the result in CDM; run `index_local_run` separately when the indexed result
 must reflect the tag change.
 Metric queries should pass a `primary_period_id` returned by
-`list_run_periods` as the `period` argument; this avoids combining distinct
+`list_indexed_periods` as the `period` argument; this avoids combining distinct
 primary periods implicitly.
 Result queries use the local CDM server configured by `cdm-server.port`; log queries
 use Crucible's configured logger database. `get_log_session` uses offsets for

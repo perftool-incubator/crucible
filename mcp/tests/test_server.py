@@ -130,11 +130,11 @@ class TestServer(unittest.TestCase):
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("inputSchema", tools["get_run_logs"])
         for tool_name in (
-            "list_tools", "list_results", "get_result", "list_run_periods", "get_metric",
+            "list_tools", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
             "get_log_session",
             "search_logs",
-            "list_run_tags", "add_run_tags", "remove_run_tags",
+            "list_local_run_tags", "add_local_run_tags", "remove_local_run_tags",
         ):
             self.assertIn(tool_name, tools)
             self.assertIn("inputSchema", tools[tool_name])
@@ -222,7 +222,7 @@ class TestServer(unittest.TestCase):
             "jsonrpc": "2.0",
             "id": 6,
             "method": "tools/call",
-            "params": {"name": "list_results", "arguments": {"limit": "1"}},
+            "params": {"name": "list_indexed_results", "arguments": {"limit": "1"}},
         })
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
@@ -233,7 +233,7 @@ class TestServer(unittest.TestCase):
             "id": 7,
             "method": "tools/call",
             "params": {
-                "name": "get_metric",
+                "name": "get_indexed_metric",
                 "arguments": {
                     "run": "run-1", "source": "fio", "type": "IOPS",
                     "period": "measurement", "breakout": "hostname",
