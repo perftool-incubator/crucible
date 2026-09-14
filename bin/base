@@ -999,6 +999,7 @@ function index_run() {
         echo "Opensearch documents have been created"
     else
         echo "ERROR: Could not generate OpenSearch documents [rc=${RC}]"
+        return ${RC}
     fi
 
     # Index the documents
