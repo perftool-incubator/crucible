@@ -425,13 +425,11 @@ class MCPHandler(BaseHTTPRequestHandler):
             response = self._dispatch(request)
         except (ValueError, json.JSONDecodeError) as exc:
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": str(exc)}}
-        operation = request.get("method", "invalid") if isinstance(request, dict) else "invalid"
-        params = request.get("params", {}) if isinstance(request, dict) else {}
-        arguments = params.get("arguments") if isinstance(params, dict) else None
+        operation, job_id = self._audit_context(request, response)
         self._audit(
             operation,
             "error" if "error" in response else "success",
-            job_id=arguments.get("mcp_job_id") if isinstance(arguments, dict) else None,
+            job_id=job_id,
         )
         self._json(200, response)
 
@@ -472,6 +470,30 @@ class MCPHandler(BaseHTTPRequestHandler):
                 job_id=job_id,
                 token=getattr(self, "_authenticated_token", None),
             )
+
+    @staticmethod
+    def _audit_context(request: Any, response: dict[str, Any]) -> tuple[str, str | None]:
+        """Identify the MCP tool and job affected by a request."""
+
+        if not isinstance(request, dict):
+            return "invalid", None
+        method = request.get("method", "invalid")
+        if method != "tools/call":
+            return method, None
+        params = request.get("params")
+        if not isinstance(params, dict):
+            return method, None
+        tool_name = params.get("name")
+        operation = tool_name if isinstance(tool_name, str) else method
+        arguments = params.get("arguments")
+        job_id = arguments.get("mcp_job_id") if isinstance(arguments, dict) else None
+        result = response.get("result") if isinstance(response, dict) else None
+        structured = result.get("structuredContent") if isinstance(result, dict) else None
+        job = structured.get("job") if isinstance(structured, dict) else None
+        generated_job_id = job.get("mcp_job_id") if isinstance(job, dict) else None
+        if isinstance(generated_job_id, str):
+            job_id = generated_job_id
+        return operation, job_id
 
     def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(request, dict):

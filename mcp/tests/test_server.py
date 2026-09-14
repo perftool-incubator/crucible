@@ -11,6 +11,8 @@ from socketserver import TCPServer
 
 from crucible_mcp.operations import CrucibleOperations
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
+from crucible_mcp.audit import AuditLogger
+from crucible_mcp.models import Job, JobState, ResultStatus
 from crucible_mcp.policy import InputPolicy, rotate_token
 from crucible_mcp.server import IPv6ThreadingHTTPServer, MCPHandler
 from http.server import ThreadingHTTPServer
@@ -322,6 +324,35 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32602)
+
+    def test_tool_audit_records_tool_name_and_generated_job_id(self):
+        audit_path = Path(self.directory.name) / "audit.jsonl"
+        self.server.audit = AuditLogger(audit_path)
+        self.server.run_manager = Mock()
+        job = Job(
+            mcp_job_id="generated-job",
+            idempotency_key="delete-key",
+            request_hash="hash",
+            state=JobState.QUEUED,
+            result_status=ResultStatus.NOT_AVAILABLE,
+            operation="delete_indexed_result",
+        )
+        self.server.run_manager.submit_indexed_deletion.return_value = (job, True)
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "tools/call",
+            "params": {
+                "name": "delete_indexed_result",
+                "arguments": {"idempotency_key": "delete-key", "run": "run-1"},
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        record = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(record["operation"], "delete_indexed_result")
+        self.assertEqual(record["job_id"], "generated-job")
 
 
 if __name__ == "__main__":
