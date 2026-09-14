@@ -107,6 +107,23 @@ class TestCrucibleOperations(unittest.TestCase):
         removed = self.operations.remove_local_run_tags(run_directory, ["old"])
         self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
 
+    def test_run_tag_operations_prefer_live_plain_metadata(self):
+        run_directory = self.root / "run" / "dual-metadata"
+        run_metadata = run_directory / "run"
+        run_metadata.mkdir(parents=True)
+        plain_path = run_metadata / "rickshaw-run.json"
+        compressed_path = run_metadata / "rickshaw-run.json.xz"
+        plain_path.write_text(json.dumps({"tags": [{"name": "live", "val": "yes"}]}), encoding="utf-8")
+        with lzma.open(compressed_path, "wt", encoding="utf-8") as stream:
+            json.dump({"tags": [{"name": "stale", "val": "yes"}]}, stream)
+
+        result = self.operations.add_local_run_tags(run_directory, ["updated:value"])
+
+        self.assertIn({"name": "updated", "val": "value"}, result["tags"])
+        self.assertIn("updated", plain_path.read_text(encoding="utf-8"))
+        with lzma.open(compressed_path, "rt", encoding="utf-8") as stream:
+            self.assertNotIn("updated", stream.read())
+
     def test_tag_operations_reject_malformed_existing_tags(self):
         run_directory = self.root / "run" / "malformed-tags"
         metadata_path = run_directory / "run" / "rickshaw-run.json"

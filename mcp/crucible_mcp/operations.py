@@ -363,8 +363,8 @@ class CrucibleOperations:
     @staticmethod
     def _run_metadata_path(run_directory: Path) -> Path:
         canonical = run_directory.resolve(strict=True)
-        for relative in ("run/rickshaw-run.json.xz", "run/rickshaw-run.json",
-                         "config/rickshaw-run.json.xz", "config/rickshaw-run.json"):
+        for relative in ("run/rickshaw-run.json", "run/rickshaw-run.json.xz",
+                         "config/rickshaw-run.json", "config/rickshaw-run.json.xz"):
             path = run_directory / relative
             if path.is_file():
                 resolved = path.resolve(strict=True)
