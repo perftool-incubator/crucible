@@ -103,6 +103,7 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(self.operations.list_local_run_tags(run_directory)["tags"][0]["name"], "old")
         added = self.operations.add_local_run_tags(run_directory, ["old:2", "new:value"])
         self.assertEqual({tag["name"]: tag["val"] for tag in added["tags"]}, {"old": "2", "new": "value"})
+        self.assertEqual(list(metadata_directory.glob("*.mcp-backup-*")), [])
         removed = self.operations.remove_local_run_tags(run_directory, ["old"])
         self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
 

@@ -4,11 +4,9 @@ import json
 import lzma
 import os
 import re
-import shutil
 import sqlite3
 import tempfile
 import threading
-import time
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -388,10 +386,8 @@ class CrucibleOperations:
 
     @staticmethod
     def _write_run_metadata(path: Path, document: dict[str, Any]) -> None:
-        backup = path.with_name(f"{path.name}.mcp-backup-{time.time_ns()}")
         temporary = None
         try:
-            shutil.copy2(path, backup)
             fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
             os.close(fd)
             temporary = Path(temporary_name)
