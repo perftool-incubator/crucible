@@ -482,6 +482,11 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(search["next_offset"], 1)
         self.assertFalse(search["complete"])
         self.assertLessEqual(self.operations._mcp_response_size(search), 1_048_576)
+        with self.assertRaises(OperationError) as request_id_error:
+            operations.search_logs(
+                "x", session_id="large-session", request_id="request-id" * 100_000
+            )
+        self.assertEqual(request_id_error.exception.code, "result_too_large")
 
     def test_validate_run_reports_schema_and_installed_benchmark_errors(self):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})

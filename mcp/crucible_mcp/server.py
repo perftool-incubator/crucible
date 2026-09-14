@@ -611,14 +611,14 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = self.server.operations.get_log_session(
                     arguments["session_id"], arguments.get("offset", 0),
                     arguments.get("limit", 1000), arguments.get("stream"),
-                    arguments.get("grep"),
+                    arguments.get("grep"), request_id,
                 )
             elif name == "search_logs":
                 value = self.server.operations.search_logs(
                     arguments["query"], arguments.get("session_id"),
                     arguments.get("stream"), arguments.get("offset", 0),
                     arguments.get("limit", 1000), arguments.get("since"),
-                    arguments.get("until"),
+                    arguments.get("until"), request_id,
                 )
             elif name == "describe_benchmark":
                 value = self.server.operations.describe_benchmark(arguments.get("name", ""))

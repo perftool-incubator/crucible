@@ -705,6 +705,7 @@ class CrucibleOperations:
         limit: int = 1000,
         stream: str | None = None,
         grep: str | None = None,
+        request_id: Any = None,
     ) -> dict[str, Any]:
         """Return a bounded, structured slice of one logger session."""
 
@@ -783,7 +784,7 @@ class CrucibleOperations:
                 "lines": selected,
             }
 
-        lines, trimmed = self._bound_log_items(lines, build_session_result, complete)
+        lines, trimmed = self._bound_log_items(lines, build_session_result, complete, request_id)
         return {
             **build_session_result(lines, complete and not trimmed),
         }
@@ -797,6 +798,7 @@ class CrucibleOperations:
         limit: int = 1000,
         since: float | None = None,
         until: float | None = None,
+        request_id: Any = None,
     ) -> dict[str, Any]:
         """Search logger lines with bounded, structured results."""
 
@@ -878,7 +880,7 @@ class CrucibleOperations:
                 "matches": selected,
             }
 
-        matches, trimmed = self._bound_log_items(matches, build_search_result, complete)
+        matches, trimmed = self._bound_log_items(matches, build_search_result, complete, request_id)
         return {
             **build_search_result(matches, complete and not trimmed),
         }
@@ -916,11 +918,11 @@ class CrucibleOperations:
             raise OperationError("user", f"{name} pattern is invalid", f"invalid_{name}") from exc
 
     @staticmethod
-    def _mcp_response_size(value: dict[str, Any]) -> int:
+    def _mcp_response_size(value: dict[str, Any], request_id: Any = None) -> int:
         text = json.dumps(value)
         payload = {
             "jsonrpc": "2.0",
-            "id": None,
+            "id": request_id,
             "result": {
                 "content": [{"type": "text", "text": text}],
                 "structuredContent": value,
@@ -934,8 +936,9 @@ class CrucibleOperations:
         items: list[dict[str, Any]],
         build: Any,
         complete: bool,
+        request_id: Any = None,
     ) -> tuple[list[dict[str, Any]], bool]:
-        if cls._mcp_response_size(build(items, complete)) <= MAX_LOG_RESPONSE_BYTES:
+        if cls._mcp_response_size(build(items, complete), request_id) <= MAX_LOG_RESPONSE_BYTES:
             return items, False
         if not items:
             raise OperationError(
@@ -944,7 +947,7 @@ class CrucibleOperations:
         low, high = 0, len(items)
         while low < high:
             middle = (low + high + 1) // 2
-            if cls._mcp_response_size(build(items[:middle], False)) <= MAX_LOG_RESPONSE_BYTES:
+            if cls._mcp_response_size(build(items[:middle], False), request_id) <= MAX_LOG_RESPONSE_BYTES:
                 low = middle
             else:
                 high = middle - 1
