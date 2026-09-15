@@ -167,6 +167,16 @@ matched pair, preserving ownership and permissions, then restarting
 but new connections will use the replacement certificate. Keep the old
 certificate trusted until all clients have reconnected with the new one.
 
+Rotate the MCP bearer token with the root-only Crucible command:
+
+```bash
+sudo crucible mcp rotate-token
+```
+
+The command refuses to rotate while MCP jobs are active, atomically replaces
+the root-owned `token-file`, and restarts MCP when it was already running so
+the container receives the replacement token. It does not print the token.
+
 See the [OpenSSL `req` documentation](https://docs.openssl.org/3.2/man1/openssl-req/)
 for certificate-request options and your organization's certificate-authority
 documentation for production issuance, renewal, and trust-distribution

@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import stat
 import tempfile
 from pathlib import Path
 
@@ -40,6 +41,37 @@ def token_matches(presented: str, expected: str) -> bool:
     """Compare bearer tokens without leaking length or content through timing."""
 
     return hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
+
+
+def validate_token_rotation_path(token_path: Path) -> None:
+    """Validate the privileged token destination before replacing it."""
+
+    token_path = Path(token_path)
+    if not token_path.is_absolute():
+        token_path = Path.cwd() / token_path
+
+    current = Path(token_path.anchor)
+    for part in token_path.parent.parts[1:]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError as exc:
+            raise PolicyError("MCP authentication token parent does not exist") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise PolicyError("MCP authentication token parent must contain no symlinks")
+        if metadata.st_uid != 0:
+            raise PolicyError("MCP authentication token parent must be root-owned")
+        if metadata.st_mode & 0o022:
+            raise PolicyError("MCP authentication token parent must not be group- or world-writable")
+
+    try:
+        metadata = token_path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise PolicyError("MCP authentication token must be a regular, non-symlink file")
+    if metadata.st_uid != 0:
+        raise PolicyError("MCP authentication token must be root-owned")
 
 
 def rotate_token(token_path: Path) -> str:

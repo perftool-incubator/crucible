@@ -1,10 +1,21 @@
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
-from crucible_mcp.policy import InputPolicy, PolicyError, read_token, rotate_token, token_matches
+from crucible_mcp.policy import (
+    InputPolicy,
+    PolicyError,
+    read_token,
+    rotate_token,
+    token_matches,
+    validate_token_rotation_path,
+)
 
 
 class TestPolicy(unittest.TestCase):
@@ -54,6 +65,40 @@ class TestPolicy(unittest.TestCase):
         self.assertTrue(token_matches(second, second))
         self.assertFalse(token_matches(first, second))
         self.assertEqual(stat.S_IMODE(token_path.stat().st_mode), 0o600)
+
+    def test_token_rotation_rejects_symlinked_parent(self):
+        real_parent = self.root / "real"
+        real_parent.mkdir()
+        linked_parent = self.root / "linked"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        with self.assertRaises(PolicyError):
+            validate_token_rotation_path(linked_parent / "mcp-server.token")
+
+    def test_token_rotation_rejects_writable_parent(self):
+        metadata = SimpleNamespace(st_mode=stat.S_IFDIR | 0o777, st_uid=0)
+        with patch.object(Path, "lstat", return_value=metadata):
+            with self.assertRaises(PolicyError):
+                validate_token_rotation_path(Path("/safe/mcp-server.token"))
+
+    def test_token_rotation_does_not_require_optional_host_packages(self):
+        token_path = self.root / "host-mcp-server.token"
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-S",
+                "-c",
+                "import sys; from pathlib import Path; from crucible_mcp.policy import rotate_token; rotate_token(Path(sys.argv[1]))",
+                str(token_path),
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(token_path.is_file())
 
 
 if __name__ == "__main__":

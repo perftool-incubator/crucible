@@ -657,6 +657,10 @@ class MCPHandler(BaseHTTPRequestHandler):
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "method not found"}}
 
     def _call_tool(self, request_id: Any, params: dict[str, Any]) -> dict[str, Any]:
+        with self.server.jobs.lifecycle_lock():
+            return self._call_tool_locked(request_id, params)
+
+    def _call_tool_locked(self, request_id: Any, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
         arguments = params.get("arguments", {})
         if arguments is None:

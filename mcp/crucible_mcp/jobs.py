@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import fcntl
 import sqlite3
 import threading
 import uuid
@@ -83,6 +84,7 @@ class JobStore:
     def __init__(self, database_path: Path):
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.lifecycle_lock_path = Path(f"{self.database_path}.lifecycle.lock")
         self._lock = threading.RLock()
         self._connection = sqlite3.connect(
             self.database_path, timeout=10, check_same_thread=False
@@ -95,6 +97,25 @@ class JobStore:
 
     def close(self) -> None:
         self._connection.close()
+
+    @contextmanager
+    def lifecycle_lock(self, exclusive: bool = False) -> Iterator[None]:
+        """Coordinate MCP requests with service-level maintenance operations.
+
+        The service-control shell code takes the same exclusive lock before
+        stopping MCP or rotating its credentials.  Tool requests hold a
+        shared lock for their full duration, so a maintenance operation cannot
+        pass its active-job check while a submission is still in flight.
+        """
+
+        self.lifecycle_lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with self.lifecycle_lock_path.open("a+") as lock_file:
+            operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(lock_file.fileno(), operation)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _migrate(self) -> None:
         with self._transaction() as connection:

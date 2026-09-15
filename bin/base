@@ -4,6 +4,10 @@
 
 EC_FAIL_USER=2
 
+# This descriptor is process-local state.  Never trust a value inherited from
+# the environment when running the root-only service-management commands.
+unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+
 function exit_error() {
     echo "ERROR: ${1}"
     shift
@@ -644,7 +648,102 @@ function stop_cdm_server() {
     return ${RC}
 }
 
+function mcp_lifecycle_lock_acquire() {
+    local mcp_database mcp_lock_file mcp_lock_dir mcp_lock_dir_mode
+
+    if [ -n "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        case "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}" in
+            *[!0-9]*)
+                unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+                echo "ERROR: Invalid MCP lifecycle lock descriptor"
+                return 1
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    fi
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    if [ -z "${mcp_database}" ]; then
+        echo "ERROR: mcp-server database is not configured"
+        return 1
+    fi
+    mcp_lock_file="${mcp_database}.lifecycle.lock"
+    mcp_lock_dir=$(dirname "${mcp_lock_file}")
+    if ! mkdir -p "${mcp_lock_dir}" || [ -L "${mcp_lock_dir}" ] || [ ! -d "${mcp_lock_dir}" ]; then
+        echo "ERROR: Could not prepare the MCP lifecycle lock"
+        return 1
+    fi
+    if [ "$(stat -c '%u' "${mcp_lock_dir}")" != "0" ]; then
+        echo "ERROR: MCP lifecycle lock directory must be root-owned"
+        return 1
+    fi
+    mcp_lock_dir_mode=$(stat -c '%a' "${mcp_lock_dir}")
+    if (( 0${mcp_lock_dir_mode} & 0022 )); then
+        if (( 0${mcp_lock_dir_mode} & 01000 )) || ! chmod 700 "${mcp_lock_dir}"; then
+            echo "ERROR: Could not secure the MCP lifecycle lock directory"
+            return 1
+        fi
+    fi
+    if [ ! -e "${mcp_lock_file}" ]; then
+        if ! (umask 077; set -C; : > "${mcp_lock_file}"); then
+            echo "ERROR: Could not create the MCP lifecycle lock"
+            return 1
+        fi
+    fi
+    if [ -L "${mcp_lock_file}" ] || [ ! -f "${mcp_lock_file}" ]; then
+        echo "ERROR: MCP lifecycle lock must be a regular, non-symlink file"
+        return 1
+    fi
+    if ! chmod 600 "${mcp_lock_file}"; then
+        echo "ERROR: Could not secure the MCP lifecycle lock"
+        return 1
+    fi
+    if ! exec {CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}<>"${mcp_lock_file}"; then
+        echo "ERROR: Could not open the MCP lifecycle lock"
+        return 1
+    fi
+    if ! flock -x "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}"; then
+        echo "ERROR: Could not lock the MCP lifecycle"
+        exec {CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}>&-
+        unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+        return 1
+    fi
+}
+
+function mcp_lifecycle_lock_release() {
+    if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        return 0
+    fi
+    case "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}" in
+        *[!0-9]*)
+            unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+            return 1
+            ;;
+    esac
+    flock -u "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}"
+    exec {CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}>&-
+    unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+}
+
 function start_mcp_server() {
+    local mcp_start_rc mcp_start_lock_owned=0
+
+    if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        mcp_start_lock_owned=1
+    fi
+    if ! mcp_lifecycle_lock_acquire; then
+        return 1
+    fi
+    start_mcp_server_unlocked "$@"
+    mcp_start_rc=$?
+    if [ ${mcp_start_lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
+    return ${mcp_start_rc}
+}
+
+function start_mcp_server_unlocked() {
     local RC=0 mcp_bind mcp_port mcp_token_file mcp_database mcp_started=0
     local mcp_input_root mcp_max_inline_bytes mcp_max_run_file_bytes mcp_cdm_readiness_timeout
     local mcp_cdm_port
@@ -875,6 +974,23 @@ function start_mcp_server() {
 }
 
 function stop_mcp_server() {
+    local mcp_stop_rc mcp_stop_lock_owned=0
+
+    if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        mcp_stop_lock_owned=1
+    fi
+    if ! mcp_lifecycle_lock_acquire; then
+        return 1
+    fi
+    stop_mcp_server_unlocked "$@"
+    mcp_stop_rc=$?
+    if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
+    return ${mcp_stop_rc}
+}
+
+function stop_mcp_server_unlocked() {
     local RC=0 mcp_port mcp_bind
 
     mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
@@ -893,6 +1009,93 @@ function stop_mcp_server() {
         close_firewall_port ${mcp_port} tcp
     fi
     return ${RC}
+}
+
+function rotate_mcp_token() {
+    local mcp_token_file mcp_database active_jobs was_running=0
+
+    mcp_token_file=$(jq_query ${SERVICES_CFG} '."mcp-server"."token-file"')
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    if [ -z "${mcp_token_file}" ]; then
+        echo "ERROR: mcp-server token-file is not configured"
+        return 1
+    fi
+    if [ -z "${mcp_database}" ]; then
+        echo "ERROR: mcp-server database is not configured"
+        return 1
+    fi
+
+    if ! mcp_lifecycle_lock_acquire; then
+        return 1
+    fi
+
+    if ! active_jobs=$(mcp_active_jobs); then
+        echo "ERROR: Could not verify MCP jobs; refusing to rotate the token"
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+    if [ -n "${active_jobs}" ]; then
+        echo "ERROR: Cannot rotate the MCP token while jobs are active"
+        echo "ERROR: Wait for active MCP jobs to complete before rotating the token"
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+
+    if ! PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_token_file}" <<'PY'
+import sys
+from pathlib import Path
+
+from crucible_mcp.policy import validate_token_rotation_path
+
+validate_token_rotation_path(Path(sys.argv[1]))
+PY
+    then
+        echo "ERROR: Invalid MCP token destination; refusing to stop MCP"
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+
+    if podman_running crucible-mcp-server; then
+        was_running=1
+        if ! stop_mcp_server_unlocked; then
+            mcp_lifecycle_lock_release
+            return 1
+        fi
+    fi
+
+    if ! PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_token_file}" <<'PY'
+import sys
+from pathlib import Path
+
+from crucible_mcp.policy import rotate_token
+
+token_path = Path(sys.argv[1])
+rotate_token(token_path)
+PY
+    then
+        echo "ERROR: Could not rotate the MCP token"
+        if [ ${was_running} -eq 1 ]; then
+            if start_mcp_server_unlocked; then
+                echo "MCP server was restored with the existing token"
+            else
+                echo "ERROR: MCP token rotation failed and the service could not be restored"
+            fi
+        fi
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+
+    if [ ${was_running} -eq 1 ]; then
+        if ! start_mcp_server_unlocked; then
+            echo "ERROR: MCP token rotated, but the service could not be restarted"
+            mcp_lifecycle_lock_release
+            return 1
+        fi
+    else
+        echo "Successfully rotated MCP token"
+    fi
+    mcp_lifecycle_lock_release
+    return 0
 }
 
 function mcp_active_jobs() {
@@ -1556,6 +1759,7 @@ function service_control() {
     local action_rc
     local service_rc
     local function_name
+    local mcp_stop_lock_owned=0
 
     function_name="service_control"
 
@@ -1584,10 +1788,21 @@ function service_control() {
             return 1
         fi
 
+        if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+            if ! mcp_lifecycle_lock_acquire; then
+                echo "ERROR: Cannot acquire the MCP lifecycle lock; refusing to stop services"
+                return 1
+            fi
+            mcp_stop_lock_owned=1
+        fi
+
         local mcp_jobs
         if ! mcp_jobs=$(mcp_active_jobs); then
             echo "ERROR: Cannot verify MCP job state; refusing to stop services"
             echo "ERROR: Resolve the MCP job database error before stopping services"
+            if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+                mcp_lifecycle_lock_release
+            fi
             return 1
         fi
         if [ -n "${mcp_jobs}" ]; then
@@ -1597,6 +1812,9 @@ function service_control() {
                 echo "ERROR:   ${job_id} (${job_state})"
             done
             echo "ERROR: Wait for MCP jobs to complete before stopping services"
+            if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+                mcp_lifecycle_lock_release
+            fi
             return 1
         fi
     fi
@@ -1613,7 +1831,11 @@ function service_control() {
                 all_services="httpd opensearch valkey cdm-server image-sourcing"
             fi
             service_control ${action} ${all_services}
-            return $?
+            service_rc=$?
+            if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+                mcp_lifecycle_lock_release
+            fi
+            return ${service_rc}
         fi
 
         if [ "${service}" == "redis" ]; then
@@ -1647,6 +1869,9 @@ function service_control() {
         action_rc=$(( action_rc + service_rc ))
     done
 
+    if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
     return ${action_rc}
 }
 
