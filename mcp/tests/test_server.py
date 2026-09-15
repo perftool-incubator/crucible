@@ -132,7 +132,9 @@ class TestServer(unittest.TestCase):
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("inputSchema", tools["get_run_logs"])
         for tool_name in (
-            "list_tools", "list_local_runs", "get_local_run_summary", "get_local_run_metadata", "list_local_archives", "archive_local_run", "unarchive_local_run", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
+            "list_tools", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
+            "list_run_artifacts", "get_run_artifact", "list_local_archives",
+            "archive_local_run", "unarchive_local_run", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
             "get_log_session",
             "search_logs",
@@ -168,6 +170,103 @@ class TestServer(unittest.TestCase):
         contents = payload["result"]["contents"]
         self.assertEqual(contents[0]["uri"], resource["uri"])
         self.assertIn("run file", contents[0]["text"].lower())
+
+    def test_artifact_tools_resolve_completed_mcp_jobs(self):
+        job, _ = self.server.jobs.create_or_get(
+            "artifact-source", {"operation": "run"}
+        )
+        self.server.jobs.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory="/approved/run",
+        )
+        self.server.jobs.transition(job.mcp_job_id, JobState.RUNNING)
+        self.server.jobs.transition(job.mcp_job_id, JobState.COMPLETED)
+        self.server.operations.list_run_artifacts = Mock(
+            return_value={"run_path": "/approved/run", "artifacts": []}
+        )
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 16,
+            "method": "tools/call",
+            "params": {
+                "name": "list_run_artifacts",
+                "arguments": {"mcp_job_id": job.mcp_job_id},
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        self.server.operations.list_run_artifacts.assert_called_once_with(
+            Path("/approved/run"), 0, 100
+        )
+
+    def test_artifact_tools_resolve_failed_mcp_jobs_with_run_directories(self):
+        job, _ = self.server.jobs.create_or_get(
+            "failed-artifact-source", {"operation": "run"}
+        )
+        self.server.jobs.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory="/approved/failed-run",
+        )
+        self.server.jobs.transition(job.mcp_job_id, JobState.RUNNING)
+        self.server.jobs.transition(
+            job.mcp_job_id,
+            JobState.FAILED,
+            error_category="runtime",
+            error_message="benchmark failed",
+            exit_code=1,
+        )
+        self.server.operations.list_run_artifacts = Mock(
+            return_value={"run_path": "/approved/failed-run", "artifacts": []}
+        )
+        self.server.operations.get_run_artifact = Mock(
+            return_value={
+                "run_path": "/approved/failed-run",
+                "artifact_path": "run/tool-data/failure.txt",
+                "text": "failure details",
+            }
+        )
+
+        for request_id, name, arguments in (
+            (
+                17,
+                "list_run_artifacts",
+                {"mcp_job_id": job.mcp_job_id},
+            ),
+            (
+                18,
+                "get_run_artifact",
+                {
+                    "mcp_job_id": job.mcp_job_id,
+                    "artifact_path": "run/tool-data/failure.txt",
+                },
+            ),
+        ):
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            })
+            status, payload = self.request("POST", "/mcp", body, self.token)
+            with self.subTest(name=name):
+                self.assertEqual(status, 200)
+                self.assertNotIn("error", payload)
+
+        self.server.operations.list_run_artifacts.assert_called_once_with(
+            Path("/approved/failed-run"), 0, 100
+        )
+        self.server.operations.get_run_artifact.assert_called_once_with(
+            Path("/approved/failed-run"),
+            "run/tool-data/failure.txt",
+            0,
+            131072,
+            18,
+        )
 
     def test_documentation_resource_rejects_arbitrary_paths(self):
         body = json.dumps({
@@ -213,6 +312,8 @@ class TestServer(unittest.TestCase):
         self.assertIn("get_run_summary", info["capabilities"])
         self.assertIn("archive_local_run", info["capabilities"])
         self.assertIn("unarchive_local_run", info["capabilities"])
+        self.assertIn("list_run_artifacts", info["capabilities"])
+        self.assertIn("get_run_artifact", info["capabilities"])
 
     def test_invalid_parameter_shapes_return_json_rpc_errors(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": []})

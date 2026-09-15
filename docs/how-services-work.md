@@ -201,6 +201,8 @@ through the standard `tools/list` request; the current interface is:
 | `list_local_runs` | List local run artifacts from approved run roots. |
 | `get_local_run_summary` | Read a completed result summary from an approved local run artifact. |
 | `get_local_run_metadata` | Read rickshaw run metadata from an approved local run artifact. |
+| `list_run_artifacts` | List metadata for approved artifacts in a local run. |
+| `get_run_artifact` | Read a bounded UTF-8 slice of an approved text artifact. |
 | `list_local_archives` | List local run archives without accessing remote archive backends. |
 | `archive_local_run` | Archive an approved local run and remove the live run after success. |
 | `unarchive_local_run` | Restore a local run archive into the approved run root. |
@@ -249,9 +251,10 @@ The `crucible://docs/agentic-perf-workflow` resource describes the recommended
 discovery, validation, execution, processing, and CDM review sequence for
 agentic-perf clients.
 
-The `search_documentation` tool is available for clients that do not provide a
-resource browser. It returns matching resource metadata, after which the client
-can retrieve the selected document with `resources/read`.
+The `search_documentation` tool is available for clients that support
+`resources/read` but do not provide a resource browser. It returns matching
+resource metadata, after which the client can retrieve the selected document
+with `resources/read`; it does not return document contents itself.
 
 The discovery, result, metric, log, and documentation tools are read-only.
 `start_run`, `postprocess_local_run`, `index_local_run`, `delete_indexed_result`,
@@ -264,6 +267,20 @@ configured OpenSearch/CDM result; it does not remove local run files.
 does not query CDM.
 `get_local_run_metadata` reads the local `rickshaw-run.json[.xz]` artifact and
 does not query CDM.
+`list_run_artifacts` returns only metadata and stable relative paths from the
+approved result subtrees: `run/iterations`, `run/tool-data`, `run/sysinfo`, and
+`run/opensearch`, plus `run/result-summary.json`. `get_run_artifact` accepts
+those returned relative paths but retrieves only bounded UTF-8 text from the
+allowlisted subtrees; configuration files, credentials, archives, symlinks,
+environment dumps, binary files, and compressed artifacts are not retrievable.
+Both artifact tools accept a completed or failed terminal MCP job ID when the
+job retained a run directory, which supports inspection of failed runs.
+Offsets and limits
+for artifact reads are measured in bytes. Artifact-list offsets are traversal
+positions rather than counts of returned artifacts, and callers should continue
+from `next_offset`.
+Artifact traversal is bounded; requests that exceed the traversal limit return a
+bounded-result error rather than scanning the run tree indefinitely.
 Local archive management is limited to the configured local archive directory;
 remote archive backends are not exposed through MCP.
 Tag operations accept an approved run directory or a completed MCP job ID and

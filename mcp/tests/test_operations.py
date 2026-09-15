@@ -1,5 +1,7 @@
+import errno
 import json
 import lzma
+import os
 import sqlite3
 import tempfile
 import time
@@ -8,7 +10,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from crucible_mcp.operations import CrucibleOperations, OperationError
+from crucible_mcp.operations import (
+    MAX_ARTIFACT_READ_BYTES,
+    MAX_ARTIFACT_RESPONSE_BYTES,
+    CrucibleOperations,
+    OperationError,
+)
 from crucible_mcp.policy import InputPolicy
 
 
@@ -250,6 +257,389 @@ class TestCrucibleOperations(unittest.TestCase):
 
         self.assertEqual(result["metadata_path"], str(metadata_path))
         self.assertEqual(result["metadata"], {"run-id": "run-2", "benchmarks": []})
+
+    def test_list_run_artifacts_returns_bounded_metadata_for_approved_paths(self):
+        run_directory = self.root / "run" / "artifact-run"
+        result_summary = run_directory / "run" / "result-summary.json"
+        text_artifact = (
+            run_directory
+            / "run"
+            / "iterations"
+            / "iteration-1"
+            / "sample-1"
+            / "client"
+            / "1"
+            / "benchmark-result.json"
+        )
+        binary_artifact = run_directory / "run" / "tool-data" / "capture.bin"
+        secret = run_directory / "config" / "secret.json"
+        result_summary.parent.mkdir(parents=True)
+        text_artifact.parent.mkdir(parents=True)
+        binary_artifact.parent.mkdir(parents=True)
+        secret.parent.mkdir(parents=True)
+        result_summary.write_text("{}", encoding="utf-8")
+        text_artifact.write_text('{"value": 1}', encoding="utf-8")
+        binary_artifact.write_bytes(b"\x00\x01")
+        secret.write_text('{"password": "do-not-list"}', encoding="utf-8")
+
+        result = self.operations.list_run_artifacts(run_directory)
+
+        self.assertEqual(result["count"], 3)
+        paths = {item["artifact_path"] for item in result["artifacts"]}
+        self.assertEqual(
+            paths,
+            {
+                "run/result-summary.json",
+                "run/iterations/iteration-1/sample-1/client/1/benchmark-result.json",
+                "run/tool-data/capture.bin",
+            },
+        )
+        retrievable = {
+            item["artifact_path"]: item["retrievable"] for item in result["artifacts"]
+        }
+        self.assertTrue(retrievable["run/result-summary.json"])
+        self.assertTrue(
+            retrievable[
+                "run/iterations/iteration-1/sample-1/client/1/benchmark-result.json"
+            ]
+        )
+        self.assertFalse(retrievable["run/tool-data/capture.bin"])
+        self.assertEqual(
+            next(
+                item
+                for item in result["artifacts"]
+                if item["artifact_path"] == "run/tool-data/capture.bin"
+            )["media_type"],
+            "application/octet-stream",
+        )
+
+    def test_list_run_artifacts_bounds_scan_work_independent_of_offset(self):
+        run_directory = self.root / "run" / "scan-cap"
+        iterations = run_directory / "run" / "iterations"
+        iterations.mkdir(parents=True)
+        for name in ("a.txt", "b.txt", "c.txt"):
+            (iterations / name).write_text(name, encoding="utf-8")
+
+        with patch("crucible_mcp.operations.MAX_ARTIFACT_SCAN_FILES", 2):
+            with self.assertRaises(OperationError) as high_offset:
+                self.operations.list_run_artifacts(run_directory, offset=2)
+            self.assertEqual(high_offset.exception.code, "result_too_large")
+
+            with self.assertRaises(OperationError) as too_many_files:
+                self.operations.list_run_artifacts(run_directory, limit=10)
+            self.assertEqual(too_many_files.exception.code, "result_too_large")
+
+    def test_list_run_artifacts_bounds_empty_directory_traversal(self):
+        run_directory = self.root / "run" / "empty-directory-cap"
+        (run_directory / "run" / "iterations" / "empty" / "deep").mkdir(
+            parents=True
+        )
+
+        with patch("crucible_mcp.operations.MAX_ARTIFACT_SCAN_FILES", 3):
+            with self.assertRaises(OperationError) as raised:
+                self.operations.list_run_artifacts(run_directory)
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_list_run_artifacts_bounds_open_directory_depth(self):
+        run_directory = self.root / "run" / "directory-depth-cap"
+        (run_directory / "run" / "iterations" / "deep").mkdir(parents=True)
+
+        with patch("crucible_mcp.operations.MAX_ARTIFACT_DIRECTORY_DEPTH", 2):
+            with self.assertRaises(OperationError) as raised:
+                self.operations.list_run_artifacts(run_directory)
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_list_run_artifacts_reports_traversal_errors(self):
+        run_directory = self.root / "run" / "traversal-error"
+        run_directory.mkdir(parents=True)
+
+        with patch(
+            "crucible_mcp.operations.os.scandir",
+            side_effect=PermissionError("unreadable"),
+        ):
+            result = self.operations.list_run_artifacts(run_directory)
+
+        self.assertFalse(result["complete"])
+
+    def test_list_run_artifacts_handles_entry_inspection_errors(self):
+        run_directory = self.root / "run" / "entry-error"
+        (run_directory / "run" / "iterations").mkdir(parents=True)
+
+        class FailingEntry:
+            name = "broken.txt"
+
+            def is_symlink(self):
+                return False
+
+            def is_dir(self, follow_symlinks=False):
+                return False
+
+            def is_file(self, follow_symlinks=False):
+                raise OSError("entry disappeared")
+
+        class SingleEntryIterator:
+            def __init__(self, entry):
+                self.entry = entry
+                self.consumed = False
+
+            def __next__(self):
+                if self.consumed:
+                    raise StopIteration
+                self.consumed = True
+                return self.entry
+
+            def close(self):
+                return None
+
+        real_scandir = os.scandir
+        calls = 0
+
+        def failing_scandir(path):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                return SingleEntryIterator(FailingEntry())
+            return real_scandir(path)
+
+        with patch("crucible_mcp.operations.os.scandir", side_effect=failing_scandir):
+            result = self.operations.list_run_artifacts(run_directory)
+
+        self.assertFalse(result["complete"])
+
+    def test_list_run_artifacts_does_not_follow_raced_directory_symlinks(self):
+        run_directory = self.root / "run" / "directory-symlink-race"
+        (run_directory / "run").mkdir(parents=True)
+        real_open = os.open
+
+        def raced_open(path, flags, *args, **kwargs):
+            if kwargs.get("dir_fd") is not None and path == "run":
+                raise OSError(errno.ELOOP, "directory replaced by symlink")
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch("crucible_mcp.operations.os.open", side_effect=raced_open):
+            result = self.operations.list_run_artifacts(run_directory)
+
+        self.assertFalse(result["complete"])
+        self.assertGreater(result["next_offset"], 0)
+
+    def test_get_run_artifact_returns_utf8_byte_slices(self):
+        run_directory = self.root / "run" / "artifact-slice"
+        artifact = run_directory / "run" / "iterations" / "sample.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("αβγ\n", encoding="utf-8")
+
+        first = self.operations.get_run_artifact(
+            run_directory, "run/iterations/sample.txt", limit=4
+        )
+        second = self.operations.get_run_artifact(
+            run_directory,
+            "run/iterations/sample.txt",
+            offset=first["next_offset"],
+            limit=4,
+        )
+
+        self.assertEqual(first["text"], "αβ")
+        self.assertEqual(first["next_offset"], 4)
+        self.assertFalse(first["complete"])
+        self.assertEqual(second["text"], "γ\n")
+        self.assertTrue(second["complete"])
+
+    def test_get_run_artifact_rejects_unapproved_and_binary_paths(self):
+        run_directory = self.root / "run" / "artifact-policy"
+        secret = run_directory / "config" / "secret.json"
+        binary = run_directory / "run" / "iterations" / "capture.bin"
+        credentials = run_directory / "run" / "tool-data" / "credentials.json"
+        token = run_directory / "run" / "tool-data" / "token.txt"
+        engine_env = run_directory / "run" / "tool-data" / "engine-env.txt"
+        nested_credential = (
+            run_directory / "run" / "tool-data" / "credentials" / "private.txt"
+        )
+        secret.parent.mkdir(parents=True)
+        binary.parent.mkdir(parents=True)
+        credentials.parent.mkdir(parents=True)
+        nested_credential.parent.mkdir(parents=True)
+        secret.write_text("secret", encoding="utf-8")
+        binary.write_bytes(b"\x00\x01")
+        credentials.write_text('{"password": "secret"}', encoding="utf-8")
+        token.write_text("secret-token", encoding="utf-8")
+        engine_env.write_text("AWS_SECRET_ACCESS_KEY=secret", encoding="utf-8")
+        nested_credential.write_text("private secret", encoding="utf-8")
+
+        with self.assertRaises(OperationError) as rejected:
+            self.operations.get_run_artifact(run_directory, "config/secret.json")
+        self.assertEqual(rejected.exception.code, "path_rejected")
+
+        with self.assertRaises(OperationError) as binary_error:
+            self.operations.get_run_artifact(
+                run_directory, "run/iterations/capture.bin"
+            )
+        self.assertEqual(binary_error.exception.code, "artifact_not_text")
+
+        for sensitive in (
+            "run/tool-data/credentials.json",
+            "run/tool-data/token.txt",
+            "run/tool-data/engine-env.txt",
+            "run/tool-data/credentials/private.txt",
+        ):
+            with self.subTest(sensitive=sensitive):
+                with self.assertRaises(OperationError) as sensitive_error:
+                    self.operations.get_run_artifact(run_directory, sensitive)
+                self.assertEqual(
+                    sensitive_error.exception.code, "artifact_not_retrievable"
+                )
+
+        listed = self.operations.list_run_artifacts(run_directory)
+        listed_by_path = {
+            item["artifact_path"]: item for item in listed["artifacts"]
+        }
+        self.assertFalse(listed_by_path["run/tool-data/credentials.json"]["retrievable"])
+        self.assertFalse(listed_by_path["run/tool-data/token.txt"]["retrievable"])
+        self.assertFalse(listed_by_path["run/tool-data/engine-env.txt"]["retrievable"])
+        self.assertFalse(
+            listed_by_path["run/tool-data/credentials/private.txt"]["retrievable"]
+        )
+
+    def test_get_run_artifact_reports_missing_paths(self):
+        run_directory = self.root / "run" / "missing-artifact"
+        iterations = run_directory / "run" / "iterations"
+        iterations.mkdir(parents=True)
+
+        with self.assertRaises(OperationError) as missing:
+            self.operations.get_run_artifact(
+                run_directory, "run/iterations/nope.txt"
+            )
+        self.assertEqual(missing.exception.code, "artifact_not_found")
+
+        (iterations / "directory.txt").mkdir()
+        with self.assertRaises(OperationError) as directory:
+            self.operations.get_run_artifact(
+                run_directory, "run/iterations/directory.txt"
+            )
+        self.assertEqual(directory.exception.code, "artifact_not_found")
+
+    def test_get_run_artifact_rejects_nul_paths(self):
+        run_directory = self.root / "run" / "nul-artifact-path"
+        (run_directory / "run" / "iterations").mkdir(parents=True)
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_run_artifact(
+                run_directory, "run/iterations/bad\x00name.txt"
+            )
+        self.assertEqual(raised.exception.code, "invalid_artifact_path")
+
+    def test_get_run_artifact_maps_open_failures(self):
+        run_directory = self.root / "run" / "unreadable-artifact"
+        artifact = run_directory / "run" / "iterations" / "result.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("result", encoding="utf-8")
+
+        with patch.object(
+            self.operations,
+            "_open_artifact_readonly",
+            side_effect=PermissionError("permission denied"),
+        ):
+            with self.assertRaises(OperationError) as raised:
+                self.operations.get_run_artifact(
+                    run_directory, "run/iterations/result.txt"
+                )
+        self.assertEqual(raised.exception.code, "artifact_unavailable")
+
+    def test_get_run_artifact_maps_invalid_path_resolution(self):
+        run_directory = self.root / "run" / "invalid-artifact-path"
+        artifact = run_directory / "run" / "iterations" / "result.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("result", encoding="utf-8")
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_run_artifact(
+                run_directory,
+                f"run/iterations/{'a' * 256}.txt",
+            )
+        self.assertEqual(raised.exception.code, "invalid_artifact_path")
+
+    def test_get_run_artifact_rejects_symlink_during_descriptor_open(self):
+        run_directory = self.root / "run" / "artifact-symlink"
+        artifact_directory = run_directory / "run" / "iterations"
+        artifact_directory.mkdir(parents=True)
+        outside = self.root / "outside.txt"
+        outside.write_text("secret", encoding="utf-8")
+        (artifact_directory / "link.txt").symlink_to(outside)
+
+        with self.assertRaises(OperationError) as rejected:
+            CrucibleOperations._open_artifact_readonly(
+                run_directory.resolve(), "run/iterations/link.txt"
+            )
+        self.assertEqual(rejected.exception.code, "path_rejected")
+
+    def test_get_run_artifact_rejects_fifo_without_blocking(self):
+        run_directory = self.root / "run" / "artifact-fifo"
+        artifact_directory = run_directory / "run" / "iterations"
+        artifact_directory.mkdir(parents=True)
+        fifo = artifact_directory / "stream.txt"
+        try:
+            os.mkfifo(fifo)
+        except (AttributeError, NotImplementedError, OSError):
+            self.skipTest("FIFO creation is unavailable")
+
+        with self.assertRaises(OperationError) as rejected:
+            CrucibleOperations._open_artifact_readonly(
+                run_directory.resolve(), "run/iterations/stream.txt"
+            )
+        self.assertEqual(rejected.exception.code, "artifact_not_found")
+
+    def test_get_run_artifact_reports_small_utf8_limits(self):
+        run_directory = self.root / "run" / "small-utf8"
+        artifact = run_directory / "run" / "iterations" / "unicode.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("€", encoding="utf-8")
+
+        with self.assertRaises(OperationError) as too_small:
+            self.operations.get_run_artifact(
+                run_directory, "run/iterations/unicode.txt", limit=1
+            )
+        self.assertEqual(too_small.exception.code, "result_too_large")
+
+        with self.assertRaises(OperationError) as invalid_offset:
+            self.operations.get_run_artifact(
+                run_directory,
+                "run/iterations/unicode.txt",
+                offset=1,
+                limit=2,
+            )
+        self.assertEqual(invalid_offset.exception.code, "invalid_offset")
+
+    def test_get_run_artifact_reports_truncated_utf8_at_eof(self):
+        run_directory = self.root / "run" / "truncated-utf8"
+        artifact = run_directory / "run" / "iterations" / "truncated.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"\xe2")
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_run_artifact(
+                run_directory,
+                "run/iterations/truncated.txt",
+                limit=131072,
+            )
+        self.assertEqual(raised.exception.code, "invalid_artifact")
+
+    def test_get_run_artifact_bounds_serialized_control_bytes(self):
+        run_directory = self.root / "run" / "large-control-artifact"
+        artifact = run_directory / "run" / "iterations" / "control.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"\x00" * MAX_ARTIFACT_READ_BYTES)
+
+        result = self.operations.get_run_artifact(
+            run_directory,
+            "run/iterations/control.txt",
+            request_id="large-control-request",
+        )
+
+        self.assertFalse(result["complete"])
+        self.assertLess(result["next_offset"], result["size"])
+        self.assertLessEqual(
+            self.operations._mcp_response_size(result, "large-control-request"),
+            MAX_ARTIFACT_RESPONSE_BYTES,
+        )
 
     def test_local_artifact_invalid_utf8_is_a_structured_artifact_error(self):
         summary_run = self.root / "run" / "invalid-summary"

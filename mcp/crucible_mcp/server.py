@@ -32,6 +32,8 @@ TOOL_NAMES = (
     "list_local_runs",
     "get_local_run_summary",
     "get_local_run_metadata",
+    "list_run_artifacts",
+    "get_run_artifact",
     "list_local_archives",
     "archive_local_run",
     "unarchive_local_run",
@@ -97,6 +99,43 @@ TOOL_DEFINITIONS = (
             "type": "object",
             "properties": {"run_path": {"type": "string", "minLength": 1}},
             "required": ["run_path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_run_artifacts",
+        "description": "List metadata for approved artifacts in a local run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_path": {"type": "string", "minLength": 1},
+                "mcp_job_id": {"type": "string", "minLength": 1},
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 99999,
+                    "description": "Traversal position returned by a previous page.",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+            },
+            "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_run_artifact",
+        "description": "Read a bounded UTF-8 slice of an approved local run artifact.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_path": {"type": "string", "minLength": 1},
+                "mcp_job_id": {"type": "string", "minLength": 1},
+                "artifact_path": {"type": "string", "minLength": 1},
+                "offset": {"type": "integer", "minimum": 0, "maximum": 1073741824},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 131072},
+            },
+            "required": ["artifact_path"],
+            "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
             "additionalProperties": False,
         },
     },
@@ -688,6 +727,30 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = self.server.operations.get_local_run_summary(Path(arguments["run_path"]))
             elif name == "get_local_run_metadata":
                 value = self.server.operations.get_local_run_metadata(Path(arguments["run_path"]))
+            elif name in {"list_run_artifacts", "get_run_artifact"}:
+                if "run_path" in arguments:
+                    artifact_run_path = Path(arguments["run_path"])
+                else:
+                    source_job = self.server.jobs.get(arguments["mcp_job_id"])
+                    if source_job.state not in {JobState.COMPLETED, JobState.FAILED}:
+                        return self._error(request_id, -32000, "source job has not completed")
+                    if not source_job.run_directory:
+                        return self._error(request_id, -32000, "source job has no run directory")
+                    artifact_run_path = Path(source_job.run_directory)
+                if name == "list_run_artifacts":
+                    value = self.server.operations.list_run_artifacts(
+                        artifact_run_path,
+                        arguments.get("offset", 0),
+                        arguments.get("limit", 100),
+                    )
+                else:
+                    value = self.server.operations.get_run_artifact(
+                        artifact_run_path,
+                        arguments["artifact_path"],
+                        arguments.get("offset", 0),
+                        arguments.get("limit", 131072),
+                        request_id,
+                    )
             elif name == "list_local_archives":
                 value = self.server.operations.list_local_archives(arguments.get("limit", 1000))
             elif name in {"archive_local_run", "unarchive_local_run"}:

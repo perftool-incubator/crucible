@@ -1,10 +1,12 @@
 """Typed, non-execution Crucible operations for the MCP contract."""
 
+import errno
 import json
 import lzma
 import os
 import re
 import sqlite3
+import stat
 import tempfile
 import threading
 from pathlib import Path
@@ -19,6 +21,78 @@ from .documentation import DocumentationCatalog
 from .policy import InputPolicy, PolicyError
 
 MAX_LOG_RESPONSE_BYTES = 1_048_576
+MAX_ARTIFACT_LIST_LIMIT = 1000
+MAX_ARTIFACT_OFFSET = 1_073_741_824
+MAX_ARTIFACT_SCAN_FILES = 100_000
+MAX_ARTIFACT_DIRECTORY_DEPTH = 64
+MAX_ARTIFACT_METADATA_BYTES = 262_144
+MAX_ARTIFACT_READ_BYTES = 131_072
+MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
+
+_ARTIFACT_ROOTS = (
+    "run/iterations",
+    "run/tool-data",
+    "run/sysinfo",
+    "run/opensearch",
+)
+_TEXT_ARTIFACT_SUFFIXES = {
+    ".csv": "text/csv",
+    ".err": "text/plain",
+    ".json": "application/json",
+    ".log": "text/plain",
+    ".md": "text/markdown",
+    ".ndjson": "application/x-ndjson",
+    ".out": "text/plain",
+    ".txt": "text/plain",
+    ".xml": "application/xml",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+}
+_ARTIFACT_SUFFIX_MEDIA_TYPES = {
+    **_TEXT_ARTIFACT_SUFFIXES,
+    ".xz": "application/x-xz",
+    ".tgz": "application/gzip",
+    ".gz": "application/gzip",
+    ".tar": "application/x-tar",
+}
+_SENSITIVE_ARTIFACT_SUFFIXES = {
+    ".asc",
+    ".cer",
+    ".crt",
+    ".der",
+    ".gpg",
+    ".jks",
+    ".key",
+    ".kdb",
+    ".p12",
+    ".pfx",
+    ".pem",
+}
+_SENSITIVE_ARTIFACT_NAMES = {
+    ".env",
+    ".netrc",
+    "config",
+    "config.ini",
+    "config.json",
+    "config.toml",
+    "config.yaml",
+    "config.yml",
+    "credentials",
+    "credentials.json",
+    "credentials.yaml",
+    "credentials.yml",
+    "engine-env",
+    "engine-env.txt",
+    "secret",
+    "secret.json",
+    "secret.yaml",
+    "secret.yml",
+    "token",
+    "token.json",
+    "token.txt",
+    "token.yaml",
+    "token.yml",
+}
 
 
 class OperationError(RuntimeError):
@@ -79,6 +153,8 @@ class CrucibleOperations:
                 "list_local_runs",
                 "get_local_run_summary",
                 "get_local_run_metadata",
+                "list_run_artifacts",
+                "get_run_artifact",
                 "list_local_archives",
                 "archive_local_run",
                 "unarchive_local_run",
@@ -301,6 +377,461 @@ class CrucibleOperations:
             "metadata": metadata,
         }
 
+    def list_run_artifacts(
+        self, run_path: Path, offset: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        """List metadata for approved artifacts without returning their contents."""
+
+        if offset < 0 or offset > MAX_ARTIFACT_OFFSET:
+            raise OperationError(
+                "user", f"offset must be between 0 and {MAX_ARTIFACT_OFFSET}", "invalid_offset"
+            )
+        if offset >= MAX_ARTIFACT_SCAN_FILES:
+            raise OperationError(
+                "framework",
+                "artifact listing exceeds the traversal limit",
+                "result_too_large",
+            )
+        if limit < 1 or limit > MAX_ARTIFACT_LIST_LIMIT:
+            raise OperationError(
+                "user",
+                f"limit must be between 1 and {MAX_ARTIFACT_LIST_LIMIT}",
+                "invalid_limit",
+            )
+
+        canonical = self._canonical_run_directory(run_path)
+        artifacts: list[dict[str, Any]] = []
+        scanned = 0
+        metadata_bytes = len(str(canonical).encode("utf-8"))
+        complete = True
+        next_offset = offset
+        scan_limit = MAX_ARTIFACT_SCAN_FILES
+
+        def mark_walk_error(_error: OSError) -> None:
+            nonlocal complete
+            complete = False
+
+        directory_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        root_fd = None
+        try:
+            root_fd = os.open(canonical, directory_flags)
+            root_iterator = os.scandir(root_fd)
+        except OSError as exc:
+            mark_walk_error(exc)
+            if root_fd is not None:
+                os.close(root_fd)
+            root_fd = None
+            root_iterator = None
+
+        stack: list[tuple[int, str, Any]] = []
+        if root_iterator is not None:
+            stack.append((root_fd, ".", root_iterator))
+        scanned = 1
+        try:
+            while stack:
+                current_fd, current_relative, entries = stack[-1]
+                try:
+                    entry = next(entries)
+                except StopIteration:
+                    entries.close()
+                    stack.pop()
+                    os.close(current_fd)
+                    continue
+                except OSError as exc:
+                    mark_walk_error(exc)
+                    entries.close()
+                    stack.pop()
+                    os.close(current_fd)
+                    continue
+
+                scanned += 1
+                if scanned > scan_limit:
+                    raise OperationError(
+                        "framework",
+                        "artifact listing exceeds the traversal limit",
+                        "result_too_large",
+                    )
+                relative = (
+                    entry.name
+                    if current_relative == "."
+                    else f"{current_relative}/{entry.name}"
+                )
+                try:
+                    is_symlink = entry.is_symlink()
+                    is_directory = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    complete = False
+                    next_offset = scanned
+                    continue
+
+                if is_directory and not is_symlink:
+                    if not self._artifact_directory_may_contain(
+                        current_relative, entry.name
+                    ):
+                        continue
+                    if len(stack) >= MAX_ARTIFACT_DIRECTORY_DEPTH:
+                        raise OperationError(
+                            "framework",
+                            "artifact listing exceeds the directory depth limit",
+                            "result_too_large",
+                        )
+                    child_fd = None
+                    try:
+                        child_fd = os.open(
+                            entry.name, directory_flags, dir_fd=current_fd
+                        )
+                        child_iterator = os.scandir(child_fd)
+                    except OSError as exc:
+                        mark_walk_error(exc)
+                        next_offset = scanned
+                        if child_fd is not None:
+                            os.close(child_fd)
+                        continue
+                    stack.append((child_fd, relative, child_iterator))
+                    continue
+
+                file_offset = scanned
+                try:
+                    is_regular = entry.is_file(follow_symlinks=False)
+                except OSError:
+                    complete = False
+                    next_offset = file_offset
+                    continue
+                if is_symlink or not is_regular:
+                    next_offset = file_offset
+                    continue
+                if file_offset <= offset:
+                    next_offset = file_offset
+                    continue
+                if not self._is_approved_artifact(relative):
+                    next_offset = file_offset
+                    continue
+                if len(artifacts) >= limit:
+                    complete = False
+                    next_offset = file_offset - 1
+                    break
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                except OSError:
+                    complete = False
+                    next_offset = file_offset
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    next_offset = file_offset
+                    continue
+                artifact = {
+                    "artifact_path": relative,
+                    "name": entry.name,
+                    "media_type": self._artifact_media_type(Path(entry.name)),
+                    "size": metadata.st_size,
+                    "modified_at": int(metadata.st_mtime * 1000),
+                    "retrievable": self._is_retrievable_artifact(relative),
+                }
+                artifact_bytes = len(
+                    json.dumps(artifact, separators=(",", ":")).encode("utf-8")
+                )
+                if (
+                    artifacts
+                    and metadata_bytes + artifact_bytes > MAX_ARTIFACT_METADATA_BYTES
+                ):
+                    complete = False
+                    next_offset = file_offset - 1
+                    break
+                artifacts.append(artifact)
+                metadata_bytes += artifact_bytes
+                next_offset = file_offset
+        finally:
+            for directory_fd, _relative, entries in stack:
+                entries.close()
+                os.close(directory_fd)
+
+        return {
+            "run_path": str(canonical),
+            "offset": offset,
+            "next_offset": next_offset,
+            "complete": complete,
+            "artifacts": artifacts,
+            "count": len(artifacts),
+        }
+
+    @staticmethod
+    def _artifact_directory_may_contain(current: str, child: str) -> bool:
+        candidate = child if current == "." else f"{current}/{child}"
+        return any(
+            candidate.startswith(f"{root}/")
+            or root == candidate
+            or root.startswith(f"{candidate}/")
+            for root in _ARTIFACT_ROOTS
+        )
+
+    def get_run_artifact(
+        self,
+        run_path: Path,
+        artifact_path: str,
+        offset: int = 0,
+        limit: int = MAX_ARTIFACT_READ_BYTES,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Read a bounded UTF-8 slice of one approved text artifact."""
+
+        if offset < 0 or offset > MAX_ARTIFACT_OFFSET:
+            raise OperationError(
+                "user", f"offset must be between 0 and {MAX_ARTIFACT_OFFSET}", "invalid_offset"
+            )
+        if limit < 1 or limit > MAX_ARTIFACT_READ_BYTES:
+            raise OperationError(
+                "user",
+                f"limit must be between 1 and {MAX_ARTIFACT_READ_BYTES}",
+                "invalid_limit",
+            )
+        if "\x00" in artifact_path:
+            raise OperationError(
+                "user", "artifact path contains a NUL character", "invalid_artifact_path"
+            )
+        canonical = self._canonical_run_directory(run_path)
+        try:
+            artifact = self._safe_artifact_path(canonical, artifact_path)
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise OperationError(
+                "user", "artifact does not exist", "artifact_not_found"
+            ) from exc
+        except OSError as exc:
+            raise OperationError(
+                "user", "artifact path could not be resolved", "invalid_artifact_path"
+            ) from exc
+        relative = artifact.relative_to(canonical).as_posix()
+        if not self._is_approved_artifact(relative):
+            raise OperationError(
+                "authorization", "artifact is outside the approved artifact set", "path_rejected"
+            )
+        if not self._is_text_artifact(relative):
+            raise OperationError(
+                "user", "artifact is not an approved UTF-8 text artifact", "artifact_not_text"
+            )
+        if not self._is_retrievable_artifact(relative):
+            raise OperationError(
+                "authorization",
+                "sensitive artifacts are not retrievable",
+                "artifact_not_retrievable",
+            )
+        try:
+            stream = self._open_artifact_readonly(canonical, relative)
+        except FileNotFoundError as exc:
+            raise OperationError(
+                "user", "artifact does not exist", "artifact_not_found"
+            ) from exc
+        except (NotADirectoryError, PermissionError) as exc:
+            raise OperationError(
+                "framework", "artifact could not be opened", "artifact_unavailable"
+            ) from exc
+        except OSError as exc:
+            raise OperationError(
+                "framework", "artifact could not be opened", "artifact_unavailable"
+            ) from exc
+        try:
+            size = os.fstat(stream.fileno()).st_size
+            if offset > size:
+                raise OperationError(
+                    "user", "offset is beyond the artifact size", "invalid_offset"
+                )
+            stream.seek(offset)
+            encoded = stream.read(limit)
+        except OperationError:
+            raise
+        except OSError as exc:
+            raise OperationError(
+                "framework", "artifact could not be read", "artifact_unavailable"
+            ) from exc
+        finally:
+            stream.close()
+
+        text, consumed = self._decode_artifact_slice(
+            encoded, offset, offset + len(encoded) >= size
+        )
+
+        def build_result(selected_text: str) -> dict[str, Any]:
+            selected_consumed = len(selected_text.encode("utf-8"))
+            selected_offset = offset + selected_consumed
+            return {
+                "run_path": str(canonical),
+                "artifact_path": relative,
+                "media_type": self._artifact_media_type(artifact),
+                "size": size,
+                "offset": offset,
+                "next_offset": selected_offset,
+                "complete": selected_offset >= size,
+                "text": selected_text,
+            }
+
+        result = build_result(text)
+        if self._mcp_response_size(result, request_id) <= MAX_ARTIFACT_RESPONSE_BYTES:
+            return result
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            candidate = build_result(text[:middle])
+            if self._mcp_response_size(candidate, request_id) <= MAX_ARTIFACT_RESPONSE_BYTES:
+                low = middle
+            else:
+                high = middle - 1
+        if low == 0:
+            raise OperationError(
+                "framework", "artifact response exceeds size limit", "result_too_large"
+            )
+        return build_result(text[:low])
+
+    @staticmethod
+    def _is_approved_artifact(relative: str) -> bool:
+        if relative == "run/result-summary.json":
+            return True
+        return any(
+            relative == root or relative.startswith(f"{root}/")
+            for root in _ARTIFACT_ROOTS
+        )
+
+    @staticmethod
+    def _is_text_artifact(relative: str) -> bool:
+        if relative == "run/result-summary.json":
+            return True
+        if not any(
+            relative == root or relative.startswith(f"{root}/")
+            for root in _ARTIFACT_ROOTS
+        ):
+            return False
+        return Path(relative).suffix.lower() in _TEXT_ARTIFACT_SUFFIXES
+
+    @staticmethod
+    def _is_sensitive_artifact(relative: str) -> bool:
+        for component in Path(relative).parts:
+            name = component.lower()
+            if name in _SENSITIVE_ARTIFACT_NAMES:
+                return True
+            if Path(name).suffix.lower() in _SENSITIVE_ARTIFACT_SUFFIXES:
+                return True
+            if any(
+                marker in name
+                for marker in ("credential", "password", "secret", "token")
+            ):
+                return True
+        return False
+
+    @classmethod
+    def _is_retrievable_artifact(cls, relative: str) -> bool:
+        return cls._is_text_artifact(relative) and not cls._is_sensitive_artifact(relative)
+
+    @staticmethod
+    def _artifact_media_type(path: Path) -> str:
+        return _ARTIFACT_SUFFIX_MEDIA_TYPES.get(
+            path.suffix.lower(), "application/octet-stream"
+        )
+
+    @staticmethod
+    def _decode_artifact_slice(
+        encoded: bytes, offset: int, at_eof: bool
+    ) -> tuple[str, int]:
+        if not encoded:
+            return "", 0
+        end = len(encoded)
+        while end:
+            try:
+                return encoded[:end].decode("utf-8"), end
+            except UnicodeDecodeError as exc:
+                if exc.reason == "unexpected end of data" and exc.start == 0:
+                    if CrucibleOperations._utf8_character_length(encoded[0]) is not None:
+                        if at_eof:
+                            raise OperationError(
+                                "user",
+                                "artifact is not valid UTF-8",
+                                "invalid_artifact",
+                            ) from exc
+                        raise OperationError(
+                            "user",
+                            "limit is too small for the next UTF-8 character",
+                            "result_too_large",
+                        ) from exc
+                if exc.reason != "unexpected end of data" or exc.start == 0:
+                    code = "invalid_offset" if offset else "invalid_artifact"
+                    message = (
+                        "offset is not at a UTF-8 character boundary"
+                        if offset
+                        else "artifact is not valid UTF-8"
+                    )
+                    raise OperationError("user", message, code) from exc
+                if at_eof:
+                    raise OperationError(
+                        "user",
+                        "artifact is not valid UTF-8",
+                        "invalid_artifact",
+                    ) from exc
+                end = exc.start
+        raise OperationError(
+            "user",
+            "limit is too small for the next UTF-8 character",
+            "result_too_large",
+        )
+
+    @staticmethod
+    def _utf8_character_length(first_byte: int) -> int | None:
+        if first_byte <= 0x7F:
+            return 1
+        if 0xC2 <= first_byte <= 0xDF:
+            return 2
+        if 0xE0 <= first_byte <= 0xEF:
+            return 3
+        if 0xF0 <= first_byte <= 0xF4:
+            return 4
+        return None
+
+    @staticmethod
+    def _open_artifact_readonly(run_directory: Path, relative: str):
+        """Open an approved artifact without reopening a replaceable pathname."""
+
+        parts = Path(relative).parts
+        if not parts:
+            raise FileNotFoundError(relative)
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+        close_on_exec = getattr(os, "O_CLOEXEC", 0)
+        directory_flag = getattr(os, "O_DIRECTORY", 0)
+        nonblocking = getattr(os, "O_NONBLOCK", 0)
+        flags = os.O_RDONLY | no_follow | close_on_exec
+        directory_fd = os.open(run_directory, flags | directory_flag)
+        file_fd = None
+        try:
+            for component in parts[:-1]:
+                next_directory_fd = os.open(
+                    component,
+                    flags | directory_flag,
+                    dir_fd=directory_fd,
+                )
+                os.close(directory_fd)
+                directory_fd = next_directory_fd
+            # A raced FIFO must not block the request worker before fstat rejects it.
+            file_fd = os.open(parts[-1], flags | nonblocking, dir_fd=directory_fd)
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+                raise OperationError(
+                    "user", "artifact is not a regular file", "artifact_not_found"
+                )
+            stream = os.fdopen(file_fd, "rb")
+            file_fd = None
+            return stream
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise OperationError(
+                    "authorization",
+                    "artifact path changed to a symlink",
+                    "path_rejected",
+                ) from exc
+            raise
+        finally:
+            if file_fd is not None:
+                os.close(file_fd)
+            os.close(directory_fd)
+
     def list_local_archives(self, limit: int = 1000) -> dict[str, Any]:
         """List local archives without accessing configured remote backends."""
 
@@ -378,7 +909,21 @@ class CrucibleOperations:
     @staticmethod
     def _safe_artifact_path(run_directory: Path, relative: str) -> Path:
         canonical = run_directory.resolve(strict=True)
+        relative_path = Path(relative)
+        if relative_path.is_absolute() or any(
+            part in {".", ".."} for part in relative_path.parts
+        ):
+            raise OperationError(
+                "authorization", "run artifact path is not relative", "path_rejected"
+            )
         path = run_directory / relative
+        current = canonical
+        for part in relative_path.parts:
+            current /= part
+            if current.is_symlink():
+                raise OperationError(
+                    "authorization", "run artifact path contains a symlink", "path_rejected"
+                )
         resolved = path.resolve(strict=True)
         if canonical not in resolved.parents:
             raise OperationError(
