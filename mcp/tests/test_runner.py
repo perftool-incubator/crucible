@@ -284,6 +284,92 @@ class TestRunManager(unittest.TestCase):
 
         self.assertEqual(recovered.state, JobState.COMPLETED)
 
+    def test_orphaned_processing_resolution_backfills_identifiers(self):
+        job, _ = self.store.create_or_get(
+            "key-orphaned-processing-identifiers", {"operation": "index"}, "index"
+        )
+        target = self.root / "orphaned-processing-run"
+        (target / "run").mkdir(parents=True)
+        (target / "run" / "rickshaw-run.json").write_text(
+            '{"run-id":"rickshaw-orphaned"}', encoding="utf-8"
+        )
+        (target / "run" / "result-summary.json").write_text(
+            '{"cdm_run_id":"cdm-orphaned"}', encoding="utf-8"
+        )
+        supervision = self.root / "orphaned-processing-job"
+        supervision.mkdir()
+        (supervision / "processing-complete").write_text("index\n", encoding="utf-8")
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(target),
+            supervision_directory=str(supervision),
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.INDEXING,
+            run_directory=str(target),
+            supervision_directory=str(supervision),
+        )
+
+        recovered = self.manager._resolve_or_fail(self.store.get(job.mcp_job_id))
+
+        self.assertEqual(recovered.state, JobState.COMPLETED)
+        self.assertEqual(recovered.rickshaw_run_id, "rickshaw-orphaned")
+        self.assertEqual(recovered.cdm_run_id, "cdm-orphaned")
+
+    def test_orphaned_run_resolution_backfills_identifiers(self):
+        job, _ = self.store.create_or_get(
+            "key-orphaned-run-identifiers", {"operation": "run"}
+        )
+        target = self.root / "orphaned-run"
+        (target / "run").mkdir(parents=True)
+        (target / "run" / "rickshaw-run.json").write_text(
+            '{"run-id":"rickshaw-direct"}', encoding="utf-8"
+        )
+        (target / "run" / "result-summary.json").write_text(
+            '{"cdm_run_id":"cdm-direct"}', encoding="utf-8"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(target),
+        )
+        self.store.transition(job.mcp_job_id, JobState.INDEXING, exit_code=17)
+
+        recovered = self.manager._resolve_or_fail(self.store.get(job.mcp_job_id))
+
+        self.assertEqual(recovered.state, JobState.COMPLETED)
+        self.assertEqual(recovered.rickshaw_run_id, "rickshaw-direct")
+        self.assertEqual(recovered.cdm_run_id, "cdm-direct")
+        self.assertEqual(recovered.exit_code, 17)
+
+    def test_recovery_backfill_invalid_utf8_reaches_terminal_state(self):
+        job, _ = self.store.create_or_get(
+            "key-invalid-recovery-artifact", {"operation": "index"}, "index"
+        )
+        target = self.root / "invalid-recovery-run"
+        (target / "run").mkdir(parents=True)
+        (target / "run" / "rickshaw-run.json").write_bytes(b"{\xff")
+        (target / "run" / "result-summary.json").write_text(
+            '{"cdm_run_id":"cdm-invalid-metadata"}', encoding="utf-8"
+        )
+        supervision = self.root / "invalid-recovery-job"
+        supervision.mkdir()
+        (supervision / "processing-complete").write_text("index\n", encoding="utf-8")
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(target),
+            supervision_directory=str(supervision),
+        )
+        self.store.transition(job.mcp_job_id, JobState.INDEXING)
+
+        recovered = self.manager._resolve_or_fail(self.store.get(job.mcp_job_id))
+
+        self.assertEqual(recovered.state, JobState.COMPLETED)
+        self.assertEqual(recovered.cdm_run_id, "cdm-invalid-metadata")
+
     def test_processing_jobs_report_operation_lifecycle_state(self):
         manager = RunManager(
             self.store,

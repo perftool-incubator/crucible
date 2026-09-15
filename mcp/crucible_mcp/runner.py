@@ -284,6 +284,9 @@ class RunManager:
                         "index": JobState.INDEXING,
                     }.get(job.operation, JobState.RUNNING)
                     job = self.store.transition(job.mcp_job_id, lifecycle_state)
+                if job.operation in {"postprocess", "index"}:
+                    self._backfill_identifiers(job.mcp_job_id)
+                    job = self.store.get(job.mcp_job_id)
                 return self.store.transition(
                     job.mcp_job_id,
                     JobState.COMPLETED,
@@ -295,12 +298,18 @@ class RunManager:
             )
         if job.run_directory:
             summary_path = Path(job.run_directory) / "run" / "result-summary.json"
-            if summary_path.is_file() and job.state == JobState.RUNNING:
+            if summary_path.is_file() and job.state in {
+                JobState.RUNNING,
+                JobState.POSTPROCESSING,
+                JobState.INDEXING,
+            }:
+                self._backfill_identifiers(job.mcp_job_id)
+                job = self.store.get(job.mcp_job_id)
                 return self.store.transition(
                     job.mcp_job_id,
                     JobState.COMPLETED,
                     result_status=ResultStatus.AVAILABLE.value,
-                    exit_code=0,
+                    exit_code=job.exit_code,
                 )
         return self._fail_recovery_job(
             job, "runner was not present or could not be verified during reconciliation"
@@ -361,6 +370,11 @@ class RunManager:
         if current.state in {JobState.COMPLETED, JobState.FAILED}:
             self._threads.pop(job.mcp_job_id, None)
             return
+        # A restarted supervisor does not run the original waiter's normal
+        # completion path, so recover identifiers from the retained artifacts
+        # before resolving the terminal state.
+        self._backfill_identifiers(job.mcp_job_id)
+        current = self.store.get(job.mcp_job_id)
         self._resolve_or_fail(current)
         self._threads.pop(job.mcp_job_id, None)
 
@@ -626,7 +640,7 @@ class RunManager:
             if path.suffix == ".xz":
                 return json.loads(lzma.open(path, "rt", encoding="utf-8").read())
             return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, lzma.LZMAError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, lzma.LZMAError, json.JSONDecodeError):
             return None
 
     def _consume_events(self, job_id: str, event_path: Path, position: int) -> int:
