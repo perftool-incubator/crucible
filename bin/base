@@ -645,13 +645,13 @@ function stop_cdm_server() {
 }
 
 function start_mcp_server() {
-    local RC=0 mcp_bind mcp_port mcp_token_file mcp_database
+    local RC=0 mcp_bind mcp_port mcp_token_file mcp_database mcp_started=0
     local mcp_input_root mcp_max_inline_bytes mcp_max_run_file_bytes mcp_cdm_readiness_timeout
     local mcp_cdm_port
     local mcp_audit_log
-    local mcp_audit_max_bytes mcp_audit_retained_files actual_port
+    local mcp_audit_max_bytes mcp_audit_retained_files mcp_tls_cert mcp_tls_key mcp_allowed_origins actual_port
     local mcp_private_dir mcp_private_file
-    local -a mcp_cmd mcp_data_mounts mcp_data_paths mcp_data_readonly_flags
+    local -a mcp_cmd mcp_data_mounts mcp_data_paths mcp_data_readonly_flags mcp_origins
     local mcp_data_path mcp_data_readonly mcp_data_index mcp_existing_index
     local mcp_mount_index mcp_health_host
 
@@ -667,6 +667,9 @@ function start_mcp_server() {
     mcp_audit_log=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-log"')
     mcp_audit_max_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-max-bytes"')
     mcp_audit_retained_files=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-retained-files"')
+    mcp_tls_cert=$(jq_query ${SERVICES_CFG} '."mcp-server"."tls-cert" // ""')
+    mcp_tls_key=$(jq_query ${SERVICES_CFG} '."mcp-server"."tls-key" // ""')
+    mapfile -t mcp_origins < <(jq -r '."mcp-server"."allowed-origins"[]? // empty' "${SERVICES_CFG}")
 
     if [ -z "${mcp_bind}" -o -z "${mcp_port}" -o -z "${mcp_token_file}" -o -z "${mcp_database}" \
         -o -z "${mcp_cdm_readiness_timeout}" ]; then
@@ -674,8 +677,30 @@ function start_mcp_server() {
         return 1
     fi
     if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
-        echo "ERROR: MCP remote binding is unavailable until TLS support is configured"
+        if [ -z "${mcp_tls_cert}" -o -z "${mcp_tls_key}" ]; then
+            echo "ERROR: MCP remote binding requires tls-cert and tls-key"
+            return 1
+        fi
+    fi
+    if [ "${mcp_bind}" == "0.0.0.0" -o "${mcp_bind}" == "::" ] && [ ${#mcp_origins[@]} -eq 0 ]; then
+        echo "ERROR: wildcard MCP binding requires allowed-origins"
         return 1
+    fi
+    if [ -n "${mcp_tls_cert}" -a -z "${mcp_tls_key}" ] || [ -z "${mcp_tls_cert}" -a -n "${mcp_tls_key}" ]; then
+        echo "ERROR: MCP tls-cert and tls-key must be configured together"
+        return 1
+    fi
+    if [ -n "${mcp_tls_cert}" ]; then
+        for mcp_private_file in "${mcp_tls_cert}" "${mcp_tls_key}"; do
+            if [ ! -f "${mcp_private_file}" ] || [ -L "${mcp_private_file}" ]; then
+                echo "ERROR: MCP TLS files must be regular, non-symlink files"
+                return 1
+            fi
+            if [ "$(stat -c '%u' "${mcp_private_file}")" != "0" ] || [ "$(stat -c '%a' "${mcp_private_file}")" != "600" ]; then
+                echo "ERROR: MCP TLS files must be root-owned with mode 0600"
+                return 1
+            fi
+        done
     fi
     mcp_health_host="${mcp_bind}"
     if [[ "${mcp_bind}" == *:* ]]; then
@@ -742,10 +767,20 @@ function start_mcp_server() {
             --audit-max-bytes "${mcp_audit_max_bytes}"
             --audit-retained-files "${mcp_audit_retained_files}"
         )
+        if [ -n "${mcp_tls_cert}" ]; then
+            mcp_cmd+=(--tls-cert "${mcp_tls_cert}" --tls-key "${mcp_tls_key}")
+        fi
+        for mcp_allowed_origins in "${mcp_origins[@]}"; do
+            mcp_cmd+=(--allowed-origin "${mcp_allowed_origins}")
+        done
 
         mcp_data_mounts=()
         mcp_data_paths=()
         mcp_data_readonly_flags=()
+        if [ -n "${mcp_tls_cert}" ]; then
+            mcp_data_mounts+=("--mount=type=bind,source=${mcp_tls_cert},destination=${mcp_tls_cert},readonly")
+            mcp_data_mounts+=("--mount=type=bind,source=${mcp_tls_key},destination=${mcp_tls_key},readonly")
+        fi
         for mcp_data_index in 0 1 2 3 4; do
             case ${mcp_data_index} in
                 0) mcp_data_path=$(dirname "${mcp_database}"); mcp_data_readonly=false ;;
@@ -795,15 +830,30 @@ function start_mcp_server() {
             echo "ERROR: Could not start MCP server"
             return ${RC}
         fi
+        mcp_started=1
+    fi
+
+    if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+        if ! open_firewall_port ${mcp_port} tcp; then
+            if [ ${mcp_started} -eq 1 ]; then
+                ${podman_stop} crucible-mcp-server > /dev/null 2>&1
+            fi
+            echo "ERROR: Could not open the MCP firewall port"
+            return 1
+        fi
     fi
 
     local mcp_token mcp_available=0 mcp_count=1 mcp_timeout=30
     mcp_token=$(cat "${mcp_token_file}")
     echo "Waiting for MCP server to be available (${mcp_timeout} seconds maximum)..."
     while [ ${mcp_available} -eq 0 -a ${mcp_count} -le ${mcp_timeout} ]; do
-        if curl --silent --show-error --fail \
+        local mcp_scheme="http"
+        if [ -n "${mcp_tls_cert}" ]; then
+            mcp_scheme="https"
+        fi
+        if curl --silent --show-error --fail --insecure --noproxy '*' \
             --header "Authorization: Bearer ${mcp_token}" \
-            "http://${mcp_health_host}:${mcp_port}/health" >/dev/null 2>&1; then
+            "${mcp_scheme}://${mcp_health_host}:${mcp_port}/health" >/dev/null 2>&1; then
             mcp_available=1
         else
             sleep 1
@@ -812,6 +862,12 @@ function start_mcp_server() {
     done
     if [ ${mcp_available} -eq 0 ]; then
         echo "ERROR: MCP server failed to become available within ${mcp_timeout} seconds"
+        if [ ${mcp_started} -eq 1 ]; then
+            ${podman_stop} crucible-mcp-server > /dev/null 2>&1
+        fi
+        if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+            close_firewall_port ${mcp_port} tcp
+        fi
         return 1
     fi
     echo "Successfully started MCP server on port ${mcp_port}"
@@ -819,9 +875,10 @@ function start_mcp_server() {
 }
 
 function stop_mcp_server() {
-    local RC=0 mcp_port
+    local RC=0 mcp_port mcp_bind
 
     mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
+    mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
     echo -n "Checking for MCP server"
     if podman_running crucible-mcp-server; then
         ${podman_stop} crucible-mcp-server > /dev/null
@@ -831,6 +888,9 @@ function stop_mcp_server() {
         else
             echo "Successfully stopped MCP server"
         fi
+    fi
+    if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+        close_firewall_port ${mcp_port} tcp
     fi
     return ${RC}
 }

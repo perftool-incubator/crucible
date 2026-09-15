@@ -9,6 +9,7 @@ shell commands or exposing arbitrary filesystem access.
 import argparse
 import json
 import socket
+import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -349,6 +350,40 @@ class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
+class TLSHTTPServerMixin:
+    """Defer TLS handshakes until the connection has a worker thread."""
+
+    tls_context: ssl.SSLContext
+    tls_handshake_timeout = 10
+
+    def get_request(self):  # noqa: D102 - socketserver API
+        request, client_address = self.socket.accept()
+        request = self.tls_context.wrap_socket(
+            request,
+            server_side=True,
+            do_handshake_on_connect=False,
+        )
+        return request, client_address
+
+    def process_request_thread(self, request, client_address):  # noqa: D102 - socketserver API
+        try:
+            request.settimeout(self.tls_handshake_timeout)
+            request.do_handshake()
+            request.settimeout(None)
+        except (OSError, ssl.SSLError):
+            request.close()
+            return
+        super().process_request_thread(request, client_address)
+
+
+class TLSHTTPServer(TLSHTTPServerMixin, ThreadingHTTPServer):
+    """Threaded HTTPS server with worker-bound TLS handshakes."""
+
+
+class TLSIPv6ThreadingHTTPServer(TLSHTTPServerMixin, IPv6ThreadingHTTPServer):
+    """IPv6 threaded HTTPS server with worker-bound TLS handshakes."""
+
+
 def _job_status(job: Job) -> dict[str, Any]:
     return job.as_dict()
 
@@ -361,12 +396,56 @@ class MCPHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
+        self._send_cors_headers()
         self.end_headers()
         self.wfile.write(encoded)
 
     def _empty(self, status: int) -> None:
         self.send_response(status)
         self.send_header("Content-Length", "0")
+        self._send_cors_headers()
+        self.end_headers()
+
+    def _send_cors_headers(self, *, preflight: bool = False) -> None:
+        origin = self.headers.get("Origin")
+        if origin is None or not self._origin_allowed():
+            return
+        self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Vary", "Origin")
+        if preflight:
+            self.send_header("Access-Control-Allow-Methods", "POST")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type, MCP-Protocol-Version, MCP-Session-Id",
+            )
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib handler API
+        if self.path != "/mcp":
+            self._json(404, {"error": "not_found"})
+            return
+        if not self._origin_allowed():
+            self._json(403, {"error": "origin_not_allowed"})
+            return
+        if self.headers.get("Access-Control-Request-Method") != "POST":
+            self._empty(405)
+            return
+        requested_headers = {
+            value.strip().lower()
+            for value in self.headers.get("Access-Control-Request-Headers", "").split(",")
+            if value.strip()
+        }
+        allowed_headers = {
+            "authorization",
+            "content-type",
+            "mcp-protocol-version",
+            "mcp-session-id",
+        }
+        if not requested_headers <= allowed_headers:
+            self._json(403, {"error": "headers_not_allowed"})
+            return
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self._send_cors_headers(preflight=True)
         self.end_headers()
 
     def _authorized(self) -> bool:
@@ -442,13 +521,41 @@ class MCPHandler(BaseHTTPRequestHandler):
             port = parsed.port
         except ValueError:
             return False
-        if parsed.scheme != "http" or parsed.username or parsed.password:
+        expected_scheme = "https" if getattr(self.server, "tls_enabled", False) else "http"
+        if parsed.scheme != expected_scheme or parsed.username or parsed.password:
             return False
-        if parsed.path or parsed.query or parsed.fragment or port != self.server.server_port:
+        if parsed.path or parsed.query or parsed.fragment:
+            return False
+        effective_port = port if port is not None else (443 if parsed.scheme == "https" else 80)
+        configured_bind = getattr(self.server, "bind_host", "")
+        if configured_bind in {"0.0.0.0", "::"}:
+            for allowed in self.server.allowed_origins:
+                try:
+                    allowed_origin = urlsplit(allowed)
+                    allowed_port = allowed_origin.port
+                except ValueError:
+                    continue
+                if allowed_port is None:
+                    allowed_port = 443 if allowed_origin.scheme == "https" else 80
+                if (
+                    allowed_origin.scheme == parsed.scheme
+                    and allowed_origin.hostname == parsed.hostname
+                    and allowed_port == effective_port
+                    and allowed_origin.path in {"", "/"}
+                    and not allowed_origin.query
+                    and not allowed_origin.fragment
+                    and not allowed_origin.username
+                    and not allowed_origin.password
+                ):
+                    return True
+            return False
+        if effective_port != self.server.server_port:
             return False
         allowed_hosts = {"localhost", "127.0.0.1"}
         if isinstance(self.server, IPv6ThreadingHTTPServer):
             allowed_hosts.add("::1")
+        if configured_bind:
+            allowed_hosts.add(configured_bind)
         return parsed.hostname in allowed_hosts
 
     @staticmethod
@@ -734,6 +841,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Crucible MCP service")
     parser.add_argument("--bind", required=True)
     parser.add_argument("--port", required=True, type=int)
+    parser.add_argument("--tls-cert", type=Path)
+    parser.add_argument("--tls-key", type=Path)
+    parser.add_argument("--allowed-origin", action="append", default=[])
     parser.add_argument("--token-file", required=True, type=Path)
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--max-request-bytes", type=int, default=1_048_576)
@@ -749,8 +859,28 @@ def main() -> None:
     parser.add_argument("--audit-retained-files", type=int, default=5)
     args = parser.parse_args()
 
-    server_class = IPv6ThreadingHTTPServer if ":" in args.bind else ThreadingHTTPServer
+    if (args.tls_cert is None) != (args.tls_key is None):
+        parser.error("--tls-cert and --tls-key must be supplied together")
+    if args.bind not in {"127.0.0.1", "localhost", "::1"} and (
+        args.tls_cert is None or args.tls_key is None
+    ):
+        parser.error("remote MCP binds require --tls-cert and --tls-key")
+    if args.bind in {"0.0.0.0", "::"} and not args.allowed_origin:
+        parser.error("wildcard MCP binds require at least one --allowed-origin")
+    use_ipv6 = ":" in args.bind
+    if args.tls_cert is not None and args.tls_key is not None:
+        server_class = TLSIPv6ThreadingHTTPServer if use_ipv6 else TLSHTTPServer
+    else:
+        server_class = IPv6ThreadingHTTPServer if use_ipv6 else ThreadingHTTPServer
     server = server_class((args.bind, args.port), MCPHandler)
+    if args.tls_cert is not None and args.tls_key is not None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(args.tls_cert, args.tls_key)
+        server.tls_context = context
+    server.tls_enabled = args.tls_cert is not None
+    server.bind_host = args.bind
+    server.allowed_origins = tuple(args.allowed_origin)
     server.token_path = args.token_file
     server.jobs = JobStore(args.database)
     server.operations = CrucibleOperations(

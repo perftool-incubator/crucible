@@ -112,6 +112,25 @@
                         "streamable-http"
                     ]
                 },
+                "tls-cert": {
+                    "description": "PEM certificate for explicitly enabled remote MCP access",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "tls-key": {
+                    "description": "PEM private key for explicitly enabled remote MCP access",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "allowed-origins": {
+                    "description": "HTTPS origins permitted for wildcard MCP binds",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "uniqueItems": true
+                },
                 "token-file": {
                     "description": "Root-owned bearer-token file",
                     "type": "string",

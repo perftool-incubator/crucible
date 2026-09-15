@@ -115,11 +115,62 @@ enabled in `config/services.json`:
 }
 ```
 
+`tls-cert` and `tls-key` are optional. Localhost HTTP is the default. A
+non-local bind must configure both PEM files; they must be regular,
+root-owned files with mode `0600`, and the service will require HTTPS.
+Wildcard binds such as `0.0.0.0` and `::` must also configure
+`allowed-origins`, containing the complete HTTPS origins that browser clients
+may use.
+
 The service requires a bearer token for every request, including localhost
-requests. The default implementation accepts localhost binding only; remote
-binding remains unavailable until TLS support is configured. The token file
+requests. The default implementation accepts localhost binding over HTTP.
+Remote binding requires the configured TLS certificate and key. The token file
 is root-owned with mode `0600`, and MCP job state is stored in SQLite at the
 configured database path.
+
+#### MCP TLS certificates
+
+For development or isolated testing, create a self-signed certificate with
+Subject Alternative Names matching the address clients will use. For example,
+for a server named `crucible-mcp.example.test`:
+
+```bash
+sudo install -d -m 0700 /etc/crucible/mcp
+sudo openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
+    -days 30 \
+    -keyout /etc/crucible/mcp/server.key \
+    -out /etc/crucible/mcp/server.crt \
+    -subj '/CN=crucible-mcp.example.test' \
+    -addext 'subjectAltName=DNS:crucible-mcp.example.test'
+sudo chown root:root /etc/crucible/mcp/server.crt /etc/crucible/mcp/server.key
+sudo chmod 0600 /etc/crucible/mcp/server.crt /etc/crucible/mcp/server.key
+```
+
+For an IP-based client connection, use an IP Subject Alternative Name instead,
+for example `-addext 'subjectAltName=IP:192.0.2.10'`. Clients must explicitly
+trust the self-signed certificate; do not disable certificate verification in
+normal client configuration. The `--insecure` option used by Crucible's local
+startup readiness probe only verifies that the configured service is reachable;
+it does not change client-side TLS requirements.
+
+For production or shared environments, use a certificate issued by the
+organization's trusted CA and include every DNS name or IP address used by MCP
+clients in the certificate's Subject Alternative Name extension. Install the
+certificate and private key at the configured paths, set both `tls-cert` and
+`tls-key`, and ensure the client trusts the issuing CA. The private key must
+remain root-owned with mode `0600`; do not place it in a URL, command-line
+argument, or client configuration distributed to users.
+
+Certificate rotation is performed by replacing the certificate and key as a
+matched pair, preserving ownership and permissions, then restarting
+`mcp-server` during a maintenance window. Existing connections may complete,
+but new connections will use the replacement certificate. Keep the old
+certificate trusted until all clients have reconnected with the new one.
+
+See the [OpenSSL `req` documentation](https://docs.openssl.org/3.2/man1/openssl-req/)
+for certificate-request options and your organization's certificate-authority
+documentation for production issuance, renewal, and trust-distribution
+procedures.
 
 MCP-owned jobs prevent service shutdown while they are queued, running,
 post-processing, indexing, or awaiting recovery. This protects jobs that are
@@ -127,7 +178,8 @@ not represented by an active Rickshaw container.
 
 #### MCP tools
 
-The MCP endpoint is available at `http://<bind>:<port>/mcp`. Every request
+The MCP endpoint is available at `http[s]://<bind>:<port>/mcp`, depending on
+whether TLS is configured. Every request
 requires the bearer token from `token-file`. Tool discovery is available
 through the standard `tools/list` request; the current interface is:
 

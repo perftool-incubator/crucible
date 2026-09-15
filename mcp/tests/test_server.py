@@ -356,5 +356,55 @@ class TestServer(unittest.TestCase):
         self.assertEqual(record["job_id"], "generated-job")
 
 
+class TestOriginValidation(unittest.TestCase):
+    @staticmethod
+    def handler(origin="https://ui.example:443"):
+        handler = object.__new__(MCPHandler)
+        handler.headers = {
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
+        }
+        handler.path = "/mcp"
+        handler.server = Mock(
+            tls_enabled=True,
+            bind_host="0.0.0.0",
+            server_port=8889,
+            allowed_origins=("https://ui.example:443",),
+        )
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock()
+        return handler
+
+    def test_wildcard_bind_accepts_allowlisted_origin_on_another_port(self):
+        handler = self.handler()
+
+        self.assertTrue(MCPHandler._origin_allowed(handler))
+
+    def test_https_origin_omitted_port_matches_listener_port_443(self):
+        handler = self.handler("https://mcp.example")
+        handler.server.bind_host = "mcp.example"
+        handler.server.server_port = 443
+
+        self.assertTrue(MCPHandler._origin_allowed(handler))
+
+    def test_wildcard_origin_normalizes_explicit_default_port(self):
+        handler = self.handler("https://ui.example")
+
+        self.assertTrue(MCPHandler._origin_allowed(handler))
+
+    def test_allowlisted_origin_receives_cors_preflight_headers(self):
+        handler = self.handler()
+
+        MCPHandler.do_OPTIONS(handler)
+
+        handler.send_response.assert_called_once_with(204)
+        headers = dict(call.args for call in handler.send_header.call_args_list)
+        self.assertEqual(headers["Access-Control-Allow-Origin"], "https://ui.example:443")
+        self.assertEqual(headers["Access-Control-Allow-Methods"], "POST")
+        self.assertIn("Authorization", headers["Access-Control-Allow-Headers"])
+
+
 if __name__ == "__main__":
     unittest.main()
