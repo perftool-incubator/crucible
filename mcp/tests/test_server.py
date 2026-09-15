@@ -150,6 +150,12 @@ class TestServer(unittest.TestCase):
         resource = next(item for item in resources if item["name"] == "run-files")
         self.assertEqual(resource["uri"], "crucible://docs/run-files")
         self.assertEqual(resource["mimeType"], "text/markdown")
+        workflow = next(
+            item for item in resources if item["name"] == "agentic-perf-workflow"
+        )
+        self.assertEqual(
+            workflow["uri"], "crucible://docs/agentic-perf-workflow"
+        )
 
         body = json.dumps({
             "jsonrpc": "2.0",

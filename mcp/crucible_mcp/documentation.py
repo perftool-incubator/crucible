@@ -75,6 +75,12 @@ DOCUMENTATION_ENTRIES = (
         "Crucible service roles, configuration, startup, and shutdown behavior.",
     ),
     DocumentationEntry(
+        "agentic-perf-workflow",
+        "mcp-agentic-perf-workflow.md",
+        "Agentic-perf MCP Workflow",
+        "How an agentic-perf benchmark or review agent uses Crucible through MCP.",
+    ),
+    DocumentationEntry(
         "image-sourcing",
         "how-image-sourcing-works.md",
         "How Image Sourcing Works",

@@ -42,6 +42,19 @@ class TestDocumentationCatalog(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertIn("/chunk/", results[0]["uri"])
 
+    def test_agentic_perf_workflow_is_allowlisted(self):
+        (self.docs / "mcp-agentic-perf-workflow.md").write_text(
+            "# Agentic-perf MCP Workflow\n", encoding="utf-8"
+        )
+        catalog = DocumentationCatalog(self.root)
+
+        resources = catalog.list_resources()
+
+        self.assertIn(
+            "crucible://docs/agentic-perf-workflow",
+            {resource["uri"] for resource in resources},
+        )
+
     def test_multibyte_character_stays_within_chunk_limit(self):
         content = b"0123456789abcde" + "€".encode("utf-8") + b"tail"
         (self.docs / "how-run-files-work.md").write_bytes(content)

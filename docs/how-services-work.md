@@ -245,6 +245,10 @@ limit are returned as one resource. Larger allowlisted documents are exposed as
 ordered resources such as `crucible://docs/run-files/chunk/1`; reading all
 chunks reconstructs the complete document.
 
+The `crucible://docs/agentic-perf-workflow` resource describes the recommended
+discovery, validation, execution, processing, and CDM review sequence for
+agentic-perf clients.
+
 The `search_documentation` tool is available for clients that do not provide a
 resource browser. It returns matching resource metadata, after which the client
 can retrieve the selected document with `resources/read`.
