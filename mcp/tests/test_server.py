@@ -132,7 +132,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("inputSchema", tools["get_run_logs"])
         for tool_name in (
-            "list_tools", "list_endpoints", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
+            "list_tools", "list_endpoints", "list_active_runs", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
             "list_run_artifacts", "get_run_artifact", "list_local_archives",
             "archive_local_run", "unarchive_local_run", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
@@ -152,6 +152,63 @@ class TestServer(unittest.TestCase):
         })
         _, payload = self.request("POST", "/mcp", body, self.token)
         self.assertIn("endpoints", payload["result"]["structuredContent"])
+
+    def test_list_active_runs_is_bounded_and_paginated(self):
+        jobs = [
+            self.server.jobs.create_or_get(f"active-{index}", {"run": index})[0]
+            for index in range(3)
+        ]
+
+        def call(cursor=None):
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "tools/call",
+                "params": {
+                    "name": "list_active_runs",
+                    "arguments": {
+                        "cursor": cursor,
+                        "limit": 2,
+                    } if cursor else {"limit": 2},
+                },
+            })
+            status, payload = self.request("POST", "/mcp", body, self.token)
+            self.assertEqual(status, 200)
+            return payload["result"]["structuredContent"]
+
+        first_page = call()
+        ordered_jobs = sorted(jobs, key=lambda job: (job.created_at, job.mcp_job_id))
+        self.server.jobs.transition(ordered_jobs[0].mcp_job_id, JobState.STARTING)
+        self.server.jobs.transition(ordered_jobs[0].mcp_job_id, JobState.RUNNING)
+        self.server.jobs.transition(ordered_jobs[0].mcp_job_id, JobState.COMPLETED)
+        second_page = call(first_page["next_cursor"])
+
+        self.assertEqual(
+            [job["mcp_job_id"] for job in first_page["jobs"]],
+            [job.mcp_job_id for job in ordered_jobs[:2]],
+        )
+        self.assertEqual(first_page["count"], 2)
+        self.assertFalse(first_page["complete"])
+        self.assertIsInstance(first_page["next_cursor"], str)
+        self.assertEqual([job["mcp_job_id"] for job in second_page["jobs"]], [ordered_jobs[2].mcp_job_id])
+        self.assertEqual(second_page["count"], 1)
+        self.assertTrue(second_page["complete"])
+
+    def test_list_active_runs_rejects_malformed_cursor_as_invalid_params(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "list_active_runs",
+                "arguments": {"cursor": "not-a-valid-cursor"},
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["id"], 21)
+        self.assertEqual(payload["error"]["code"], -32602)
 
     def test_documentation_resources_are_curated_and_readable(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 11, "method": "resources/list"})

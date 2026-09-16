@@ -7,6 +7,7 @@ shell commands or exposing arbitrary filesystem access.
 """
 
 import argparse
+import base64
 import json
 import socket
 import ssl
@@ -30,6 +31,7 @@ TOOL_NAMES = (
     "list_tools",
     "list_benchmarks",
     "list_local_runs",
+    "list_active_runs",
     "get_local_run_summary",
     "get_local_run_metadata",
     "list_run_artifacts",
@@ -77,6 +79,18 @@ TOOL_DEFINITIONS = (
         "name": "list_endpoints",
         "description": "List installed endpoint implementations, schemas, and coarse capabilities.",
         "inputSchema": _EMPTY_INPUT,
+    },
+    {
+        "name": "list_active_runs",
+        "description": "List active MCP jobs, including runs and maintenance operations.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "cursor": {"type": "string", "maxLength": 512},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "additionalProperties": False,
+        },
     },
     {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
     {
@@ -433,6 +447,28 @@ def _job_status(job: Job) -> dict[str, Any]:
     return job.as_dict()
 
 
+def _encode_active_cursor(job: Job) -> str:
+    payload = json.dumps(
+        [job.created_at, job.mcp_job_id], separators=(",", ":")
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_active_cursor(cursor: str) -> tuple[str, str]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        values = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid active job cursor") from exc
+    if (
+        not isinstance(values, list)
+        or len(values) != 2
+        or not all(isinstance(value, str) and value for value in values)
+    ):
+        raise ValueError("invalid active job cursor")
+    return values[0], values[1]
+
+
 class MCPHandler(BaseHTTPRequestHandler):
     server_version = "CrucibleMCP/0.1"
 
@@ -727,6 +763,25 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = {"tools": self.server.operations.list_tools(arguments.get("name"))}
             elif name == "list_endpoints":
                 value = self.server.operations.list_endpoints()
+            elif name == "list_active_runs":
+                cursor = arguments.get("cursor")
+                limit = arguments.get("limit", 100)
+                try:
+                    after = _decode_active_cursor(cursor) if cursor else None
+                except ValueError as exc:
+                    return self._error(request_id, -32602, str(exc))
+                jobs = self.server.jobs.list_active(limit=limit + 1, after=after)
+                complete = len(jobs) <= limit
+                if not complete:
+                    jobs = jobs[:limit]
+                next_cursor = _encode_active_cursor(jobs[-1]) if not complete else None
+                value = {
+                    "jobs": [_job_status(job) for job in jobs],
+                    "cursor": cursor,
+                    "next_cursor": next_cursor,
+                    "complete": complete,
+                    "count": len(jobs),
+                }
             elif name == "list_benchmarks":
                 value = {"benchmarks": self.server.operations.list_benchmarks()}
             elif name == "list_local_runs":

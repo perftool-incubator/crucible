@@ -198,6 +198,7 @@ through the standard `tools/list` request; the current interface is:
 | `crucible_info` | Report the MCP contract version and supported capabilities. |
 | `list_tools` | List installed Crucible tools and their metadata. |
 | `list_endpoints` | List installed endpoint implementations, schemas, and coarse capabilities. |
+| `list_active_runs` | List active MCP jobs, including runs and maintenance operations, with cursor pagination. |
 | `list_benchmarks` | List installed benchmarks. |
 | `list_local_runs` | List local run artifacts from approved run roots. |
 | `get_local_run_summary` | Read a completed result summary from an approved local run artifact. |

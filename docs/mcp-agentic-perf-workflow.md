@@ -208,6 +208,11 @@ If the service restarts, continue polling the same MCP job ID. The managed
 runner reconciles the durable job record and does not launch a duplicate
 workload for a retry.
 
+If the agent no longer has the job ID, use `list_active_runs` to recover active
+job handles before resuming polling. The response is paginated; follow
+`next_cursor` while `complete` is false and use each returned job's
+`mcp_job_id` with `get_run_status`.
+
 ## 6. Optionally reprocess or index the run
 
 The normal `start_run` command already runs Crucible's postprocessing and

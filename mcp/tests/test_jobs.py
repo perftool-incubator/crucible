@@ -71,6 +71,22 @@ class TestJobStore(unittest.TestCase):
         with self.assertRaises(Exception):
             self.store.transition(job.mcp_job_id, JobState.COMPLETED)
 
+    def test_list_active_supports_bounded_pagination(self):
+        jobs = [
+            self.store.create_or_get(f"request-{index}", {"run": index})[0]
+            for index in range(3)
+        ]
+
+        ordered_jobs = sorted(jobs, key=lambda job: (job.created_at, job.mcp_job_id))
+        first_page = self.store.list_active(limit=2)
+        second_page = self.store.list_active(
+            limit=2,
+            after=(ordered_jobs[1].created_at, ordered_jobs[1].mcp_job_id),
+        )
+
+        self.assertEqual([job.mcp_job_id for job in first_page], [job.mcp_job_id for job in ordered_jobs[:2]])
+        self.assertEqual([job.mcp_job_id for job in second_page], [ordered_jobs[2].mcp_job_id])
+
 
 if __name__ == "__main__":
     unittest.main()

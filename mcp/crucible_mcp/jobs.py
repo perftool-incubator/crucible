@@ -234,13 +234,28 @@ class JobStore:
             ).fetchone()
         return self._row_to_job(row) if row is not None else None
 
-    def list_active(self) -> list[Job]:
+    def list_active(
+        self,
+        limit: int | None = None,
+        after: tuple[str, str] | None = None,
+    ) -> list[Job]:
+        if limit is not None and limit < 1:
+            raise ValueError("active job pagination limit must be positive")
         placeholders = ",".join("?" for _ in ACTIVE_JOB_STATES)
+        conditions = [f"state IN ({placeholders})"]
+        parameters: tuple[Any, ...] = tuple(state.value for state in ACTIVE_JOB_STATES)
+        if after is not None:
+            conditions.append("(created_at > ? OR (created_at = ? AND mcp_job_id > ?))")
+            parameters += (after[0], after[0], after[1])
+        query = (
+            f"SELECT * FROM jobs WHERE {' AND '.join(conditions)} "
+            "ORDER BY created_at, mcp_job_id"
+        )
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters += (limit,)
         with self._lock:
-            rows = self._connection.execute(
-                f"SELECT * FROM jobs WHERE state IN ({placeholders}) ORDER BY created_at",
-                tuple(state.value for state in ACTIVE_JOB_STATES),
-            ).fetchall()
+            rows = self._connection.execute(query, parameters).fetchall()
         return [self._row_to_job(row) for row in rows]
 
     def transition(self, job_id: str, state: JobState, **updates: Any) -> Job:

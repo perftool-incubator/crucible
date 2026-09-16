@@ -158,6 +158,7 @@ class CrucibleOperations:
                 "describe_benchmark",
                 "list_tools",
                 "list_endpoints",
+                "list_active_runs",
                 "list_local_runs",
                 "get_local_run_summary",
                 "get_local_run_metadata",
