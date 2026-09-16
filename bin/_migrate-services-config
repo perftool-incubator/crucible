@@ -68,7 +68,6 @@ if [ "${has_old_format}" == "true" ]; then
        }' ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
 
     echo "Migrated image-sourcing config to per-architecture format with key 'default'"
-    exit 0
 fi
 
 # If a previous migration resolved "default" to the native architecture,
@@ -115,6 +114,35 @@ if [ "${has_remote_archive}" != "true" ]; then
        ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
 
     echo "Added default remote-archive configuration"
+fi
+
+# Add the MCP service section for installations upgraded from a configuration
+# written before MCP was introduced.  MCP remains disabled by default, but the
+# complete section must exist before the services schema is validated.
+has_mcp_server=$(jq -r 'has("mcp-server")' ${SERVICES_CFG} 2>/dev/null)
+
+if [ "${has_mcp_server}" != "true" ]; then
+    echo "Adding default mcp-server configuration..."
+
+    jq --indent 4 \
+       '."mcp-server" = {
+           "enabled": false,
+           "bind": "127.0.0.1",
+           "port": 8889,
+           "transport": "streamable-http",
+           "token-file": "/etc/crucible/mcp-server.token",
+           "database": "/var/lib/crucible/mcp/jobs.db",
+           "input-root": "/var/lib/crucible/mcp/inputs",
+           "max-inline-bytes": 1048576,
+           "max-run-file-bytes": 1048576,
+           "cdm-readiness-timeout": 60,
+           "audit-log": "/var/lib/crucible/logs/mcp-audit.jsonl",
+           "audit-max-bytes": 10485760,
+           "audit-retained-files": 5
+       }' \
+       ${SERVICES_CFG} > ${SERVICES_CFG}.tmp && mv ${SERVICES_CFG}.tmp ${SERVICES_CFG}
+
+    echo "Added default MCP configuration"
 fi
 
 # Already migrated — silent exit

@@ -26,6 +26,7 @@ execution depends on:
 - **cdm-server** — CDM query API server for result analysis
 - **httpd** — Web UI for browsing results and logs
 - **image-sourcing** — Container image builder for engine images
+- **mcp-server** — Authenticated MCP interface for Crucible operations
 
 Services are managed via `crucible start <service>` and
 `crucible stop <service>`, and configured in
@@ -85,6 +86,241 @@ benchmark and tool engines. It runs per-architecture instances
 — one for each CPU architecture that endpoints require. The
 native architecture runs locally; non-native architectures
 require remote builder hosts.
+
+### MCP server
+
+The MCP server provides an authenticated interface for discovery,
+validation, run submission, post-processing, indexing, status polling,
+bounded logs, and result summaries. It is disabled for `crucible start all`
+by default and can be
+enabled in `config/services.json`:
+
+```json
+{
+    "mcp-server": {
+        "enabled": true,
+        "bind": "127.0.0.1",
+        "port": 8889,
+        "transport": "streamable-http",
+        "token-file": "/etc/crucible/mcp-server.token",
+        "database": "/var/lib/crucible/mcp/jobs.db",
+        "input-root": "/var/lib/crucible/mcp/inputs",
+        "max-inline-bytes": 1048576,
+        "max-run-file-bytes": 1048576,
+        "cdm-readiness-timeout": 60,
+        "audit-log": "/var/lib/crucible/logs/mcp-audit.jsonl",
+        "audit-max-bytes": 10485760,
+        "audit-retained-files": 5
+    }
+}
+```
+
+`tls-cert` and `tls-key` are optional. Localhost HTTP is the default. A
+non-local bind must configure both PEM files; they must be regular,
+root-owned files with mode `0600`, and the service will require HTTPS.
+Wildcard binds such as `0.0.0.0` and `::` must also configure
+`allowed-origins`, containing the complete HTTPS origins that browser clients
+may use.
+
+The service requires a bearer token for every request, including localhost
+requests. The default implementation accepts localhost binding over HTTP.
+Remote binding requires the configured TLS certificate and key. The token file
+is root-owned with mode `0600`, and MCP job state is stored in SQLite at the
+configured database path.
+
+#### MCP TLS certificates
+
+For development or isolated testing, create a self-signed certificate with
+Subject Alternative Names matching the address clients will use. For example,
+for a server named `crucible-mcp.example.test`:
+
+```bash
+sudo install -d -m 0700 /etc/crucible/mcp
+sudo openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
+    -days 30 \
+    -keyout /etc/crucible/mcp/server.key \
+    -out /etc/crucible/mcp/server.crt \
+    -subj '/CN=crucible-mcp.example.test' \
+    -addext 'subjectAltName=DNS:crucible-mcp.example.test'
+sudo chown root:root /etc/crucible/mcp/server.crt /etc/crucible/mcp/server.key
+sudo chmod 0600 /etc/crucible/mcp/server.crt /etc/crucible/mcp/server.key
+```
+
+For an IP-based client connection, use an IP Subject Alternative Name instead,
+for example `-addext 'subjectAltName=IP:192.0.2.10'`. Clients must explicitly
+trust the self-signed certificate; do not disable certificate verification in
+normal client configuration. The `--insecure` option used by Crucible's local
+startup readiness probe only verifies that the configured service is reachable;
+it does not change client-side TLS requirements.
+
+For production or shared environments, use a certificate issued by the
+organization's trusted CA and include every DNS name or IP address used by MCP
+clients in the certificate's Subject Alternative Name extension. Install the
+certificate and private key at the configured paths, set both `tls-cert` and
+`tls-key`, and ensure the client trusts the issuing CA. The private key must
+remain root-owned with mode `0600`; do not place it in a URL, command-line
+argument, or client configuration distributed to users.
+
+Certificate rotation is performed by replacing the certificate and key as a
+matched pair, preserving ownership and permissions, then restarting
+`mcp-server` during a maintenance window. Existing connections may complete,
+but new connections will use the replacement certificate. Keep the old
+certificate trusted until all clients have reconnected with the new one.
+
+Rotate the MCP bearer token with the root-only Crucible command:
+
+```bash
+sudo crucible mcp rotate-token
+```
+
+The command refuses to rotate while MCP jobs are active, atomically replaces
+the root-owned `token-file`, and restarts MCP when it was already running so
+the container receives the replacement token. It does not print the token.
+
+See the [OpenSSL `req` documentation](https://docs.openssl.org/3.2/man1/openssl-req/)
+for certificate-request options and your organization's certificate-authority
+documentation for production issuance, renewal, and trust-distribution
+procedures.
+
+MCP-owned jobs prevent service shutdown while they are queued, running,
+post-processing, indexing, or awaiting recovery. This protects jobs that are
+not represented by an active Rickshaw container.
+
+#### MCP tools
+
+The MCP endpoint is available at `http[s]://<bind>:<port>/mcp`, depending on
+whether TLS is configured. Every request
+requires the bearer token from `token-file`. Tool discovery is available
+through the standard `tools/list` request; the current interface is:
+
+| Tool | Purpose |
+| --- | --- |
+| `crucible_info` | Report the MCP contract version and supported capabilities. |
+| `list_tools` | List installed Crucible tools and their metadata. |
+| `list_benchmarks` | List installed benchmarks. |
+| `list_local_runs` | List local run artifacts from approved run roots. |
+| `get_local_run_summary` | Read a completed result summary from an approved local run artifact. |
+| `get_local_run_metadata` | Read rickshaw run metadata from an approved local run artifact. |
+| `list_run_artifacts` | List metadata for approved artifacts in a local run. |
+| `get_run_artifact` | Read a bounded UTF-8 slice of an approved text artifact. |
+| `list_local_archives` | List local run archives without accessing remote archive backends. |
+| `archive_local_run` | Archive an approved local run and remove the live run after success. |
+| `unarchive_local_run` | Restore a local run archive into the approved run root. |
+| `describe_benchmark` | Return metadata for one installed benchmark. |
+| `validate_run` | Validate an inline run document or an approved run-file path. |
+| `start_run` | Submit an asynchronous, idempotent Crucible run. |
+| `postprocess_local_run` | Post-process an approved local run directory asynchronously. |
+| `index_local_run` | Generate CDM documents and index an approved local run directory asynchronously. |
+| `delete_indexed_result` | Delete one indexed CDM result without deleting its local run artifacts. |
+| `list_local_run_tags` | List tags from an approved local run result. |
+| `add_local_run_tags` | Add or replace tags in an approved local run result. |
+| `remove_local_run_tags` | Remove named tags from an approved local run result. |
+| `get_run_status` | Poll the lifecycle and result-readiness state of a submitted run. |
+| `get_run_logs` | Read a bounded slice of runner output for a submitted run. |
+| `get_run_summary` | Retrieve the summary of a completed submitted run. |
+| `list_indexed_results` | Search historical indexed result run IDs through CDM. |
+| `get_indexed_result` | Retrieve structured metadata for one historical indexed run. |
+| `list_indexed_periods` | List every primary period and sample associated with an indexed run. |
+| `get_indexed_metric` | Query indexed metric data for a historical run with bounded range and resolution options. |
+| `list_log_sessions` | List recent logger sessions without returning their full contents. |
+| `get_log_info` | Return aggregate counts from the logger database. |
+| `get_log_session` | Read a bounded, structured slice of one logger session with optional stream and regex filters. |
+| `search_logs` | Search logger lines across sessions with bounded regex, stream, and time filters. |
+| `search_documentation` | Search the curated user-facing Crucible documentation catalog. |
+
+`validate_run` is intentionally limited to Crucible run documents: clients can
+validate an inline run document or an approved run-file path. The CLI's other
+validation types—such as multiplex, workshop, tool metadata, repository,
+service, and registry configuration—remain CLI-only because they support
+benchmark/tool development or host administration rather than normal MCP run
+execution.
+
+#### MCP documentation resources
+
+The MCP server also exposes curated user-facing documentation through the
+standard MCP resource interface. Clients can use `resources/list` to discover
+available documents and `resources/read` to retrieve one by URI. Documentation
+resources use URIs such as `crucible://docs/run-files` and are restricted to an
+allowlisted set of Markdown files under Crucible's `docs/` directory; arbitrary
+filesystem paths are not exposed. Documents within the normal resource size
+limit are returned as one resource. Larger allowlisted documents are exposed as
+ordered resources such as `crucible://docs/run-files/chunk/1`; reading all
+chunks reconstructs the complete document.
+
+The `crucible://docs/agentic-perf-workflow` resource describes the recommended
+discovery, validation, execution, processing, and CDM review sequence for
+agentic-perf clients.
+
+The `search_documentation` tool is available for clients that support
+`resources/read` but do not provide a resource browser. It returns matching
+resource metadata, after which the client can retrieve the selected document
+with `resources/read`; it does not return document contents itself.
+
+The discovery, result, metric, log, and documentation tools are read-only.
+`start_run`, `postprocess_local_run`, `index_local_run`, `delete_indexed_result`,
+`archive_local_run`, and `unarchive_local_run` create asynchronous jobs.
+The postprocessing and indexing tools accept either an approved run directory
+or a completed MCP job ID as their source.
+`delete_indexed_result` accepts an indexed run ID and operates only on the
+configured OpenSearch/CDM result; it does not remove local run files.
+`get_local_run_summary` reads the local `run/result-summary.json` artifact and
+does not query CDM.
+`get_local_run_metadata` reads the local `rickshaw-run.json[.xz]` artifact and
+does not query CDM.
+`list_run_artifacts` returns only metadata and stable relative paths from the
+approved result subtrees: `run/iterations`, `run/tool-data`, `run/sysinfo`, and
+`run/opensearch`, plus `run/result-summary.json`. `get_run_artifact` accepts
+those returned relative paths but retrieves only bounded UTF-8 text from the
+allowlisted subtrees; configuration files, credentials, archives, symlinks,
+environment dumps, binary files, and compressed artifacts are not retrievable.
+Both artifact tools accept a completed or failed terminal MCP job ID when the
+job retained a run directory, which supports inspection of failed runs.
+Offsets and limits
+for artifact reads are measured in bytes. Artifact-list offsets are traversal
+positions rather than counts of returned artifacts, and callers should continue
+from `next_offset`.
+Artifact traversal is bounded; requests that exceed the traversal limit return a
+bounded-result error rather than scanning the run tree indefinitely.
+Local archive management is limited to the configured local archive directory;
+remote archive backends are not exposed through MCP.
+Tag operations accept an approved run directory or a completed MCP job ID and
+update the local `rickshaw-run.json[.xz]` artifact. They do not automatically
+re-index the result in CDM; run `index_local_run` separately when the indexed result
+must reflect the tag change.
+Metric queries should pass a `primary_period_id` returned by
+`list_indexed_periods` as the `period` argument; this avoids combining distinct
+primary periods implicitly.
+Result queries use the local CDM server configured by `cdm-server.port`; log queries
+use Crucible's configured logger database. `get_log_session` uses offsets for
+bounded polling and does not provide the CLI's live `--follow` mode. Run-file
+submission remains restricted to the configured `input-root` and its policy
+checks.
+
+For example, after obtaining the token, a client can verify service health
+with:
+
+```bash
+curl -H "Authorization: Bearer $(cat /etc/crucible/mcp-server.token)" \
+    http://127.0.0.1:8889/health
+```
+
+#### MCP integration checks
+
+The live read-only checks are opt-in so the normal unit-test suite does not
+depend on local services:
+
+```bash
+CRUCIBLE_MCP_INTEGRATION=1 \
+CRUCIBLE_MCP_LOG_DB="$HOME/.crucible/log.db" \
+PYTHONPATH=mcp python3 -m unittest mcp.tests.test_integration
+```
+
+The suite checks CDM run discovery, logger queries, and Podman discovery. Set
+`CRUCIBLE_MCP_CDM_URL` to query a non-default CDM endpoint. To exercise a
+metric query, also set `CRUCIBLE_MCP_RUN`, `CRUCIBLE_MCP_SOURCE`, and
+`CRUCIBLE_MCP_TYPE`, plus either `CRUCIBLE_MCP_PERIOD` or both
+`CRUCIBLE_MCP_BEGIN` and `CRUCIBLE_MCP_END`. These checks are read-only and
+never submit runs or change containers.
 
 ### Remote archive storage
 
@@ -283,6 +519,14 @@ The `remote-archive` section configures remote storage backends:
 - **image-sourcing.use**: Enable/disable image sourcing
 - **image-sourcing.services**: Per-architecture SIS
   configuration
+- **mcp-server.enabled**: Include MCP in `start all` when enabled
+- **mcp-server.bind/port**: MCP listener address and port
+- **mcp-server.token-file**: Root-owned bearer-token file
+- **mcp-server.database**: Durable MCP job database
+- **mcp-server.input-root**: Default approved run-file directory
+- **mcp-server.audit-log**: Credential-safe JSONL security audit log
+- **mcp-server.audit-max-bytes**: Active audit-log size limit
+- **mcp-server.audit-retained-files**: Number of rotated audit logs retained
 - **remote-archive.remotes**: Named map of remote storage
   backends
 - **remote-archive.default**: Default remote for `--remote

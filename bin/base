@@ -4,6 +4,10 @@
 
 EC_FAIL_USER=2
 
+# This descriptor is process-local state.  Never trust a value inherited from
+# the environment when running the root-only service-management commands.
+unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+
 function exit_error() {
     echo "ERROR: ${1}"
     shift
@@ -171,6 +175,18 @@ function find_available_port() {
     local service_name=$1
     local desired_port=$2
     local max_attempts=${3:-100}
+    local port_min port_max
+
+    port_min=$(jq_query ${SERVICES_CFG_SCHEMA} '.["$defs"].port.minimum')
+    port_max=$(jq_query ${SERVICES_CFG_SCHEMA} '.["$defs"].port.maximum')
+    if [ -z "${port_min}" -o -z "${port_max}" ]; then
+        echo "ERROR: Could not read service port bounds from ${SERVICES_CFG_SCHEMA}" >&2
+        return 1
+    fi
+    if [ ${desired_port} -lt ${port_min} -o ${desired_port} -gt ${port_max} ]; then
+        echo "ERROR: ${service_name} configured port ${desired_port} is outside the valid range ${port_min}-${port_max}" >&2
+        return 1
+    fi
 
     local port=${desired_port}
     local attempt=0
@@ -184,10 +200,13 @@ function find_available_port() {
             return 0
         fi
         (( port++ ))
+        if [ ${port} -gt ${port_max} ]; then
+            port=${port_min}
+        fi
         (( attempt++ ))
     done
 
-    echo "ERROR: Could not find an available port for ${service_name} (tried ${desired_port}-$((desired_port + max_attempts - 1)))" >&2
+    echo "ERROR: Could not find an available port for ${service_name} after ${max_attempts} attempts in the valid range ${port_min}-${port_max}" >&2
     return 1
 }
 
@@ -629,6 +648,475 @@ function stop_cdm_server() {
     return ${RC}
 }
 
+function mcp_lifecycle_lock_acquire() {
+    local mcp_database mcp_lock_file mcp_lock_dir mcp_lock_dir_mode
+
+    if [ -n "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        case "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}" in
+            *[!0-9]*)
+                unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+                echo "ERROR: Invalid MCP lifecycle lock descriptor"
+                return 1
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    fi
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    if [ -z "${mcp_database}" ]; then
+        echo "ERROR: mcp-server database is not configured"
+        return 1
+    fi
+    mcp_lock_file="${mcp_database}.lifecycle.lock"
+    mcp_lock_dir=$(dirname "${mcp_lock_file}")
+    if ! mkdir -p "${mcp_lock_dir}" || [ -L "${mcp_lock_dir}" ] || [ ! -d "${mcp_lock_dir}" ]; then
+        echo "ERROR: Could not prepare the MCP lifecycle lock"
+        return 1
+    fi
+    if [ "$(stat -c '%u' "${mcp_lock_dir}")" != "0" ]; then
+        echo "ERROR: MCP lifecycle lock directory must be root-owned"
+        return 1
+    fi
+    mcp_lock_dir_mode=$(stat -c '%a' "${mcp_lock_dir}")
+    if (( 0${mcp_lock_dir_mode} & 0022 )); then
+        if (( 0${mcp_lock_dir_mode} & 01000 )) || ! chmod 700 "${mcp_lock_dir}"; then
+            echo "ERROR: Could not secure the MCP lifecycle lock directory"
+            return 1
+        fi
+    fi
+    if [ ! -e "${mcp_lock_file}" ]; then
+        if ! (umask 077; set -C; : > "${mcp_lock_file}"); then
+            echo "ERROR: Could not create the MCP lifecycle lock"
+            return 1
+        fi
+    fi
+    if [ -L "${mcp_lock_file}" ] || [ ! -f "${mcp_lock_file}" ]; then
+        echo "ERROR: MCP lifecycle lock must be a regular, non-symlink file"
+        return 1
+    fi
+    if ! chmod 600 "${mcp_lock_file}"; then
+        echo "ERROR: Could not secure the MCP lifecycle lock"
+        return 1
+    fi
+    if ! exec {CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}<>"${mcp_lock_file}"; then
+        echo "ERROR: Could not open the MCP lifecycle lock"
+        return 1
+    fi
+    if ! flock -x "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}"; then
+        echo "ERROR: Could not lock the MCP lifecycle"
+        exec {CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}>&-
+        unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+        return 1
+    fi
+}
+
+function mcp_lifecycle_lock_release() {
+    if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        return 0
+    fi
+    case "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}" in
+        *[!0-9]*)
+            unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+            return 1
+            ;;
+    esac
+    flock -u "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}"
+    exec {CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}>&-
+    unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+}
+
+function start_mcp_server() {
+    local mcp_start_rc mcp_start_lock_owned=0
+
+    if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        mcp_start_lock_owned=1
+    fi
+    if ! mcp_lifecycle_lock_acquire; then
+        return 1
+    fi
+    start_mcp_server_unlocked "$@"
+    mcp_start_rc=$?
+    if [ ${mcp_start_lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
+    return ${mcp_start_rc}
+}
+
+function start_mcp_server_unlocked() {
+    local RC=0 mcp_bind mcp_port mcp_token_file mcp_database mcp_started=0
+    local mcp_input_root mcp_max_inline_bytes mcp_max_run_file_bytes mcp_cdm_readiness_timeout
+    local mcp_cdm_port
+    local mcp_audit_log
+    local mcp_audit_max_bytes mcp_audit_retained_files mcp_tls_cert mcp_tls_key mcp_allowed_origins actual_port
+    local mcp_private_dir mcp_private_file
+    local -a mcp_cmd mcp_data_mounts mcp_data_paths mcp_data_readonly_flags mcp_origins
+    local mcp_data_path mcp_data_readonly mcp_data_index mcp_existing_index
+    local mcp_mount_index mcp_health_host
+
+    mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
+    mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
+    mcp_token_file=$(jq_query ${SERVICES_CFG} '."mcp-server"."token-file"')
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    mcp_input_root=$(jq_query ${SERVICES_CFG} '."mcp-server"."input-root"')
+    mcp_max_inline_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."max-inline-bytes"')
+    mcp_max_run_file_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."max-run-file-bytes"')
+    mcp_cdm_readiness_timeout=$(jq_query ${SERVICES_CFG} '."mcp-server"."cdm-readiness-timeout"')
+    mcp_cdm_port=$(jq_query ${SERVICES_CFG} '."cdm-server".port')
+    mcp_audit_log=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-log"')
+    mcp_audit_max_bytes=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-max-bytes"')
+    mcp_audit_retained_files=$(jq_query ${SERVICES_CFG} '."mcp-server"."audit-retained-files"')
+    mcp_tls_cert=$(jq_query ${SERVICES_CFG} '."mcp-server"."tls-cert" // ""')
+    mcp_tls_key=$(jq_query ${SERVICES_CFG} '."mcp-server"."tls-key" // ""')
+    mapfile -t mcp_origins < <(jq -r '."mcp-server"."allowed-origins"[]? // empty' "${SERVICES_CFG}")
+
+    if [ -z "${mcp_bind}" -o -z "${mcp_port}" -o -z "${mcp_token_file}" -o -z "${mcp_database}" \
+        -o -z "${mcp_cdm_readiness_timeout}" ]; then
+        echo "ERROR: mcp-server configuration is incomplete"
+        return 1
+    fi
+    if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+        if [ -z "${mcp_tls_cert}" -o -z "${mcp_tls_key}" ]; then
+            echo "ERROR: MCP remote binding requires tls-cert and tls-key"
+            return 1
+        fi
+    fi
+    if [ "${mcp_bind}" == "0.0.0.0" -o "${mcp_bind}" == "::" ] && [ ${#mcp_origins[@]} -eq 0 ]; then
+        echo "ERROR: wildcard MCP binding requires allowed-origins"
+        return 1
+    fi
+    if [ -n "${mcp_tls_cert}" -a -z "${mcp_tls_key}" ] || [ -z "${mcp_tls_cert}" -a -n "${mcp_tls_key}" ]; then
+        echo "ERROR: MCP tls-cert and tls-key must be configured together"
+        return 1
+    fi
+    if [ -n "${mcp_tls_cert}" ]; then
+        for mcp_private_file in "${mcp_tls_cert}" "${mcp_tls_key}"; do
+            if [ ! -f "${mcp_private_file}" ] || [ -L "${mcp_private_file}" ]; then
+                echo "ERROR: MCP TLS files must be regular, non-symlink files"
+                return 1
+            fi
+            if [ "$(stat -c '%u' "${mcp_private_file}")" != "0" ] || [ "$(stat -c '%a' "${mcp_private_file}")" != "600" ]; then
+                echo "ERROR: MCP TLS files must be root-owned with mode 0600"
+                return 1
+            fi
+        done
+    fi
+    mcp_health_host="${mcp_bind}"
+    if [[ "${mcp_bind}" == *:* ]]; then
+        mcp_health_host="[${mcp_bind}]"
+    fi
+
+    mkdir -p "$(dirname "${mcp_token_file}")" "${mcp_input_root}"
+    for mcp_private_dir in "$(dirname "${mcp_database}")" \
+                           "$(dirname "${mcp_audit_log}")" \
+                           "$(dirname "${LOG_DB}")"; do
+        if ! mkdir -p "${mcp_private_dir}" || ! chmod 700 "${mcp_private_dir}"; then
+            echo "ERROR: Could not secure MCP storage directory '${mcp_private_dir}'"
+            return 1
+        fi
+    done
+    for mcp_private_file in "${mcp_database}" "${mcp_audit_log}" "${LOG_DB}"; do
+        if ! touch "${mcp_private_file}" || ! chmod 600 "${mcp_private_file}"; then
+            echo "ERROR: Could not secure MCP storage file '${mcp_private_file}'"
+            return 1
+        fi
+    done
+    if [ ! -e "${mcp_token_file}" ]; then
+        (umask 077; head -c 32 /dev/urandom | base64 > "${mcp_token_file}")
+    fi
+    if [ -L "${mcp_token_file}" ] || [ ! -f "${mcp_token_file}" ]; then
+        echo "ERROR: MCP token file must be a regular, non-symlink file"
+        return 1
+    fi
+    if [ "$(stat -c '%u' "${mcp_token_file}")" != "0" ]; then
+        echo "ERROR: MCP token file must be owned by root"
+        return 1
+    fi
+    chmod 600 "${mcp_token_file}"
+
+    echo -n "Checking for MCP server"
+    if ! podman_running crucible-mcp-server; then
+        actual_port=$(find_available_port "mcp-server" ${mcp_port})
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        if [ ${actual_port} -ne ${mcp_port} ]; then
+            jq_update_validated ${SERVICES_CFG} \
+                                ${SERVICES_CFG_SCHEMA} \
+                                "services:mcp-server-port-search" \
+                                ".\"mcp-server\".port = ${actual_port}"
+            mcp_port=${actual_port}
+        fi
+
+        mcp_cmd=(
+            "${CRUCIBLE_HOME}/bin/crucible-mcp"
+            --bind "${mcp_bind}"
+            --port "${mcp_port}"
+            --token-file "${mcp_token_file}"
+            --database "${mcp_database}"
+            --max-request-bytes "${mcp_max_inline_bytes}"
+            --crucible-home "${CRUCIBLE_HOME}"
+            --input-root "${mcp_input_root}"
+            --run-root "${var_run_crucible}"
+            --max-run-file-bytes "${mcp_max_run_file_bytes}"
+            --cdm-readiness-timeout "${mcp_cdm_readiness_timeout}"
+            --cdm-url "http://127.0.0.1:${mcp_cdm_port}"
+            --log-db "${LOG_DB}"
+            --audit-log "${mcp_audit_log}"
+            --audit-max-bytes "${mcp_audit_max_bytes}"
+            --audit-retained-files "${mcp_audit_retained_files}"
+        )
+        if [ -n "${mcp_tls_cert}" ]; then
+            mcp_cmd+=(--tls-cert "${mcp_tls_cert}" --tls-key "${mcp_tls_key}")
+        fi
+        for mcp_allowed_origins in "${mcp_origins[@]}"; do
+            mcp_cmd+=(--allowed-origin "${mcp_allowed_origins}")
+        done
+
+        mcp_data_mounts=()
+        mcp_data_paths=()
+        mcp_data_readonly_flags=()
+        if [ -n "${mcp_tls_cert}" ]; then
+            mcp_data_mounts+=("--mount=type=bind,source=${mcp_tls_cert},destination=${mcp_tls_cert},readonly")
+            mcp_data_mounts+=("--mount=type=bind,source=${mcp_tls_key},destination=${mcp_tls_key},readonly")
+        fi
+        for mcp_data_index in 0 1 2 3 4; do
+            case ${mcp_data_index} in
+                0) mcp_data_path=$(dirname "${mcp_database}"); mcp_data_readonly=false ;;
+                1) mcp_data_path=${mcp_input_root}; mcp_data_readonly=true ;;
+                2) mcp_data_path=$(dirname "${mcp_audit_log}"); mcp_data_readonly=false ;;
+                3) mcp_data_path=$(dirname "${LOG_DB}"); mcp_data_readonly=true ;;
+                4) mcp_data_path=${var_run_crucible}; mcp_data_readonly=false ;;
+            esac
+            case "${mcp_data_path}" in
+                /var/lib/crucible|/var/lib/crucible/*|/root|/root/*|/home|/home/*|"${CRUCIBLE_HOME}"|"${CRUCIBLE_HOME}"/*)
+                    continue
+                    ;;
+            esac
+
+            mcp_mount_index=-1
+            for mcp_existing_index in "${!mcp_data_paths[@]}"; do
+                if [ "${mcp_data_paths[${mcp_existing_index}]}" == "${mcp_data_path}" ]; then
+                    mcp_mount_index=${mcp_existing_index}
+                    break
+                fi
+            done
+            if [ ${mcp_mount_index} -eq -1 ]; then
+                mcp_data_paths+=("${mcp_data_path}")
+                mcp_data_readonly_flags+=("${mcp_data_readonly}")
+            else
+                if [ "${mcp_data_readonly}" == "false" ]; then
+                    mcp_data_readonly_flags[${mcp_mount_index}]=false
+                fi
+            fi
+        done
+        for mcp_data_index in "${!mcp_data_paths[@]}"; do
+            mcp_data_path=${mcp_data_paths[${mcp_data_index}]}
+            if [ "${mcp_data_readonly_flags[${mcp_data_index}]}" == "true" ]; then
+                mcp_data_mounts+=("--mount=type=bind,source=${mcp_data_path},destination=${mcp_data_path},readonly")
+            else
+                mcp_data_mounts+=("--mount=type=bind,source=${mcp_data_path},destination=${mcp_data_path}")
+            fi
+        done
+
+        ${podman_run} --name crucible-mcp-server \
+            --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \
+            "--mount=type=bind,source=${mcp_token_file},destination=${mcp_token_file},readonly" \
+            "${mcp_data_mounts[@]}" "${container_common_args[@]}" "${container_service_args[@]}" \
+            ${CRUCIBLE_CONTROLLER_IMAGE} "${mcp_cmd[@]}" > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not start MCP server"
+            return ${RC}
+        fi
+        mcp_started=1
+    fi
+
+    if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+        if ! open_firewall_port ${mcp_port} tcp; then
+            if [ ${mcp_started} -eq 1 ]; then
+                ${podman_stop} crucible-mcp-server > /dev/null 2>&1
+            fi
+            echo "ERROR: Could not open the MCP firewall port"
+            return 1
+        fi
+    fi
+
+    local mcp_token mcp_available=0 mcp_count=1 mcp_timeout=30
+    mcp_token=$(cat "${mcp_token_file}")
+    echo "Waiting for MCP server to be available (${mcp_timeout} seconds maximum)..."
+    while [ ${mcp_available} -eq 0 -a ${mcp_count} -le ${mcp_timeout} ]; do
+        local mcp_scheme="http"
+        if [ -n "${mcp_tls_cert}" ]; then
+            mcp_scheme="https"
+        fi
+        if curl --silent --show-error --fail --insecure --noproxy '*' \
+            --header "Authorization: Bearer ${mcp_token}" \
+            "${mcp_scheme}://${mcp_health_host}:${mcp_port}/health" >/dev/null 2>&1; then
+            mcp_available=1
+        else
+            sleep 1
+        fi
+        (( mcp_count += 1 ))
+    done
+    if [ ${mcp_available} -eq 0 ]; then
+        echo "ERROR: MCP server failed to become available within ${mcp_timeout} seconds"
+        if [ ${mcp_started} -eq 1 ]; then
+            ${podman_stop} crucible-mcp-server > /dev/null 2>&1
+        fi
+        if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+            close_firewall_port ${mcp_port} tcp
+        fi
+        return 1
+    fi
+    echo "Successfully started MCP server on port ${mcp_port}"
+    return ${RC}
+}
+
+function stop_mcp_server() {
+    local mcp_stop_rc mcp_stop_lock_owned=0
+
+    if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        mcp_stop_lock_owned=1
+    fi
+    if ! mcp_lifecycle_lock_acquire; then
+        return 1
+    fi
+    stop_mcp_server_unlocked "$@"
+    mcp_stop_rc=$?
+    if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
+    return ${mcp_stop_rc}
+}
+
+function stop_mcp_server_unlocked() {
+    local RC=0 mcp_port mcp_bind
+
+    mcp_port=$(jq_query ${SERVICES_CFG} '."mcp-server".port')
+    mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
+    echo -n "Checking for MCP server"
+    if podman_running crucible-mcp-server; then
+        ${podman_stop} crucible-mcp-server > /dev/null
+        RC=$?
+        if [ ${RC} != 0 ]; then
+            echo "ERROR: Could not stop MCP server"
+        else
+            echo "Successfully stopped MCP server"
+        fi
+    fi
+    if [ "${mcp_bind}" != "127.0.0.1" -a "${mcp_bind}" != "localhost" -a "${mcp_bind}" != "::1" ]; then
+        close_firewall_port ${mcp_port} tcp
+    fi
+    return ${RC}
+}
+
+function rotate_mcp_token() {
+    local mcp_token_file mcp_database active_jobs was_running=0
+
+    mcp_token_file=$(jq_query ${SERVICES_CFG} '."mcp-server"."token-file"')
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    if [ -z "${mcp_token_file}" ]; then
+        echo "ERROR: mcp-server token-file is not configured"
+        return 1
+    fi
+    if [ -z "${mcp_database}" ]; then
+        echo "ERROR: mcp-server database is not configured"
+        return 1
+    fi
+
+    if ! mcp_lifecycle_lock_acquire; then
+        return 1
+    fi
+
+    if ! active_jobs=$(mcp_active_jobs); then
+        echo "ERROR: Could not verify MCP jobs; refusing to rotate the token"
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+    if [ -n "${active_jobs}" ]; then
+        echo "ERROR: Cannot rotate the MCP token while jobs are active"
+        echo "ERROR: Wait for active MCP jobs to complete before rotating the token"
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+
+    if ! PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_token_file}" <<'PY'
+import sys
+from pathlib import Path
+
+from crucible_mcp.policy import validate_token_rotation_path
+
+validate_token_rotation_path(Path(sys.argv[1]))
+PY
+    then
+        echo "ERROR: Invalid MCP token destination; refusing to stop MCP"
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+
+    if podman_running crucible-mcp-server; then
+        was_running=1
+        if ! stop_mcp_server_unlocked; then
+            mcp_lifecycle_lock_release
+            return 1
+        fi
+    fi
+
+    if ! PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_token_file}" <<'PY'
+import sys
+from pathlib import Path
+
+from crucible_mcp.policy import rotate_token
+
+token_path = Path(sys.argv[1])
+rotate_token(token_path)
+PY
+    then
+        echo "ERROR: Could not rotate the MCP token"
+        if [ ${was_running} -eq 1 ]; then
+            if start_mcp_server_unlocked; then
+                echo "MCP server was restored with the existing token"
+            else
+                echo "ERROR: MCP token rotation failed and the service could not be restored"
+            fi
+        fi
+        mcp_lifecycle_lock_release
+        return 1
+    fi
+
+    if [ ${was_running} -eq 1 ]; then
+        if ! start_mcp_server_unlocked; then
+            echo "ERROR: MCP token rotated, but the service could not be restarted"
+            mcp_lifecycle_lock_release
+            return 1
+        fi
+    else
+        echo "Successfully rotated MCP token"
+    fi
+    mcp_lifecycle_lock_release
+    return 0
+}
+
+function mcp_active_jobs() {
+    local mcp_database
+    mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
+    if [ ! -f "${mcp_database}" ]; then
+        return 0
+    fi
+    PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_database}" <<'PY'
+import sys
+from crucible_mcp.jobs import JobStore
+
+store = JobStore(sys.argv[1])
+try:
+    for job in store.list_active():
+        print(f"{job.mcp_job_id} {job.state.value}")
+finally:
+    store.close()
+PY
+}
+
 function extract_run_id() {
     local RUN_DIR THIS_ID
 
@@ -774,6 +1262,7 @@ function index_run() {
         echo "Opensearch documents have been created"
     else
         echo "ERROR: Could not generate OpenSearch documents [rc=${RC}]"
+        return ${RC}
     fi
 
     # Index the documents
@@ -1270,6 +1759,7 @@ function service_control() {
     local action_rc
     local service_rc
     local function_name
+    local mcp_stop_lock_owned=0
 
     function_name="service_control"
 
@@ -1297,6 +1787,36 @@ function service_control() {
             echo "ERROR: Wait for the run(s) to complete or stop them manually before stopping services"
             return 1
         fi
+
+        if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+            if ! mcp_lifecycle_lock_acquire; then
+                echo "ERROR: Cannot acquire the MCP lifecycle lock; refusing to stop services"
+                return 1
+            fi
+            mcp_stop_lock_owned=1
+        fi
+
+        local mcp_jobs
+        if ! mcp_jobs=$(mcp_active_jobs); then
+            echo "ERROR: Cannot verify MCP job state; refusing to stop services"
+            echo "ERROR: Resolve the MCP job database error before stopping services"
+            if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+                mcp_lifecycle_lock_release
+            fi
+            return 1
+        fi
+        if [ -n "${mcp_jobs}" ]; then
+            echo "ERROR: Cannot stop services while MCP jobs are active"
+            echo "ERROR: Active MCP job(s):"
+            echo "${mcp_jobs}" | while read job_id job_state; do
+                echo "ERROR:   ${job_id} (${job_state})"
+            done
+            echo "ERROR: Wait for MCP jobs to complete before stopping services"
+            if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+                mcp_lifecycle_lock_release
+            fi
+            return 1
+        fi
     fi
 
     action_rc=0
@@ -1306,9 +1826,16 @@ function service_control() {
         shift
 
         if [ "${service}" == "all" ]; then
-            local all_services="httpd opensearch valkey cdm-server image-sourcing"
+            local all_services="httpd opensearch valkey cdm-server image-sourcing mcp-server"
+            if [ "${action}" == "start" ] && [ "$(jq_query ${SERVICES_CFG} '."mcp-server".enabled // false')" != "true" ]; then
+                all_services="httpd opensearch valkey cdm-server image-sourcing"
+            fi
             service_control ${action} ${all_services}
-            return $?
+            service_rc=$?
+            if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+                mcp_lifecycle_lock_release
+            fi
+            return ${service_rc}
         fi
 
         if [ "${service}" == "redis" ]; then
@@ -1319,6 +1846,10 @@ function service_control() {
         case "${service}" in
             "httpd"|"opensearch"|"valkey")
                 ${action}_${service}
+                service_rc=$?
+                ;;
+            "mcp-server")
+                ${action}_mcp_server
                 service_rc=$?
                 ;;
             "cdm-server")
@@ -1338,6 +1869,9 @@ function service_control() {
         action_rc=$(( action_rc + service_rc ))
     done
 
+    if [ ${mcp_stop_lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
     return ${action_rc}
 }
 

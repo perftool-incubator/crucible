@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4 -*-
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=bash
+
+set -e
+
+if [ -z "${CRUCIBLE_HOME}" ]; then
+    echo "ERROR: CRUCIBLE_HOME must be set" >&2
+    exit 1
+fi
+
+export PYTHONPATH="${CRUCIBLE_HOME}/mcp${PYTHONPATH:+:${PYTHONPATH}}"
+exec python3 -m crucible_mcp.server "$@"

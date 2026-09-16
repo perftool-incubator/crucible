@@ -1,0 +1,1634 @@
+"""Typed, non-execution Crucible operations for the MCP contract."""
+
+import errno
+import json
+import lzma
+import os
+import re
+import sqlite3
+import stat
+import tempfile
+import threading
+from pathlib import Path
+from typing import Any
+from urllib.error import URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
+
+from jsonschema import Draft201909Validator
+
+from .documentation import DocumentationCatalog
+from .policy import InputPolicy, PolicyError
+
+MAX_LOG_RESPONSE_BYTES = 1_048_576
+MAX_ARTIFACT_LIST_LIMIT = 1000
+MAX_ARTIFACT_OFFSET = 1_073_741_824
+MAX_ARTIFACT_SCAN_FILES = 100_000
+MAX_ARTIFACT_DIRECTORY_DEPTH = 64
+MAX_ARTIFACT_METADATA_BYTES = 262_144
+MAX_ARTIFACT_READ_BYTES = 131_072
+MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
+
+_ARTIFACT_ROOTS = (
+    "run/iterations",
+    "run/tool-data",
+    "run/sysinfo",
+    "run/opensearch",
+)
+_TEXT_ARTIFACT_SUFFIXES = {
+    ".csv": "text/csv",
+    ".err": "text/plain",
+    ".json": "application/json",
+    ".log": "text/plain",
+    ".md": "text/markdown",
+    ".ndjson": "application/x-ndjson",
+    ".out": "text/plain",
+    ".txt": "text/plain",
+    ".xml": "application/xml",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+}
+_ARTIFACT_SUFFIX_MEDIA_TYPES = {
+    **_TEXT_ARTIFACT_SUFFIXES,
+    ".xz": "application/x-xz",
+    ".tgz": "application/gzip",
+    ".gz": "application/gzip",
+    ".tar": "application/x-tar",
+}
+_SENSITIVE_ARTIFACT_SUFFIXES = {
+    ".asc",
+    ".cer",
+    ".crt",
+    ".der",
+    ".gpg",
+    ".jks",
+    ".key",
+    ".kdb",
+    ".p12",
+    ".pfx",
+    ".pem",
+}
+_SENSITIVE_ARTIFACT_NAMES = {
+    ".env",
+    ".netrc",
+    "config",
+    "config.ini",
+    "config.json",
+    "config.toml",
+    "config.yaml",
+    "config.yml",
+    "credentials",
+    "credentials.json",
+    "credentials.yaml",
+    "credentials.yml",
+    "engine-env",
+    "engine-env.txt",
+    "secret",
+    "secret.json",
+    "secret.yaml",
+    "secret.yml",
+    "token",
+    "token.json",
+    "token.txt",
+    "token.yaml",
+    "token.yml",
+}
+
+
+class OperationError(RuntimeError):
+    """A structured operation failure safe to return to an MCP client."""
+
+    def __init__(self, category: str, message: str, code: str = "operation_error"):
+        super().__init__(message)
+        self.category = category
+        self.code = code
+        self.message = message
+
+    def as_dict(self) -> dict[str, str]:
+        return {"category": self.category, "code": self.code, "message": self.message}
+
+
+class CrucibleOperations:
+    """Read-only discovery and validation operations.
+
+    Execution is intentionally not implemented here yet.  Keeping these
+    operations separate from the HTTP transport lets the eventual runner use
+    the same typed validation result without passing user strings to a shell.
+    """
+
+    def __init__(
+        self,
+        crucible_home: Path,
+        input_policy: InputPolicy | None = None,
+        cdm_base_url: str = "http://127.0.0.1:3000",
+        log_db: Path | None = None,
+        run_root: Path | None = None,
+    ):
+        self.crucible_home = Path(crucible_home).resolve()
+        self.cdm_base_url = cdm_base_url.rstrip("/")
+        self.log_db = Path(log_db) if log_db else None
+        self.documentation = DocumentationCatalog(self.crucible_home)
+        configured_run_root = Path(run_root) if run_root else self.crucible_home / "run"
+        if not configured_run_root.is_absolute():
+            configured_run_root = self.crucible_home / configured_run_root
+        self.archive_root = (configured_run_root.parent / "archive").resolve()
+        self.local_run_root = configured_run_root.resolve()
+        self.input_policy = input_policy or InputPolicy(
+            [self.crucible_home / "mcp" / "inputs"]
+        )
+        self.run_policy = InputPolicy([run_root or self.crucible_home / "run"])
+        self._tag_locks: dict[Path, threading.Lock] = {}
+        self._tag_locks_guard = threading.Lock()
+
+    def crucible_info(self) -> dict[str, Any]:
+        return {
+            "name": "crucible",
+            "mcp_contract_version": "2",
+            "execution_supported": True,
+            "capabilities": [
+                "crucible_info",
+                "list_benchmarks",
+                "describe_benchmark",
+                "list_tools",
+                "list_local_runs",
+                "get_local_run_summary",
+                "get_local_run_metadata",
+                "list_run_artifacts",
+                "get_run_artifact",
+                "list_local_archives",
+                "archive_local_run",
+                "unarchive_local_run",
+                "list_indexed_results",
+                "get_indexed_result",
+                "list_indexed_periods",
+                "get_indexed_metric",
+                "list_log_sessions",
+                "get_log_info",
+                "get_log_session",
+                "search_logs",
+                "validate_run",
+                "start_run",
+                "get_run_status",
+                "get_run_logs",
+                "get_run_summary",
+                "postprocess_local_run",
+                "index_local_run",
+                "delete_indexed_result",
+                "list_local_run_tags",
+                "add_local_run_tags",
+                "remove_local_run_tags",
+                "search_documentation",
+            ],
+        }
+
+    def list_documentation(self) -> list[dict[str, Any]]:
+        """List curated user-facing documentation as MCP resources."""
+
+        return self.documentation.list_resources()
+
+    def read_documentation(self, uri: str) -> dict[str, Any]:
+        """Read one curated documentation resource by stable URI."""
+
+        try:
+            return self.documentation.read_resource(uri)
+        except (FileNotFoundError, ValueError) as exc:
+            raise OperationError(
+                "user", str(exc), "documentation_not_found"
+            ) from exc
+
+    def search_documentation(self, query: str, limit: int = 10) -> dict[str, Any]:
+        """Search curated documentation without accepting filesystem paths."""
+
+        if limit < 1 or limit > 20:
+            raise OperationError(
+                "user", "limit must be between 1 and 20", "invalid_limit"
+            )
+        try:
+            resources = self.documentation.search(query, limit)
+        except ValueError as exc:
+            raise OperationError("user", str(exc), "invalid_query") from exc
+        return {"query": query, "resources": resources, "count": len(resources)}
+
+    def list_local_run_tags(self, run_directory: Path) -> dict[str, Any]:
+        _, document = self._load_run_metadata(run_directory)
+        return {"run_path": str(run_directory), "tags": self._validated_tags(document)}
+
+    def add_local_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
+        canonical = self._canonical_run_directory(run_directory)
+        with self._tag_lock(canonical):
+            path, document = self._load_run_metadata(canonical)
+            current = self._validated_tags(document)
+            for raw_tag in tags:
+                match = re.fullmatch(r"([a-zA-Z0-9-_\s]+):([a-zA-Z0-9-_:\s\\/\.]+)", raw_tag)
+                if match is None:
+                    raise OperationError("user", f"invalid tag: {raw_tag}", "invalid_tag")
+                existing = next((tag for tag in current if tag.get("name") == match.group(1)), None)
+                if existing is None:
+                    current.append({"name": match.group(1), "val": match.group(2)})
+                else:
+                    existing["val"] = match.group(2)
+            self._write_run_metadata(path, document)
+            return {"run_path": str(run_directory), "tags": current}
+
+    def remove_local_run_tags(self, run_directory: Path, names: list[str]) -> dict[str, Any]:
+        canonical = self._canonical_run_directory(run_directory)
+        with self._tag_lock(canonical):
+            path, document = self._load_run_metadata(canonical)
+            if any(not re.fullmatch(r"[a-zA-Z0-9-_\s]+", name) for name in names):
+                raise OperationError("user", "tag names must not include values", "invalid_tag")
+            existing = self._validated_tags(document)
+            document["tags"] = [tag for tag in existing if tag.get("name") not in names]
+            if len(document["tags"]) == len(existing):
+                raise OperationError("user", "no matching tags were found", "tag_not_found")
+            self._write_run_metadata(path, document)
+            return {"run_path": str(run_directory), "tags": document["tags"]}
+
+    def _tag_lock(self, run_directory: Path) -> threading.Lock:
+        with self._tag_locks_guard:
+            return self._tag_locks.setdefault(run_directory, threading.Lock())
+
+    @staticmethod
+    def _validated_tags(document: dict[str, Any]) -> list[dict[str, Any]]:
+        tags = document.setdefault("tags", [])
+        if (
+            not isinstance(tags, list)
+            or any(
+                not isinstance(tag, dict)
+                or set(tag) != {"name", "val"}
+                or not isinstance(tag["name"], str)
+                or not tag["name"]
+                or not isinstance(tag["val"], str)
+                or not tag["val"]
+                for tag in tags
+            )
+        ):
+            raise OperationError(
+                "user", "run metadata tags do not match the run schema", "invalid_run"
+            )
+        return tags
+
+    def list_local_runs(self, limit: int = 1000) -> dict[str, Any]:
+        """List local run directories without querying indexed result data."""
+
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        entries: list[dict[str, Any]] = []
+        seen: set[Path] = set()
+        root = self.local_run_root
+        if not root.is_dir():
+            return {"runs": [], "count": 0}
+        for directory in sorted(root.iterdir(), key=lambda path: path.name):
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            try:
+                canonical = directory.resolve(strict=True)
+            except OSError:
+                continue
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            entry: dict[str, Any] = {
+                "name": directory.name,
+                "path": str(canonical),
+                "status": "incomplete",
+                "run_id": None,
+                "tags": [],
+            }
+            try:
+                metadata_path, metadata = self._load_run_metadata(canonical)
+            except OperationError:
+                entries.append(entry)
+                if len(entries) >= limit:
+                    break
+                continue
+            entry["status"] = "complete" if metadata_path.parent == canonical / "run" else "incomplete"
+            entry["run_id"] = metadata.get("run-id") or metadata.get("id")
+            try:
+                entry["tags"] = self._validated_tags(metadata)
+            except OperationError:
+                entry["status"] = "incomplete"
+                entry["tags"] = []
+            entries.append(entry)
+            if len(entries) >= limit:
+                break
+        return {"runs": entries, "count": len(entries)}
+
+    def get_local_run_summary(self, run_path: Path, max_bytes: int = 1_048_576) -> dict[str, Any]:
+        """Read a bounded summary from an approved local run artifact."""
+
+        try:
+            canonical = self._canonical_run_directory(run_path)
+            summary_path = self._safe_artifact_path(canonical, "run/result-summary.json")
+            size = summary_path.stat().st_size
+            if size > max_bytes:
+                raise OperationError(
+                    "framework", "result summary exceeds size limit", "result_too_large"
+                )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except OperationError:
+            raise
+        except FileNotFoundError as exc:
+            raise OperationError(
+                "user", "local run summary is unavailable", "result_unavailable"
+            ) from exc
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise OperationError(
+                "user", "local run summary is not valid JSON", "invalid_result"
+            ) from exc
+        if not isinstance(summary, dict):
+            raise OperationError("user", "local run summary must be a JSON object", "invalid_result")
+        return {
+            "run_path": str(canonical),
+            "result_status": "available",
+            "summary": summary,
+        }
+
+    def get_local_run_metadata(self, run_path: Path, max_bytes: int = 1_048_576) -> dict[str, Any]:
+        """Read the bounded rickshaw run metadata from an approved local run."""
+
+        try:
+            canonical = self._canonical_run_directory(run_path)
+            metadata_path = self._run_metadata_path(canonical)
+            if metadata_path.stat().st_size > max_bytes:
+                raise OperationError(
+                    "framework", "run metadata exceeds size limit", "result_too_large"
+                )
+            if metadata_path.suffix == ".xz":
+                with lzma.open(metadata_path, "rt", encoding="utf-8") as stream:
+                    encoded = stream.read(max_bytes + 1)
+                    if len(encoded.encode("utf-8")) > max_bytes:
+                        raise OperationError(
+                            "framework", "run metadata exceeds size limit", "result_too_large"
+                        )
+                    metadata = json.loads(encoded)
+            else:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except OperationError:
+            raise
+        except (OSError, UnicodeDecodeError, lzma.LZMAError, json.JSONDecodeError) as exc:
+            raise OperationError(
+                "user", "run metadata is not valid JSON", "invalid_run"
+            ) from exc
+        if not isinstance(metadata, dict):
+            raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
+        return {
+            "run_path": str(canonical),
+            "metadata_path": str(metadata_path),
+            "metadata": metadata,
+        }
+
+    def list_run_artifacts(
+        self, run_path: Path, offset: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        """List metadata for approved artifacts without returning their contents."""
+
+        if offset < 0 or offset > MAX_ARTIFACT_OFFSET:
+            raise OperationError(
+                "user", f"offset must be between 0 and {MAX_ARTIFACT_OFFSET}", "invalid_offset"
+            )
+        if offset >= MAX_ARTIFACT_SCAN_FILES:
+            raise OperationError(
+                "framework",
+                "artifact listing exceeds the traversal limit",
+                "result_too_large",
+            )
+        if limit < 1 or limit > MAX_ARTIFACT_LIST_LIMIT:
+            raise OperationError(
+                "user",
+                f"limit must be between 1 and {MAX_ARTIFACT_LIST_LIMIT}",
+                "invalid_limit",
+            )
+
+        canonical = self._canonical_run_directory(run_path)
+        artifacts: list[dict[str, Any]] = []
+        scanned = 0
+        metadata_bytes = len(str(canonical).encode("utf-8"))
+        complete = True
+        next_offset = offset
+        scan_limit = MAX_ARTIFACT_SCAN_FILES
+
+        def mark_walk_error(_error: OSError) -> None:
+            nonlocal complete
+            complete = False
+
+        directory_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        root_fd = None
+        try:
+            root_fd = os.open(canonical, directory_flags)
+            root_iterator = os.scandir(root_fd)
+        except OSError as exc:
+            mark_walk_error(exc)
+            if root_fd is not None:
+                os.close(root_fd)
+            root_fd = None
+            root_iterator = None
+
+        stack: list[tuple[int, str, Any]] = []
+        if root_iterator is not None:
+            stack.append((root_fd, ".", root_iterator))
+        scanned = 1
+        try:
+            while stack:
+                current_fd, current_relative, entries = stack[-1]
+                try:
+                    entry = next(entries)
+                except StopIteration:
+                    entries.close()
+                    stack.pop()
+                    os.close(current_fd)
+                    continue
+                except OSError as exc:
+                    mark_walk_error(exc)
+                    entries.close()
+                    stack.pop()
+                    os.close(current_fd)
+                    continue
+
+                scanned += 1
+                if scanned > scan_limit:
+                    raise OperationError(
+                        "framework",
+                        "artifact listing exceeds the traversal limit",
+                        "result_too_large",
+                    )
+                relative = (
+                    entry.name
+                    if current_relative == "."
+                    else f"{current_relative}/{entry.name}"
+                )
+                try:
+                    is_symlink = entry.is_symlink()
+                    is_directory = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    complete = False
+                    next_offset = scanned
+                    continue
+
+                if is_directory and not is_symlink:
+                    if not self._artifact_directory_may_contain(
+                        current_relative, entry.name
+                    ):
+                        continue
+                    if len(stack) >= MAX_ARTIFACT_DIRECTORY_DEPTH:
+                        raise OperationError(
+                            "framework",
+                            "artifact listing exceeds the directory depth limit",
+                            "result_too_large",
+                        )
+                    child_fd = None
+                    try:
+                        child_fd = os.open(
+                            entry.name, directory_flags, dir_fd=current_fd
+                        )
+                        child_iterator = os.scandir(child_fd)
+                    except OSError as exc:
+                        mark_walk_error(exc)
+                        next_offset = scanned
+                        if child_fd is not None:
+                            os.close(child_fd)
+                        continue
+                    stack.append((child_fd, relative, child_iterator))
+                    continue
+
+                file_offset = scanned
+                try:
+                    is_regular = entry.is_file(follow_symlinks=False)
+                except OSError:
+                    complete = False
+                    next_offset = file_offset
+                    continue
+                if is_symlink or not is_regular:
+                    next_offset = file_offset
+                    continue
+                if file_offset <= offset:
+                    next_offset = file_offset
+                    continue
+                if not self._is_approved_artifact(relative):
+                    next_offset = file_offset
+                    continue
+                if len(artifacts) >= limit:
+                    complete = False
+                    next_offset = file_offset - 1
+                    break
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                except OSError:
+                    complete = False
+                    next_offset = file_offset
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    next_offset = file_offset
+                    continue
+                artifact = {
+                    "artifact_path": relative,
+                    "name": entry.name,
+                    "media_type": self._artifact_media_type(Path(entry.name)),
+                    "size": metadata.st_size,
+                    "modified_at": int(metadata.st_mtime * 1000),
+                    "retrievable": self._is_retrievable_artifact(relative),
+                }
+                artifact_bytes = len(
+                    json.dumps(artifact, separators=(",", ":")).encode("utf-8")
+                )
+                if (
+                    artifacts
+                    and metadata_bytes + artifact_bytes > MAX_ARTIFACT_METADATA_BYTES
+                ):
+                    complete = False
+                    next_offset = file_offset - 1
+                    break
+                artifacts.append(artifact)
+                metadata_bytes += artifact_bytes
+                next_offset = file_offset
+        finally:
+            for directory_fd, _relative, entries in stack:
+                entries.close()
+                os.close(directory_fd)
+
+        return {
+            "run_path": str(canonical),
+            "offset": offset,
+            "next_offset": next_offset,
+            "complete": complete,
+            "artifacts": artifacts,
+            "count": len(artifacts),
+        }
+
+    @staticmethod
+    def _artifact_directory_may_contain(current: str, child: str) -> bool:
+        candidate = child if current == "." else f"{current}/{child}"
+        return any(
+            candidate.startswith(f"{root}/")
+            or root == candidate
+            or root.startswith(f"{candidate}/")
+            for root in _ARTIFACT_ROOTS
+        )
+
+    def get_run_artifact(
+        self,
+        run_path: Path,
+        artifact_path: str,
+        offset: int = 0,
+        limit: int = MAX_ARTIFACT_READ_BYTES,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Read a bounded UTF-8 slice of one approved text artifact."""
+
+        if offset < 0 or offset > MAX_ARTIFACT_OFFSET:
+            raise OperationError(
+                "user", f"offset must be between 0 and {MAX_ARTIFACT_OFFSET}", "invalid_offset"
+            )
+        if limit < 1 or limit > MAX_ARTIFACT_READ_BYTES:
+            raise OperationError(
+                "user",
+                f"limit must be between 1 and {MAX_ARTIFACT_READ_BYTES}",
+                "invalid_limit",
+            )
+        if "\x00" in artifact_path:
+            raise OperationError(
+                "user", "artifact path contains a NUL character", "invalid_artifact_path"
+            )
+        canonical = self._canonical_run_directory(run_path)
+        try:
+            artifact = self._safe_artifact_path(canonical, artifact_path)
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise OperationError(
+                "user", "artifact does not exist", "artifact_not_found"
+            ) from exc
+        except OSError as exc:
+            raise OperationError(
+                "user", "artifact path could not be resolved", "invalid_artifact_path"
+            ) from exc
+        relative = artifact.relative_to(canonical).as_posix()
+        if not self._is_approved_artifact(relative):
+            raise OperationError(
+                "authorization", "artifact is outside the approved artifact set", "path_rejected"
+            )
+        if not self._is_text_artifact(relative):
+            raise OperationError(
+                "user", "artifact is not an approved UTF-8 text artifact", "artifact_not_text"
+            )
+        if not self._is_retrievable_artifact(relative):
+            raise OperationError(
+                "authorization",
+                "sensitive artifacts are not retrievable",
+                "artifact_not_retrievable",
+            )
+        try:
+            stream = self._open_artifact_readonly(canonical, relative)
+        except FileNotFoundError as exc:
+            raise OperationError(
+                "user", "artifact does not exist", "artifact_not_found"
+            ) from exc
+        except (NotADirectoryError, PermissionError) as exc:
+            raise OperationError(
+                "framework", "artifact could not be opened", "artifact_unavailable"
+            ) from exc
+        except OSError as exc:
+            raise OperationError(
+                "framework", "artifact could not be opened", "artifact_unavailable"
+            ) from exc
+        try:
+            size = os.fstat(stream.fileno()).st_size
+            if offset > size:
+                raise OperationError(
+                    "user", "offset is beyond the artifact size", "invalid_offset"
+                )
+            stream.seek(offset)
+            encoded = stream.read(limit)
+        except OperationError:
+            raise
+        except OSError as exc:
+            raise OperationError(
+                "framework", "artifact could not be read", "artifact_unavailable"
+            ) from exc
+        finally:
+            stream.close()
+
+        text, consumed = self._decode_artifact_slice(
+            encoded, offset, offset + len(encoded) >= size
+        )
+
+        def build_result(selected_text: str) -> dict[str, Any]:
+            selected_consumed = len(selected_text.encode("utf-8"))
+            selected_offset = offset + selected_consumed
+            return {
+                "run_path": str(canonical),
+                "artifact_path": relative,
+                "media_type": self._artifact_media_type(artifact),
+                "size": size,
+                "offset": offset,
+                "next_offset": selected_offset,
+                "complete": selected_offset >= size,
+                "text": selected_text,
+            }
+
+        result = build_result(text)
+        if self._mcp_response_size(result, request_id) <= MAX_ARTIFACT_RESPONSE_BYTES:
+            return result
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            candidate = build_result(text[:middle])
+            if self._mcp_response_size(candidate, request_id) <= MAX_ARTIFACT_RESPONSE_BYTES:
+                low = middle
+            else:
+                high = middle - 1
+        if low == 0:
+            raise OperationError(
+                "framework", "artifact response exceeds size limit", "result_too_large"
+            )
+        return build_result(text[:low])
+
+    @staticmethod
+    def _is_approved_artifact(relative: str) -> bool:
+        if relative == "run/result-summary.json":
+            return True
+        return any(
+            relative == root or relative.startswith(f"{root}/")
+            for root in _ARTIFACT_ROOTS
+        )
+
+    @staticmethod
+    def _is_text_artifact(relative: str) -> bool:
+        if relative == "run/result-summary.json":
+            return True
+        if not any(
+            relative == root or relative.startswith(f"{root}/")
+            for root in _ARTIFACT_ROOTS
+        ):
+            return False
+        return Path(relative).suffix.lower() in _TEXT_ARTIFACT_SUFFIXES
+
+    @staticmethod
+    def _is_sensitive_artifact(relative: str) -> bool:
+        for component in Path(relative).parts:
+            name = component.lower()
+            if name in _SENSITIVE_ARTIFACT_NAMES:
+                return True
+            if Path(name).suffix.lower() in _SENSITIVE_ARTIFACT_SUFFIXES:
+                return True
+            if any(
+                marker in name
+                for marker in ("credential", "password", "secret", "token")
+            ):
+                return True
+        return False
+
+    @classmethod
+    def _is_retrievable_artifact(cls, relative: str) -> bool:
+        return cls._is_text_artifact(relative) and not cls._is_sensitive_artifact(relative)
+
+    @staticmethod
+    def _artifact_media_type(path: Path) -> str:
+        return _ARTIFACT_SUFFIX_MEDIA_TYPES.get(
+            path.suffix.lower(), "application/octet-stream"
+        )
+
+    @staticmethod
+    def _decode_artifact_slice(
+        encoded: bytes, offset: int, at_eof: bool
+    ) -> tuple[str, int]:
+        if not encoded:
+            return "", 0
+        end = len(encoded)
+        while end:
+            try:
+                return encoded[:end].decode("utf-8"), end
+            except UnicodeDecodeError as exc:
+                if exc.reason == "unexpected end of data" and exc.start == 0:
+                    if CrucibleOperations._utf8_character_length(encoded[0]) is not None:
+                        if at_eof:
+                            raise OperationError(
+                                "user",
+                                "artifact is not valid UTF-8",
+                                "invalid_artifact",
+                            ) from exc
+                        raise OperationError(
+                            "user",
+                            "limit is too small for the next UTF-8 character",
+                            "result_too_large",
+                        ) from exc
+                if exc.reason != "unexpected end of data" or exc.start == 0:
+                    code = "invalid_offset" if offset else "invalid_artifact"
+                    message = (
+                        "offset is not at a UTF-8 character boundary"
+                        if offset
+                        else "artifact is not valid UTF-8"
+                    )
+                    raise OperationError("user", message, code) from exc
+                if at_eof:
+                    raise OperationError(
+                        "user",
+                        "artifact is not valid UTF-8",
+                        "invalid_artifact",
+                    ) from exc
+                end = exc.start
+        raise OperationError(
+            "user",
+            "limit is too small for the next UTF-8 character",
+            "result_too_large",
+        )
+
+    @staticmethod
+    def _utf8_character_length(first_byte: int) -> int | None:
+        if first_byte <= 0x7F:
+            return 1
+        if 0xC2 <= first_byte <= 0xDF:
+            return 2
+        if 0xE0 <= first_byte <= 0xEF:
+            return 3
+        if 0xF0 <= first_byte <= 0xF4:
+            return 4
+        return None
+
+    @staticmethod
+    def _open_artifact_readonly(run_directory: Path, relative: str):
+        """Open an approved artifact without reopening a replaceable pathname."""
+
+        parts = Path(relative).parts
+        if not parts:
+            raise FileNotFoundError(relative)
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+        close_on_exec = getattr(os, "O_CLOEXEC", 0)
+        directory_flag = getattr(os, "O_DIRECTORY", 0)
+        nonblocking = getattr(os, "O_NONBLOCK", 0)
+        flags = os.O_RDONLY | no_follow | close_on_exec
+        directory_fd = os.open(run_directory, flags | directory_flag)
+        file_fd = None
+        try:
+            for component in parts[:-1]:
+                next_directory_fd = os.open(
+                    component,
+                    flags | directory_flag,
+                    dir_fd=directory_fd,
+                )
+                os.close(directory_fd)
+                directory_fd = next_directory_fd
+            # A raced FIFO must not block the request worker before fstat rejects it.
+            file_fd = os.open(parts[-1], flags | nonblocking, dir_fd=directory_fd)
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+                raise OperationError(
+                    "user", "artifact is not a regular file", "artifact_not_found"
+                )
+            stream = os.fdopen(file_fd, "rb")
+            file_fd = None
+            return stream
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise OperationError(
+                    "authorization",
+                    "artifact path changed to a symlink",
+                    "path_rejected",
+                ) from exc
+            raise
+        finally:
+            if file_fd is not None:
+                os.close(file_fd)
+            os.close(directory_fd)
+
+    def list_local_archives(self, limit: int = 1000) -> dict[str, Any]:
+        """List local archives without accessing configured remote backends."""
+
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        if not self.archive_root.is_dir():
+            return {"archives": [], "count": 0}
+        archives = []
+        for path in sorted(self.archive_root.glob("*.tar.xz"), key=lambda item: item.name):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                archives.append({"name": path.name, "path": str(path.resolve()), "size": path.stat().st_size})
+            except OSError:
+                continue
+            if len(archives) >= limit:
+                break
+        return {"archives": archives, "count": len(archives)}
+
+    def canonical_local_archive(self, requested_path: Path) -> Path:
+        """Resolve an archive path while keeping it inside the local archive root."""
+
+        candidate = requested_path if requested_path.is_absolute() else self.archive_root / requested_path
+        try:
+            resolved = candidate.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise OperationError("user", "archive does not exist", "not_found") from exc
+        if not resolved.is_file() or resolved.suffixes[-2:] != [".tar", ".xz"]:
+            raise OperationError("user", "archive must be a .tar.xz file", "invalid_archive")
+        if self.archive_root not in resolved.parents:
+            raise OperationError("authorization", "archive is outside the local archive root", "path_rejected")
+        self._validate_legacy_basename(resolved, "archive")
+        return resolved
+
+    def canonical_archive_run(self, requested_path: Path) -> Path:
+        """Resolve only a direct child of the real run root for archiving."""
+
+        try:
+            candidate = self.run_policy.canonical_directory(requested_path)
+        except PolicyError as exc:
+            raise OperationError("authorization", str(exc), "run_path_rejected") from exc
+        if candidate.parent != self.local_run_root:
+            raise OperationError(
+                "authorization",
+                "archive target must be a direct child of the local run root",
+                "run_path_rejected",
+            )
+        self._validate_legacy_basename(candidate, "run")
+        return candidate
+
+    @staticmethod
+    def _validate_legacy_basename(path: Path, label: str) -> None:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", path.name) is None:
+            raise OperationError(
+                "user",
+                f"{label} name contains unsupported characters",
+                "invalid_path",
+            )
+
+    @staticmethod
+    def _run_metadata_path(run_directory: Path) -> Path:
+        canonical = run_directory.resolve(strict=True)
+        for relative in ("run/rickshaw-run.json", "run/rickshaw-run.json.xz",
+                         "config/rickshaw-run.json", "config/rickshaw-run.json.xz"):
+            path = run_directory / relative
+            if path.is_file():
+                resolved = path.resolve(strict=True)
+                if canonical not in resolved.parents:
+                    raise OperationError(
+                        "authorization", "run metadata is outside the run directory", "path_rejected"
+                    )
+                return resolved
+        raise OperationError("user", "run metadata is unavailable", "invalid_run")
+
+    @staticmethod
+    def _safe_artifact_path(run_directory: Path, relative: str) -> Path:
+        canonical = run_directory.resolve(strict=True)
+        relative_path = Path(relative)
+        if relative_path.is_absolute() or any(
+            part in {".", ".."} for part in relative_path.parts
+        ):
+            raise OperationError(
+                "authorization", "run artifact path is not relative", "path_rejected"
+            )
+        path = run_directory / relative
+        current = canonical
+        for part in relative_path.parts:
+            current /= part
+            if current.is_symlink():
+                raise OperationError(
+                    "authorization", "run artifact path contains a symlink", "path_rejected"
+                )
+        resolved = path.resolve(strict=True)
+        if canonical not in resolved.parents:
+            raise OperationError(
+                "authorization", "run artifact is outside the run directory", "path_rejected"
+            )
+        if not resolved.is_file():
+            raise FileNotFoundError(resolved)
+        return resolved
+
+    def _load_run_metadata(self, run_directory: Path) -> tuple[Path, dict[str, Any]]:
+        try:
+            canonical = self._canonical_run_directory(run_directory)
+            path = self._run_metadata_path(canonical)
+            document = self._read_bounded_json(path, 1_048_576)
+        except OperationError:
+            raise
+        except (OSError, UnicodeDecodeError, lzma.LZMAError, json.JSONDecodeError) as exc:
+            raise OperationError("user", "run metadata is not valid JSON", "invalid_run") from exc
+        if not isinstance(document, dict):
+            raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
+        return path, document
+
+    @staticmethod
+    def _read_bounded_json(path: Path, max_bytes: int) -> Any:
+        opener = lzma.open if path.suffix == ".xz" else open
+        with opener(path, "rb") as stream:
+            encoded = stream.read(max_bytes + 1)
+        if len(encoded) > max_bytes:
+            raise OperationError(
+                "framework", "run metadata exceeds size limit", "result_too_large"
+            )
+        return json.loads(encoded.decode("utf-8"))
+
+    def _canonical_run_directory(self, run_directory: Path) -> Path:
+        try:
+            return self.run_policy.canonical_directory(run_directory)
+        except PolicyError as exc:
+            raise OperationError("authorization", str(exc), "run_path_rejected") from exc
+
+    @staticmethod
+    def _write_run_metadata(path: Path, document: dict[str, Any]) -> None:
+        temporary = None
+        try:
+            fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+            os.close(fd)
+            temporary = Path(temporary_name)
+            if path.suffix == ".xz":
+                with lzma.open(temporary, "wt", encoding="utf-8") as stream:
+                    json.dump(document, stream, indent=4, sort_keys=True)
+            else:
+                temporary.write_text(json.dumps(document, indent=4, sort_keys=True), encoding="utf-8")
+            os.chmod(temporary, path.stat().st_mode & 0o777)
+            os.replace(temporary, path)
+        except (OSError, lzma.LZMAError, TypeError) as exc:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            raise OperationError("framework", "could not update run metadata", "write_failed") from exc
+
+    def list_benchmarks(self) -> list[dict[str, Any]]:
+        root = self.crucible_home / "subprojects" / "benchmarks"
+        if not root.is_dir():
+            return []
+        entries = []
+        for directory in sorted(root.iterdir(), key=lambda path: path.name):
+            safe_directory = self._benchmark_directory(directory.name)
+            if safe_directory is None:
+                continue
+            metadata = self._benchmark_metadata(safe_directory)
+            if metadata is not None:
+                entries.append(metadata)
+        return entries
+
+    def list_tools(self, name: str | None = None) -> list[dict[str, Any]]:
+        """List installed tools without invoking the host CLI or a shell."""
+
+        root = self.crucible_home / "subprojects" / "tools"
+        if not root.is_dir():
+            return []
+        repository_root = self.crucible_home / "repos"
+        entries = []
+        for directory in sorted(root.iterdir(), key=lambda path: path.name):
+            if not directory.is_dir():
+                continue
+            try:
+                resolved = directory.resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            if not (
+                self._under_managed_root(resolved, root)
+                or self._under_managed_root(resolved, repository_root)
+            ):
+                continue
+            try:
+                rickshaw = json.loads(
+                    (directory / "rickshaw.json").read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError):
+                continue
+            tool_name = rickshaw.get("tool") if isinstance(rickshaw, dict) else None
+            if not isinstance(tool_name, str) or (name is not None and tool_name != name):
+                continue
+            metadata: dict[str, Any] = {}
+            metadata_path = directory / "tool-metadata.json"
+            if metadata_path.is_file():
+                try:
+                    loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        metadata = loaded
+                except (OSError, json.JSONDecodeError):
+                    pass
+            entries.append(
+                {
+                    "name": tool_name,
+                    "description": metadata.get("description"),
+                    "metadata": metadata,
+                }
+            )
+        return entries
+
+    def list_indexed_results(
+        self,
+        *,
+        run: str | None = None,
+        name: str | None = None,
+        email: str | None = None,
+        harness: str | None = None,
+        benchmark: str | None = None,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        """List historical run IDs through the read-only CDM API."""
+
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        filters = {
+            key: value
+            for key, value in {
+                "run": run,
+                "name": name,
+                "email": email,
+                "harness": harness,
+                "benchmark": benchmark,
+            }.items()
+            if value is not None
+        }
+        query = f"?{urlencode(filters)}" if filters else ""
+        payload = self._cdm_request(f"/api/v1/runs{query}")
+        run_ids = payload.get("runIds") if isinstance(payload, dict) else None
+        if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
+            raise OperationError(
+                "framework", "CDM result search returned an invalid response", "invalid_result_response"
+            )
+        return {"run_ids": run_ids[:limit], "count": min(len(run_ids), limit)}
+
+    def get_indexed_result(self, run: str) -> dict[str, Any]:
+        """Return structured metadata for one historical CDM run."""
+
+        self._require_text(run, "run")
+        encoded_run = quote(run, safe="")
+        matches = self.list_indexed_results(run=run, limit=1)["run_ids"]
+        if not matches:
+            raise OperationError("user", f"unknown result run: {run}", "not_found")
+        prefix = f"/api/v1/run/{encoded_run}"
+        return {
+            "run_id": run,
+            "tags": self._cdm_request(f"{prefix}/tags").get("tags", []),
+            "benchmark": self._cdm_request(f"{prefix}/benchmark").get("benchmark"),
+            "partial_status": self._cdm_request(f"{prefix}/partial-status"),
+            "iterations": self._cdm_request(f"{prefix}/iterations").get("iterations", []),
+            "metric_sources": self._cdm_request(f"{prefix}/metric-sources").get("sources", []),
+            "periods": self.list_indexed_periods(run)["periods"],
+        }
+
+    def list_indexed_periods(self, run: str) -> dict[str, Any]:
+        """List every primary period and sample associated with a run."""
+
+        self._require_text(run, "run")
+        encoded_run = quote(run, safe="")
+        prefix = f"/api/v1/run/{encoded_run}"
+        iterations = self._cdm_request(f"{prefix}/iterations").get("iterations", [])
+        if not isinstance(iterations, list) or not all(isinstance(item, str) for item in iterations):
+            raise OperationError("framework", "CDM returned invalid iteration data", "invalid_result_response")
+        if not iterations:
+            return {"run_id": run, "periods": []}
+
+        def post(path: str, body: dict[str, Any]) -> dict[str, Any]:
+            return self._cdm_request(path, method="POST", body=body)
+
+        samples = post(f"{prefix}/iterations/samples", {"iterations": iterations}).get("samples", [])
+        statuses = post(f"{prefix}/samples/statuses", {"sampleIds": samples}).get("statuses", [])
+        period_names = post(
+            f"{prefix}/iterations/primary-period-name", {"iterations": iterations}
+        ).get("periodNames", [])
+        period_ids = post(
+            f"{prefix}/samples/primary-period-id",
+            {"sampleIds": samples, "periodNames": period_names},
+        ).get("periodIds", [])
+        ranges = post(f"{prefix}/periods/range", {"periodIds": period_ids}).get("ranges", [])
+
+        periods = []
+        for iteration_index, iteration_id in enumerate(iterations):
+            iteration_samples = samples[iteration_index] if iteration_index < len(samples) else []
+            iteration_statuses = statuses[iteration_index] if iteration_index < len(statuses) else []
+            iteration_period_ids = period_ids[iteration_index] if iteration_index < len(period_ids) else []
+            iteration_ranges = ranges[iteration_index] if iteration_index < len(ranges) else []
+            for sample_index, period_id in enumerate(iteration_period_ids):
+                if not isinstance(period_id, str) or not period_id:
+                    continue
+                period_range = iteration_ranges[sample_index] if sample_index < len(iteration_ranges) else {}
+                periods.append(
+                    {
+                        "iteration_id": iteration_id,
+                        "sample_id": iteration_samples[sample_index]
+                        if sample_index < len(iteration_samples)
+                        else None,
+                        "primary_period_id": period_id,
+                        "status": iteration_statuses[sample_index]
+                        if sample_index < len(iteration_statuses)
+                        else None,
+                        "begin": period_range.get("begin") if isinstance(period_range, dict) else None,
+                        "end": period_range.get("end") if isinstance(period_range, dict) else None,
+                    }
+                )
+        return {"run_id": run, "periods": periods}
+
+    def get_indexed_metric(
+        self,
+        *,
+        run: str,
+        source: str,
+        metric_type: str,
+        period: str | None = None,
+        begin: int | None = None,
+        end: int | None = None,
+        resolution: int = 1,
+        breakout: list[str] | None = None,
+        filter: str | None = None,
+        aggregation: str | None = None,
+        distribution_stats: str | None = None,
+        allow_incompatible_aggregation: bool = False,
+    ) -> dict[str, Any]:
+        """Query bounded metric data through the CDM API."""
+
+        for value, label in ((run, "run"), (source, "source"), (metric_type, "type")):
+            self._require_text(value, label)
+        if period is None and (begin is None or end is None):
+            raise OperationError("user", "provide period or both begin and end", "invalid_metric_range")
+        if resolution < 1 or resolution > 100_000:
+            raise OperationError("user", "resolution is outside configured bounds", "invalid_resolution")
+        body: dict[str, Any] = {
+            "run": run,
+            "source": source,
+            "type": metric_type,
+            "resolution": resolution,
+            "breakout": breakout or [],
+            "allow-incompatible-aggregation": allow_incompatible_aggregation,
+        }
+        optional_fields = {
+            "period": period,
+            "begin": begin,
+            "end": end,
+            "filter": filter,
+            "aggregation": aggregation,
+            "distribution-stats": distribution_stats,
+        }
+        body.update({key: value for key, value in optional_fields.items() if value is not None})
+        return self._cdm_request("/api/v1/metric-data", method="POST", body=body)
+
+    def list_log_sessions(self, limit: int = 100) -> dict[str, Any]:
+        """List recent Crucible logger sessions without reading log contents."""
+
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        if limit < 1 or limit > 1000:
+            raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT sessions.session_id, sessions.timestamp,
+                           sources.source, commands.command,
+                           COUNT(lines.id) AS line_count
+                    FROM sessions
+                    JOIN sources ON sources.id = sessions.source
+                    JOIN commands ON commands.id = sessions.command
+                    LEFT JOIN lines ON lines.session = sessions.id
+                    GROUP BY sessions.id
+                    ORDER BY sessions.timestamp DESC LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        return {
+            "sessions": [
+                {
+                    "session_id": row[0],
+                    "timestamp": row[1],
+                    "source": row[2],
+                    "command": row[3],
+                    "line_count": row[4],
+                }
+                for row in rows
+            ]
+        }
+
+    def get_log_info(self) -> dict[str, Any]:
+        """Return aggregate logger database information."""
+
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                sessions = connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                lines = connection.execute("SELECT COUNT(*) FROM lines").fetchone()[0]
+                sources = connection.execute("SELECT COUNT(*) FROM sources").fetchone()[0]
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        return {"sessions": sessions, "lines": lines, "sources": sources}
+
+    def get_log_session(
+        self,
+        session_id: str,
+        offset: int = 0,
+        limit: int = 1000,
+        stream: str | None = None,
+        grep: str | None = None,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Return a bounded, structured slice of one logger session."""
+
+        self._require_text(session_id, "session_id")
+        if offset < 0 or limit < 1 or limit > 10000:
+            raise OperationError("user", "offset must be nonnegative and limit must be 1..10000", "invalid_bounds")
+        if stream is not None and stream not in {"stdout", "stderr"}:
+            raise OperationError("user", "stream must be stdout or stderr", "invalid_stream")
+        pattern = None
+        if grep is not None:
+            pattern = self._compile_log_pattern(grep, "grep")
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                metadata = connection.execute(
+                    """SELECT sessions.timestamp, sources.source, commands.command
+                       FROM sessions JOIN sources ON sources.id = sessions.source
+                       JOIN commands ON commands.id = sessions.command
+                       WHERE sessions.session_id = ?""",
+                    (session_id,),
+                ).fetchone()
+                if metadata is None:
+                    raise OperationError("user", f"unknown log session: {session_id}", "not_found")
+                query = """SELECT lines.timestamp, streams.stream, lines.line
+                           FROM sessions JOIN lines ON lines.session = sessions.id
+                           JOIN streams ON streams.id = lines.stream
+                           WHERE sessions.session_id = ?"""
+                params: list[Any] = [session_id]
+                if stream is not None:
+                    query += " AND streams.stream = ?"
+                    params.append(stream.upper())
+                query += " ORDER BY lines.id"
+                rows = connection.execute(query, params)
+                lines = []
+                matched = 0
+                response_bytes = 0
+                complete = True
+                for timestamp, line_stream, line in rows:
+                    line = line or ""
+                    if pattern is not None and pattern.search(line) is None:
+                        continue
+                    if matched < offset:
+                        matched += 1
+                        continue
+                    if len(lines) >= limit:
+                        complete = False
+                        break
+                    candidate = {"timestamp": timestamp, "stream": line_stream, "line": line}
+                    candidate_bytes = len(json.dumps(candidate, separators=(",", ":")).encode("utf-8"))
+                    if response_bytes + candidate_bytes > MAX_LOG_RESPONSE_BYTES:
+                        if not lines:
+                            raise OperationError(
+                                "framework",
+                                "log response contains a line larger than the response limit",
+                                "result_too_large",
+                            )
+                        complete = False
+                        break
+                    lines.append(candidate)
+                    response_bytes += candidate_bytes
+                    matched += 1
+        except OperationError:
+            raise
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        def build_session_result(selected: list[dict[str, Any]], result_complete: bool) -> dict[str, Any]:
+            return {
+                "session_id": session_id,
+                "timestamp": metadata[0],
+                "source": metadata[1],
+                "command": metadata[2],
+                "offset": offset,
+                "next_offset": offset + len(selected),
+                "complete": result_complete,
+                "lines": selected,
+            }
+
+        lines, trimmed = self._bound_log_items(lines, build_session_result, complete, request_id)
+        return {
+            **build_session_result(lines, complete and not trimmed),
+        }
+
+    def search_logs(
+        self,
+        query: str,
+        session_id: str | None = None,
+        stream: str | None = None,
+        offset: int = 0,
+        limit: int = 1000,
+        since: float | None = None,
+        until: float | None = None,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Search logger lines with bounded, structured results."""
+
+        if not isinstance(query, str) or not query or len(query) > 256:
+            raise OperationError("user", "query must be 1..256 characters", "invalid_query")
+        pattern = self._compile_log_pattern(query, "query")
+        if offset < 0 or limit < 1 or limit > 10000:
+            raise OperationError("user", "offset must be nonnegative and limit must be 1..10000", "invalid_bounds")
+        if stream is not None and stream not in {"stdout", "stderr"}:
+            raise OperationError("user", "stream must be stdout or stderr", "invalid_stream")
+        if self.log_db is None:
+            raise OperationError("framework", "log database is not configured", "log_unavailable")
+        try:
+            with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
+                sql = """SELECT sessions.session_id, lines.timestamp, streams.stream,
+                                 lines.line, sources.source, commands.command
+                          FROM sessions JOIN lines ON lines.session = sessions.id
+                          JOIN streams ON streams.id = lines.stream
+                          JOIN sources ON sources.id = sessions.source
+                          JOIN commands ON commands.id = sessions.command
+                          WHERE 1 = 1"""
+                params: list[Any] = []
+                if session_id is not None:
+                    self._require_text(session_id, "session_id")
+                    sql += " AND sessions.session_id = ?"
+                    params.append(session_id)
+                if stream is not None:
+                    sql += " AND streams.stream = ?"
+                    params.append(stream.upper())
+                if since is not None:
+                    sql += " AND lines.timestamp >= ?"
+                    params.append(since)
+                if until is not None:
+                    sql += " AND lines.timestamp <= ?"
+                    params.append(until)
+                sql += " ORDER BY lines.id"
+                matches = []
+                matched = 0
+                response_bytes = 0
+                complete = True
+                for row in connection.execute(sql, params):
+                    line = row[3] or ""
+                    if pattern.search(line) is None:
+                        continue
+                    if matched < offset:
+                        matched += 1
+                        continue
+                    if len(matches) >= limit:
+                        complete = False
+                        break
+                    candidate = {
+                        "session_id": row[0], "timestamp": row[1],
+                        "stream": row[2], "line": line,
+                        "source": row[4], "command": row[5],
+                    }
+                    candidate_bytes = len(json.dumps(candidate, separators=(",", ":")).encode("utf-8"))
+                    if response_bytes + candidate_bytes > MAX_LOG_RESPONSE_BYTES:
+                        if not matches:
+                            raise OperationError(
+                                "framework",
+                                "log response contains a line larger than the response limit",
+                                "result_too_large",
+                            )
+                        complete = False
+                        break
+                    matches.append(candidate)
+                    response_bytes += candidate_bytes
+                    matched += 1
+        except OperationError:
+            raise
+        except sqlite3.Error as exc:
+            raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
+        def build_search_result(selected: list[dict[str, Any]], result_complete: bool) -> dict[str, Any]:
+            return {
+                "query": query,
+                "offset": offset,
+                "next_offset": offset + len(selected),
+                "complete": result_complete,
+                "matches": selected,
+            }
+
+        matches, trimmed = self._bound_log_items(matches, build_search_result, complete, request_id)
+        return {
+            **build_search_result(matches, complete and not trimmed),
+        }
+
+    @staticmethod
+    def _compile_log_pattern(value: str, name: str) -> re.Pattern[str]:
+        """Compile a regular-expression subset with bounded matching work."""
+
+        if len(value) > 256:
+            raise OperationError("user", f"{name} pattern is too long", f"invalid_{name}")
+        escaped = False
+        in_character_class = False
+        for character in value:
+            if escaped:
+                escaped = False
+                continue
+            if character == "\\":
+                escaped = True
+                continue
+            if character == "[":
+                in_character_class = True
+                continue
+            if character == "]" and in_character_class:
+                in_character_class = False
+                continue
+            if not in_character_class and character in "*+?{|()":
+                raise OperationError(
+                    "user",
+                    f"{name} pattern grouping and alternation operators are not supported",
+                    f"invalid_{name}",
+                )
+        try:
+            return re.compile(value)
+        except re.error as exc:
+            raise OperationError("user", f"{name} pattern is invalid", f"invalid_{name}") from exc
+
+    @staticmethod
+    def _mcp_response_size(value: dict[str, Any], request_id: Any = None) -> int:
+        text = json.dumps(value)
+        payload = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "content": [{"type": "text", "text": text}],
+                "structuredContent": value,
+            },
+        }
+        return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+    @classmethod
+    def _bound_log_items(
+        cls,
+        items: list[dict[str, Any]],
+        build: Any,
+        complete: bool,
+        request_id: Any = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        if cls._mcp_response_size(build(items, complete), request_id) <= MAX_LOG_RESPONSE_BYTES:
+            return items, False
+        if not items:
+            raise OperationError(
+                "framework", "log response exceeds size limit", "result_too_large"
+            )
+        low, high = 0, len(items)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if cls._mcp_response_size(build(items[:middle], False), request_id) <= MAX_LOG_RESPONSE_BYTES:
+                low = middle
+            else:
+                high = middle - 1
+        if low == 0:
+            raise OperationError(
+                "framework",
+                "log response contains a line larger than the response limit",
+                "result_too_large",
+            )
+        return items[:low], True
+
+    def _cdm_request(
+        self, path: str, *, method: str = "GET", body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        encoded = None if body is None else json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"} if encoded is not None else {}
+        request = Request(f"{self.cdm_base_url}{path}", data=encoded, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=10) as response:
+                raw = response.read(2_097_153)
+            if len(raw) > 2_097_152:
+                raise OperationError("framework", "CDM response exceeds size limit", "result_too_large")
+            payload = json.loads(raw.decode("utf-8"))
+        except OperationError:
+            raise
+        except (OSError, URLError, json.JSONDecodeError) as exc:
+            raise OperationError("framework", "CDM query is unavailable", "result_query_failed") from exc
+        if not isinstance(payload, dict):
+            raise OperationError("framework", "CDM query returned an invalid response", "invalid_result_response")
+        return payload
+
+    @staticmethod
+    def _require_text(value: Any, label: str) -> None:
+        if not isinstance(value, str) or not value:
+            raise OperationError("user", f"{label} is required", "missing_argument")
+
+    def describe_benchmark(self, name: str) -> dict[str, Any]:
+        directory = self._benchmark_directory(name)
+        if directory is None:
+            raise OperationError("user", "benchmark name is invalid", "invalid_name")
+        if not directory.exists():
+            raise OperationError("user", f"unknown benchmark: {name}", "not_found")
+        metadata = self._benchmark_metadata(directory)
+        if metadata is None:
+            raise OperationError("framework", f"benchmark metadata is unavailable: {name}")
+        return metadata
+
+    def validate_run(self, document: Any) -> dict[str, Any]:
+        if not isinstance(document, dict):
+            raise OperationError("user", "run document must be a JSON object", "invalid_json")
+        schema_path = self.crucible_home / "subprojects" / "core" / "rickshaw" / "schema" / "run-file.json"
+        try:
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OperationError("framework", "run-file schema is unavailable") from exc
+
+        validator = Draft201909Validator(schema)
+        errors = sorted(validator.iter_errors(document), key=lambda error: list(error.path))
+        benchmark_errors = []
+        benchmarks = document.get("benchmarks", [])
+        if isinstance(benchmarks, list):
+            for benchmark in benchmarks:
+                name = benchmark.get("name") if isinstance(benchmark, dict) else None
+                if not isinstance(name, str) or self._benchmark_directory(name) is None:
+                    benchmark_errors.append(f"benchmark is not installed: {name!r}")
+
+        messages = [self._format_validation_error(error) for error in errors]
+        messages.extend(benchmark_errors)
+        return {"valid": not messages, "errors": messages}
+
+    def validate_run_file(self, path: Path) -> dict[str, Any]:
+        try:
+            canonical = self.input_policy.canonical_input(path)
+            document = json.loads(canonical.read_text(encoding="utf-8"))
+        except PolicyError as exc:
+            raise OperationError("authorization", str(exc), "input_path_rejected") from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OperationError("user", "run-file is not valid JSON", "invalid_json") from exc
+        return self.validate_run(document)
+
+    def _benchmark_directory(self, name: str) -> Path | None:
+        """Resolve a benchmark name without allowing filesystem escapes.
+
+        Active benchmark entries are symlinks into Crucible's managed
+        ``repos`` clones, so both the logical benchmark root and that clone
+        root are approved after resolution.  Arbitrary symlink targets are
+        rejected.
+        """
+
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            return None
+        benchmark_root = self.crucible_home / "subprojects" / "benchmarks"
+        candidate = benchmark_root / name
+        try:
+            resolved = candidate.resolve(strict=True)
+        except FileNotFoundError:
+            return None
+        approved_roots = (
+            benchmark_root.resolve(),
+            (self.crucible_home / "repos").resolve(),
+        )
+        if not any(root == resolved or root in resolved.parents for root in approved_roots):
+            return None
+        if not resolved.is_dir():
+            return None
+        return candidate
+
+    @staticmethod
+    def _under_managed_root(candidate: Path, root: Path) -> bool:
+        resolved_root = root.resolve()
+        return candidate == resolved_root or resolved_root in candidate.parents
+
+    def _benchmark_metadata(self, directory: Path) -> dict[str, Any] | None:
+        rickshaw_path = directory / "rickshaw.json"
+        if not rickshaw_path.is_file():
+            return None
+        try:
+            rickshaw = json.loads(rickshaw_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        name = rickshaw.get("benchmark")
+        if not isinstance(name, str):
+            return None
+        result: dict[str, Any] = {"name": name, "description": None, "metadata": {}}
+        metadata_path = directory / "benchmark-metadata.json"
+        if metadata_path.is_file():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                metadata = {}
+            if isinstance(metadata, dict):
+                result["description"] = metadata.get("description")
+                result["metadata"] = metadata
+        return result
+
+    @staticmethod
+    def _format_validation_error(error: Any) -> str:
+        path = ".".join(str(item) for item in error.path)
+        return f"{path}: {error.message}" if path else error.message
