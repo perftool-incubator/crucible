@@ -70,6 +70,81 @@ class TestCrucibleOperations(unittest.TestCase):
         )
         self.assertEqual(self.operations.list_tools("missing"), [])
 
+    def test_list_endpoints_returns_safe_metadata_and_capabilities(self):
+        endpoints = self.root / "subprojects" / "core" / "rickshaw" / "endpoints"
+        schemas = self.root / "subprojects" / "core" / "rickshaw" / "schema"
+        endpoint = endpoints / "remotehosts"
+        endpoint.mkdir(parents=True)
+        (endpoint / "remotehosts.py").write_text(
+            "def validate():\n    pass\n\ndef engine_init():\n    pass\n\ndef test_start():\n    pass\n\ndef test_stop():\n    pass\n\ndef remote_cleanup():\n    pass\n",
+            encoding="utf-8",
+        )
+        (schemas / "remotehosts.json").write_text(
+            json.dumps({
+                "title": "Remotehosts Endpoint",
+                "description": "Deploy engines over SSH.",
+                "properties": {"hosts": {}, "user": {}},
+            }),
+            encoding="utf-8",
+        )
+        (endpoints / "not-an-endpoint").mkdir()
+        (endpoints / "not-an-endpoint" / "not-an-endpoint.py").write_bytes(b"\xff")
+        shell_endpoint = endpoints / "shell"
+        shell_endpoint.mkdir()
+        (shell_endpoint / "shell").write_text(
+            "#!/bin/sh\n"
+            "do_validate=0\n"
+            "function endpoint_shell_engine_init() { :; }\n"
+            "function endpoint_shell_test_start() { :; }\n"
+            "function endpoint_shell_test_stop() { :; }\n"
+            "function endpoint_shell_cleanup() { :; }\n",
+            encoding="utf-8",
+        )
+        (schemas / "shell.json").write_text("[]", encoding="utf-8")
+        missing_schema = endpoints / "missing-schema"
+        missing_schema.mkdir()
+        (missing_schema / "missing-schema.py").write_text(
+            "def validate():\n    pass\n", encoding="utf-8"
+        )
+
+        result = self.operations.list_endpoints()
+
+        self.assertEqual(result["count"], 4)
+        self.assertFalse(result["complete"])
+        remotehosts = next(item for item in result["endpoints"] if item["name"] == "remotehosts")
+        self.assertEqual(
+            remotehosts["implementation"],
+            "subprojects/core/rickshaw/endpoints/remotehosts/remotehosts.py",
+        )
+        self.assertEqual(
+            remotehosts["schema"],
+            {
+                "path": "subprojects/core/rickshaw/schema/remotehosts.json",
+                "title": "Remotehosts Endpoint",
+                "description": "Deploy engines over SSH.",
+                "properties": ["hosts", "user"],
+            },
+        )
+        self.assertEqual(
+            remotehosts["capabilities"],
+            ["validate", "engine_deployment", "test_lifecycle", "cleanup"],
+        )
+        shell = next(item for item in result["endpoints"] if item["name"] == "shell")
+        self.assertEqual(
+            shell["implementation"],
+            "subprojects/core/rickshaw/endpoints/shell/shell",
+        )
+        self.assertIsNone(shell["schema"])
+        self.assertEqual(
+            shell["capabilities"],
+            ["validate", "engine_deployment", "test_lifecycle", "cleanup"],
+        )
+        broken = next(item for item in result["endpoints"] if item["name"] == "not-an-endpoint")
+        self.assertEqual(broken["capabilities"], [])
+        missing = next(item for item in result["endpoints"] if item["name"] == "missing-schema")
+        self.assertIsNone(missing["schema"])
+        self.assertEqual(missing["capabilities"], ["validate"])
+
     def test_list_indexed_results_queries_cdm_with_bounded_filters(self):
         response = Mock()
         response.__enter__ = lambda value: response

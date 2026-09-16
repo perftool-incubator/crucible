@@ -28,6 +28,13 @@ MAX_ARTIFACT_DIRECTORY_DEPTH = 64
 MAX_ARTIFACT_METADATA_BYTES = 262_144
 MAX_ARTIFACT_READ_BYTES = 131_072
 MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
+MAX_ENDPOINT_COUNT = 100
+MAX_ENDPOINT_SCHEMA_BYTES = 262_144
+MAX_ENDPOINT_MODULE_BYTES = 1_048_576
+MAX_ENDPOINT_SCHEMA_PROPERTIES = 100
+MAX_ENDPOINT_DESCRIPTION_CHARS = 1024
+MAX_ENDPOINT_PROPERTY_NAME_CHARS = 128
+MAX_ENDPOINT_TITLE_CHARS = 256
 
 _ARTIFACT_ROOTS = (
     "run/iterations",
@@ -150,6 +157,7 @@ class CrucibleOperations:
                 "list_benchmarks",
                 "describe_benchmark",
                 "list_tools",
+                "list_endpoints",
                 "list_local_runs",
                 "get_local_run_summary",
                 "get_local_run_metadata",
@@ -1042,6 +1050,196 @@ class CrucibleOperations:
                 }
             )
         return entries
+
+    def list_endpoints(self) -> dict[str, Any]:
+        """List installed endpoint implementations and their schemas."""
+
+        endpoint_root = self.crucible_home / "subprojects" / "core" / "rickshaw" / "endpoints"
+        schema_root = self.crucible_home / "subprojects" / "core" / "rickshaw" / "schema"
+        try:
+            endpoint_root_resolved = endpoint_root.resolve(strict=True)
+            schema_root_resolved = schema_root.resolve(strict=True)
+        except OSError as exc:
+            raise OperationError(
+                "framework", "endpoint discovery is unavailable", "discovery_unavailable"
+            ) from exc
+        if not endpoint_root_resolved.is_dir() or not schema_root_resolved.is_dir():
+            return {"endpoints": [], "count": 0, "complete": True}
+
+        entries: list[dict[str, Any]] = []
+        complete = True
+        try:
+            with os.scandir(endpoint_root_resolved) as candidates:
+                for candidate in candidates:
+                    try:
+                        if candidate.is_symlink() or not candidate.is_dir(follow_symlinks=False):
+                            continue
+                        directory = Path(candidate.path)
+                        module_path = directory / f"{candidate.name}.py"
+                        if module_path.is_symlink() or not module_path.is_file():
+                            module_path = directory / candidate.name
+                            if module_path.is_symlink() or not module_path.is_file():
+                                continue
+                        module_resolved = module_path.resolve(strict=True)
+                        if not self._under_managed_root(module_resolved, endpoint_root_resolved):
+                            continue
+                    except OSError:
+                        complete = False
+                        continue
+                    if len(entries) >= MAX_ENDPOINT_COUNT:
+                        complete = False
+                        break
+
+                    schema_info: dict[str, Any] | None = None
+                    schema_logical = (
+                        self.crucible_home
+                        / "subprojects"
+                        / "core"
+                        / "rickshaw"
+                        / "schema"
+                        / f"{candidate.name}.json"
+                    )
+                    schema_path = schema_root_resolved / f"{candidate.name}.json"
+                    try:
+                        if schema_path.is_symlink() or not schema_path.is_file():
+                            schema_path = None
+                            complete = False
+                        else:
+                            schema_resolved = schema_path.resolve(strict=True)
+                            if not self._under_managed_root(schema_resolved, schema_root_resolved):
+                                schema_path = None
+                                complete = False
+                    except OSError:
+                        schema_path = None
+                        complete = False
+                    if schema_path is not None:
+                        try:
+                            schema = json.loads(
+                                self._read_bounded_utf8(schema_path, MAX_ENDPOINT_SCHEMA_BYTES)
+                            )
+                            if not isinstance(schema, dict):
+                                complete = False
+                            else:
+                                properties = schema.get("properties", {})
+                                property_names = sorted(properties) if isinstance(properties, dict) else []
+                                if len(property_names) > MAX_ENDPOINT_SCHEMA_PROPERTIES:
+                                    property_names = property_names[:MAX_ENDPOINT_SCHEMA_PROPERTIES]
+                                    complete = False
+                                if any(
+                                    len(name) > MAX_ENDPOINT_PROPERTY_NAME_CHARS
+                                    for name in property_names
+                                ):
+                                    property_names = [
+                                        name[:MAX_ENDPOINT_PROPERTY_NAME_CHARS]
+                                        for name in property_names
+                                    ]
+                                    complete = False
+                                description = schema.get("description")
+                                if isinstance(description, str):
+                                    description = description[:MAX_ENDPOINT_DESCRIPTION_CHARS]
+                                else:
+                                    description = None
+                                title = schema.get("title")
+                                if isinstance(title, str):
+                                    title = title[:MAX_ENDPOINT_TITLE_CHARS]
+                                else:
+                                    title = None
+                                schema_info = {
+                                    "path": self._relative_crucible_path(schema_logical),
+                                    "title": title,
+                                    "description": description,
+                                    "properties": property_names,
+                                }
+                        except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+                            complete = False
+
+                    capabilities, capabilities_complete = self._endpoint_capabilities(module_resolved)
+                    if not capabilities_complete:
+                        complete = False
+                    entries.append(
+                        {
+                            "name": candidate.name,
+                            "implementation": self._relative_crucible_path(
+                                self.crucible_home
+                                / "subprojects"
+                                / "core"
+                                / "rickshaw"
+                                / "endpoints"
+                                / candidate.name
+                                / module_path.name
+                            ),
+                            "schema": schema_info,
+                            "capabilities": capabilities,
+                        }
+                    )
+        except OSError as exc:
+            raise OperationError(
+                "framework", "endpoint discovery is unavailable", "discovery_unavailable"
+            ) from exc
+        entries.sort(key=lambda entry: entry["name"])
+        return {"endpoints": entries, "count": len(entries), "complete": complete}
+
+    def _endpoint_capabilities(self, module_path: Path) -> tuple[list[str], bool]:
+        """Infer only coarse capabilities from trusted endpoint source markers."""
+
+        try:
+            source = self._read_bounded_utf8(module_path, MAX_ENDPOINT_MODULE_BYTES)
+        except (OSError, UnicodeDecodeError, ValueError):
+            return [], False
+        python_functions = set(
+            re.findall(r"^def ([A-Za-z_][A-Za-z0-9_]*)\s*\(", source, re.MULTILINE)
+        )
+        shell_functions = set(
+            re.findall(
+                r"^(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*\{",
+                source,
+                re.MULTILINE,
+            )
+        )
+        functions = python_functions | shell_functions
+        capabilities: list[str] = []
+        # The legacy shell OSP endpoint uses the shared ``do_validate`` flag
+        # instead of exposing a function named ``validate``.
+        if (
+            "validate" in functions
+            or any(name.endswith("_validate") for name in functions)
+            or re.search(r"\bdo_validate\b", source)
+        ):
+            capabilities.append("validate")
+        if "engine_init" in functions or any(
+            name.endswith("_engine_init") for name in functions
+        ):
+            capabilities.append("engine_deployment")
+        if (
+            {"test_start", "test_stop"}.issubset(functions)
+            or any(name.endswith("_test_start") for name in functions)
+            and any(name.endswith("_test_stop") for name in functions)
+        ):
+            capabilities.append("test_lifecycle")
+        if any(name.endswith("_cleanup") or name == "cleanup" for name in functions):
+            capabilities.append("cleanup")
+        return capabilities, True
+
+    @staticmethod
+    def _read_bounded_utf8(path: Path, max_bytes: int) -> str:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = None
+                encoded = stream.read(max_bytes + 1)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        if len(encoded) > max_bytes:
+            raise ValueError("endpoint metadata exceeds size limit")
+        return encoded.decode("utf-8")
+
+    def _relative_crucible_path(self, path: Path) -> str:
+        try:
+            return path.relative_to(self.crucible_home).as_posix()
+        except ValueError:
+            return path.as_posix()
 
     def list_indexed_results(
         self,

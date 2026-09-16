@@ -132,7 +132,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("inputSchema", tools["get_run_logs"])
         for tool_name in (
-            "list_tools", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
+            "list_tools", "list_endpoints", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
             "list_run_artifacts", "get_run_artifact", "list_local_archives",
             "archive_local_run", "unarchive_local_run", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
@@ -143,6 +143,15 @@ class TestServer(unittest.TestCase):
         ):
             self.assertIn(tool_name, tools)
             self.assertIn("inputSchema", tools[tool_name])
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "list_endpoints", "arguments": {}},
+        })
+        _, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertIn("endpoints", payload["result"]["structuredContent"])
 
     def test_documentation_resources_are_curated_and_readable(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 11, "method": "resources/list"})
@@ -310,6 +319,7 @@ class TestServer(unittest.TestCase):
         self.assertIn("start_run", info["capabilities"])
         self.assertIn("get_run_logs", info["capabilities"])
         self.assertIn("get_run_summary", info["capabilities"])
+        self.assertIn("list_endpoints", info["capabilities"])
         self.assertIn("archive_local_run", info["capabilities"])
         self.assertIn("unarchive_local_run", info["capabilities"])
         self.assertIn("list_run_artifacts", info["capabilities"])

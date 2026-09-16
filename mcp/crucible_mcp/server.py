@@ -46,6 +46,7 @@ TOOL_NAMES = (
     "get_log_session",
     "search_logs",
     "describe_benchmark",
+    "list_endpoints",
     "validate_run",
     "start_run",
     "get_run_status",
@@ -71,6 +72,11 @@ TOOL_DEFINITIONS = (
             "properties": {"name": {"type": "string", "minLength": 1}},
             "additionalProperties": False,
         },
+    },
+    {
+        "name": "list_endpoints",
+        "description": "List installed endpoint implementations, schemas, and coarse capabilities.",
+        "inputSchema": _EMPTY_INPUT,
     },
     {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
     {
@@ -719,6 +725,8 @@ class MCPHandler(BaseHTTPRequestHandler):
                 value = self.server.operations.crucible_info()
             elif name == "list_tools":
                 value = {"tools": self.server.operations.list_tools(arguments.get("name"))}
+            elif name == "list_endpoints":
+                value = self.server.operations.list_endpoints()
             elif name == "list_benchmarks":
                 value = {"benchmarks": self.server.operations.list_benchmarks()}
             elif name == "list_local_runs":

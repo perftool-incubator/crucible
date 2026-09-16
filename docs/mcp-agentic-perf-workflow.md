@@ -66,12 +66,16 @@ Select a benchmark from the returned list before requesting its details:
 
 ```text
 benchmarks = call_tool("list_benchmarks", {})
+endpoints = call_tool("list_endpoints", {})
 if not benchmarks["benchmarks"]:
     stop and report "no installed benchmarks"
+if not endpoints["endpoints"]:
+    stop and report "no installed endpoints"
 
 benchmark_name = choose_benchmark(benchmarks["benchmarks"], requested_benchmark)
 benchmark = call_tool("describe_benchmark", {"name": benchmark_name})
 tools = call_tool("list_tools", {})
+endpoint = choose_endpoint(endpoints["endpoints"], requested_endpoint)
 ```
 
 Use the returned metadata to choose a benchmark and construct its parameters.
@@ -86,7 +90,9 @@ configuration, and the ticket's requested workload. Prefer inline JSON for a
 small document:
 
 ```text
-run_document = construct_run_from_ticket_and_crucible_docs(ticket, resources)
+run_document = construct_run_from_ticket_and_crucible_docs(
+    ticket, resources, benchmark, endpoint, tools
+)
 
 validation = call_tool("validate_run", {
     "document": run_document
