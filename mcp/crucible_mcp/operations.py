@@ -28,6 +28,11 @@ MAX_ARTIFACT_DIRECTORY_DEPTH = 64
 MAX_ARTIFACT_METADATA_BYTES = 262_144
 MAX_ARTIFACT_READ_BYTES = 131_072
 MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
+MAX_METADATA_RESPONSE_BYTES = 1_048_576
+# XZ preset 9 uses a 64 MiB dictionary and needs additional decoder memory;
+# keep the decompressed-output bound separate so valid high-preset metadata is
+# accepted without allowing an unbounded expansion.
+MAX_METADATA_DECOMPRESSOR_MEMORY = 128 * 1_048_576
 MAX_ENDPOINT_COUNT = 100
 MAX_ENDPOINT_SCHEMA_BYTES = 262_144
 MAX_ENDPOINT_MODULE_BYTES = 1_048_576
@@ -35,6 +40,9 @@ MAX_ENDPOINT_SCHEMA_PROPERTIES = 100
 MAX_ENDPOINT_DESCRIPTION_CHARS = 1024
 MAX_ENDPOINT_PROPERTY_NAME_CHARS = 128
 MAX_ENDPOINT_TITLE_CHARS = 256
+MAX_METADATA_DEPTH = 64
+MAX_METADATA_JSON_FRAGMENTS = 4096
+MAX_METADATA_REDACTION_WORK = 16 * 1024
 
 _ARTIFACT_ROOTS = (
     "run/iterations",
@@ -100,6 +108,255 @@ _SENSITIVE_ARTIFACT_NAMES = {
     "token.yaml",
     "token.yml",
 }
+_SENSITIVE_METADATA_KEY_PARTS = {
+    "auth",
+    "authorization",
+    "credential",
+    "credentials",
+    "creds",
+    "cookie",
+    "passphrase",
+    "pass",
+    "pwd",
+    "password",
+    "private",
+    "secret",
+    "session",
+    "token",
+    "jwt",
+    "bearer",
+}
+_METADATA_SECRET_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_-])(?P<prefix>--?)?"
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_-]*)"
+    r"(?P<separator>\s*[:=]\s*|\s+)"
+)
+_METADATA_SHELL_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_\\'\"-])(?P<prefix>--?)?"
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_\\'\"$-]*)"
+    r"(?P<separator>\s*[:=]\s*|\s+)"
+)
+_METADATA_QUOTED_SHELL_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_\\'\"-])(?P<prefix>--?)"
+    r"(?P<key>(?:\\.|'[^']*'|\"[^\"]*\"|\$'[^']*')"
+    r"[A-Za-z0-9_\\'\"$-]*)"
+    r"(?P<separator>\s*[:=]\s*|\s+)"
+)
+_METADATA_URL_CREDENTIALS = re.compile(
+    r"(?P<prefix>\b[A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@"
+    r"(?=[^/\s]+(?:[/\s]|$))"
+)
+_METADATA_USER_CREDENTIAL_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_-])(?P<prefix>--?)?"
+    r"(?P<key>user(?:name)?)(?P<separator>\s*[:=]\s*|\s+)"
+    r"(?P<user>[^:\s]+):(?P<secret>[^\s;]+)",
+    re.IGNORECASE,
+)
+_METADATA_QUOTED_USER_CREDENTIAL_ASSIGNMENT = re.compile(
+    r"(?P<quote>[\"'])(?P<key>user(?:name)?)(?P=quote)"
+    r"(?P<separator>\s*:\s*)(?P<value_quote>[\"'])"
+    r"(?P<user>[^:'\"\s]+):(?P<secret>[^'\"\s]+)(?P=value_quote)",
+    re.IGNORECASE,
+)
+_METADATA_UNSUPPORTED_SHELL_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_=\-\\$'\"`(){};&|<>])"
+    r"(?:--?[^\s=:{},\[\]]{0,256}|"
+    r"[A-Za-z][^\s=:{},\[\]]{0,256})"
+    r"[\\$'\"`(){};&|<>][^\s=:{},\[\]]{0,256}="
+)
+_METADATA_UNSUPPORTED_SHELL_COMMAND = re.compile(
+    r"(?<![A-Za-z0-9_=\-\\$'\"`(){};&|<>])"
+    r"(?:--?|[A-Za-z])[^=\n]{0,256}\$\([^=\n]{0,256}\)[^=\n]{0,256}="
+)
+_METADATA_UNSUPPORTED_SHELL_OPTION = re.compile(
+    r"(?<![A-Za-z0-9_-])--[^\n]{0,256}"
+    r"(?:\$\([^\n)]{0,256}\)|`[^\n`]{0,256}`)"
+    r"[^\n]{0,256}(?:\s+|:|$)"
+)
+_METADATA_UNSUPPORTED_SHELL_WORD = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:--?|[A-Za-z])[^\n=]{0,256}"
+    r"(?:\$\([^\n)]{0,256}\)|`[^\n`]{0,256}`)"
+    r"[^\n=]{0,256}(?:\s+|:|$)"
+)
+_METADATA_UNSUPPORTED_SHELL_PARAMETER = re.compile(
+    r"(?<![A-Za-z0-9_-])--[^\n=]{0,256}\$\{[^\n}]{0,256}\}"
+    r"[^\n=]{0,256}(?:=|\s+|:)"
+)
+_METADATA_UNSUPPORTED_SHELL_PARAMETER_WORD = re.compile(
+    r"(?<![A-Za-z0-9_-])[A-Za-z][^\n=]{0,256}\$\{[^\n}]{0,256}\}"
+    r"[^\n=]{0,256}(?:=|\s+|:)"
+)
+_METADATA_UNSUPPORTED_ANSI_C_WORD = re.compile(
+    r"(?<![A-Za-z0-9_-])\$'[^'\n]{1,256}'\s+"
+)
+_METADATA_UNSUPPORTED_QUOTED_WORD = re.compile(
+    r"(?<![A-Za-z0-9_-])(?P<quote>[\"'])(?P<word>[^\"'\n]{1,256})"
+    r"(?P=quote)\s+"
+)
+_METADATA_UNSUPPORTED_ASSEMBLED_SHELL_WORD = re.compile(
+    r"(?<![A-Za-z0-9_=\-])(?P<token>[^\s=]{1,256})\s+"
+)
+_METADATA_UNSUPPORTED_COMMAND_ASSEMBLED_WORD = re.compile(
+    r"(?<![A-Za-z0-9_=\-])(?P<token>(?:\$\([^\n)]{1,256}\)|`[^\n`]{1,256}`)"
+    r"[A-Za-z0-9_.-]{1,256})\s+"
+)
+_METADATA_UNSUPPORTED_COMMAND_WORD = re.compile(
+    r"(?<![A-Za-z0-9_-])\$\([^\n)]{1,256}\)\s+"
+)
+_METADATA_PUNCTUATED_OPTION_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_-])(?P<prefix>--?)(?P<key>[A-Za-z][^\s=:]{0,256})"
+    r"(?P<separator>\s*[:=]|\s+)"
+)
+_METADATA_PUNCTUATED_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_={}\[\]\"'])"
+    r"(?P<key>[A-Za-z][^\s=:={}\[\]\"']{0,256})"
+    r"(?P<separator>\s*[:=]|\s+)"
+)
+_METADATA_BRACKETED_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_-])(?P<prefix>--?)?"
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_-]{0,256})"
+    r"\[(?P<index>[^\]\n]{1,256})\]"
+    r"(?P<separator>\s*[:=]\s*)"
+)
+_METADATA_NAME_FIELD_VARIANTS = frozenset(
+    {
+        "arg",
+        "args",
+        "argument",
+        "arguments",
+        "field",
+        "fields",
+        "flag",
+        "flags",
+        "header",
+        "headers",
+        "headername",
+        "headernames",
+        "httpheader",
+        "httpheaders",
+        "key",
+        "keys",
+        "name",
+        "names",
+        "option",
+        "options",
+        "param",
+        "params",
+        "parameter",
+        "parameters",
+        "argname",
+        "fieldname",
+        "flagname",
+        "keyname",
+        "namefield",
+        "optionname",
+        "parametername",
+    }
+)
+_METADATA_AMBIGUOUS_NAME_FIELD_VARIANTS = frozenset(
+    {
+        "arg",
+        "args",
+        "argument",
+        "arguments",
+        "headers",
+        "httpheaders",
+        "params",
+        "parameters",
+    }
+)
+_METADATA_VALUE_FIELD_VARIANTS = frozenset(
+    {
+        "default",
+        "val",
+        "value",
+        "vals",
+        "values",
+        "args",
+        "arguments",
+        "argument",
+        "argvalue",
+        "argvalues",
+        "parametervalue",
+        "parametervalues",
+        "optionvalue",
+        "optionvalues",
+        "flagvalue",
+        "flagvalues",
+    }
+)
+_METADATA_ROOT_FIELD_VARIANTS = frozenset(
+    {
+        "benchmark",
+        "benchmarks",
+        "endpoints",
+        "iterations",
+        "registries",
+        "runid",
+        "samples",
+        "tags",
+        "tools",
+    }
+)
+_METADATA_UNKNOWN_VALUE_FIELD_VARIANTS = frozenset(
+    {"body", "content", "data", "payload", "raw", "result"}
+)
+_METADATA_JSON_SENSITIVE_KEY = re.compile(
+    r"\"(?:auth|authorization|credential|credentials|passphrase|pass|pwd|"
+    r"password|private|secret|token|jwt|bearer)[^\"]*\"\s*:"
+)
+_METADATA_SENSITIVE_TEXT = re.compile(
+    r"(?:auth|authorization|credential|credentials|passphrase|pass|pwd|"
+    r"password|private|secret|token|jwt|bearer|api[_-]?key|access[_-]?key|secret[_-]?key)",
+    re.IGNORECASE,
+)
+_METADATA_QUOTED_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?:\\?[\"'])(?:auth|authorization|credential|credentials|passphrase|"
+    r"pass|pwd|password|private|secret|token|jwt|bearer|api[_-]?key|access[_-]?key|"
+    r"secret[_-]?key)[^\"']*"
+    r"(?:\\?[\"'])\s*[:=]",
+    re.IGNORECASE,
+)
+
+
+def _decode_metadata_unicode_escapes(value: str) -> str:
+    return re.sub(
+        r"\\u([0-9a-fA-F]{4})",
+        lambda match: chr(int(match.group(1), 16)),
+        value,
+    )
+
+
+def _normalize_metadata_shell_key(value: str) -> str:
+    def decode_ansi_c(match: re.Match[str]) -> str:
+        decoded = match.group(1)
+        decoded = re.sub(
+            r"\\x([0-9a-fA-F]{2})",
+            lambda item: chr(int(item.group(1), 16)),
+            decoded,
+        )
+        decoded = re.sub(
+            r"\\u([0-9a-fA-F]{4})",
+            lambda item: chr(int(item.group(1), 16)),
+            decoded,
+        )
+        decoded = re.sub(
+            r"\\([0-7]{1,3})",
+            lambda item: chr(int(item.group(1), 8)),
+            decoded,
+        )
+        return decoded
+
+    value = re.sub(r"\$'([^']*)'", decode_ansi_c, value)
+
+    def decode_command_substitution(match: re.Match[str]) -> str:
+        words = re.findall(r"[A-Za-z0-9_]+", match.group(1))
+        return words[-1] if words else ""
+
+    value = re.sub(r"\$\(([^)\n]{0,256})\)", decode_command_substitution, value)
+    value = re.sub(r"`([^`\n]{0,256})`", decode_command_substitution, value)
+    value = re.sub(r"\\(.)", r"\1", value)
+    return value.replace("'", "").replace('"', "")
 
 
 class OperationError(RuntimeError):
@@ -322,18 +579,33 @@ class CrucibleOperations:
                 break
         return {"runs": entries, "count": len(entries)}
 
-    def get_local_run_summary(self, run_path: Path, max_bytes: int = 1_048_576) -> dict[str, Any]:
+    def get_local_run_summary(
+        self,
+        run_path: Path,
+        max_bytes: int = 1_048_576,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
         """Read a bounded summary from an approved local run artifact."""
 
         try:
             canonical = self._canonical_run_directory(run_path)
             summary_path = self._safe_artifact_path(canonical, "run/result-summary.json")
-            size = summary_path.stat().st_size
-            if size > max_bytes:
+            relative = summary_path.relative_to(canonical).as_posix()
+            stream = self._open_artifact_readonly(canonical, relative)
+            try:
+                size = os.fstat(stream.fileno()).st_size
+                if size > max_bytes:
+                    raise OperationError(
+                        "framework", "result summary exceeds size limit", "result_too_large"
+                    )
+                encoded = stream.read(max_bytes + 1)
+            finally:
+                stream.close()
+            if len(encoded) > max_bytes:
                 raise OperationError(
                     "framework", "result summary exceeds size limit", "result_too_large"
                 )
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary = json.loads(encoded.decode("utf-8"))
         except OperationError:
             raise
         except FileNotFoundError as exc:
@@ -346,45 +618,1095 @@ class CrucibleOperations:
             ) from exc
         if not isinstance(summary, dict):
             raise OperationError("user", "local run summary must be a JSON object", "invalid_result")
-        return {
+        result = {
             "run_path": str(canonical),
             "result_status": "available",
             "summary": summary,
         }
+        if self._mcp_response_size(result, request_id) > MAX_METADATA_RESPONSE_BYTES:
+            raise OperationError(
+                "framework", "run summary response exceeds size limit", "result_too_large"
+            )
+        return result
 
-    def get_local_run_metadata(self, run_path: Path, max_bytes: int = 1_048_576) -> dict[str, Any]:
+    def get_local_run_metadata(
+        self,
+        run_path: Path,
+        max_bytes: int = 1_048_576,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
         """Read the bounded rickshaw run metadata from an approved local run."""
 
         try:
             canonical = self._canonical_run_directory(run_path)
-            metadata_path = self._run_metadata_path(canonical)
-            if metadata_path.stat().st_size > max_bytes:
-                raise OperationError(
-                    "framework", "run metadata exceeds size limit", "result_too_large"
-                )
-            if metadata_path.suffix == ".xz":
-                with lzma.open(metadata_path, "rt", encoding="utf-8") as stream:
-                    encoded = stream.read(max_bytes + 1)
-                    if len(encoded.encode("utf-8")) > max_bytes:
-                        raise OperationError(
-                            "framework", "run metadata exceeds size limit", "result_too_large"
-                        )
-                    metadata = json.loads(encoded)
-            else:
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata_path, metadata = self._read_run_metadata(canonical, max_bytes)
         except OperationError:
             raise
-        except (OSError, UnicodeDecodeError, lzma.LZMAError, json.JSONDecodeError) as exc:
+        except RecursionError as exc:
+            raise OperationError(
+                "framework",
+                "run metadata exceeds nesting limit",
+                "result_too_large",
+            ) from exc
+        except (
+            OSError,
+            UnicodeDecodeError,
+            lzma.LZMAError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
             raise OperationError(
                 "user", "run metadata is not valid JSON", "invalid_run"
             ) from exc
-        if not isinstance(metadata, dict):
-            raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
-        return {
-            "run_path": str(canonical),
-            "metadata_path": str(metadata_path),
-            "metadata": metadata,
+        try:
+            if not isinstance(metadata, dict):
+                raise OperationError(
+                    "user", "run metadata must be a JSON object", "invalid_run"
+                )
+            result = {
+                "run_path": str(canonical),
+                "metadata_path": str(metadata_path),
+                "metadata": self._redact_metadata(metadata),
+            }
+        except RecursionError as exc:
+            raise OperationError(
+                "framework",
+                "run metadata exceeds nesting limit",
+                "result_too_large",
+            ) from exc
+        if self._mcp_response_size(result, request_id) > MAX_METADATA_RESPONSE_BYTES:
+            raise OperationError(
+                "framework", "run metadata response exceeds size limit", "result_too_large"
+            )
+        return result
+
+    @classmethod
+    def _redact_metadata(
+        cls,
+        value: Any,
+        depth: int = 0,
+        budget: list[int] | None = None,
+    ) -> Any:
+        """Remove credential-like metadata values before returning them to MCP."""
+
+        if budget is None:
+            budget = [MAX_METADATA_REDACTION_WORK]
+        if depth > MAX_METADATA_DEPTH:
+            raise OperationError(
+                "framework",
+                "run metadata exceeds nesting limit",
+                "result_too_large",
+            )
+        if isinstance(value, dict):
+            redacted: dict[Any, Any] = {}
+            has_value_field = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_VALUE_FIELD_VARIANTS
+                for key in value
+            )
+            is_metadata_root = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_ROOT_FIELD_VARIANTS
+                for key in value
+            )
+            has_sensitive_key = any(
+                isinstance(key, str) and cls._metadata_key_is_sensitive(key)
+                for key in value
+            )
+            has_sensitive_descriptor_key = any(
+                isinstance(key, str)
+                and cls._metadata_key_is_sensitive(key)
+                and (
+                    (
+                        isinstance(item, str)
+                        and cls._metadata_key_is_sensitive(item)
+                    )
+                    or (
+                        isinstance(item, (dict, list))
+                        and cls._metadata_value_contains_sensitive_name(item)
+                    )
+                )
+                for key, item in value.items()
+            )
+            has_sensitive_name_field = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                and cls._metadata_direct_value_contains_sensitive_name(
+                    item, cls._metadata_field_variant(key)
+                )
+                for key, item in value.items()
+            )
+            has_unknown_sibling = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key)
+                not in _METADATA_NAME_FIELD_VARIANTS
+                and cls._metadata_field_variant(key)
+                not in _METADATA_VALUE_FIELD_VARIANTS
+                and cls._metadata_field_variant(key)
+                not in _METADATA_ROOT_FIELD_VARIANTS
+                for key in value
+            )
+            has_explicit_unknown_value_field = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key)
+                in _METADATA_UNKNOWN_VALUE_FIELD_VARIANTS
+                for key in value
+            )
+            has_bare_sensitive_descriptor_collection = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                and isinstance(item, list)
+                and any(
+                    isinstance(child, dict)
+                    and cls._metadata_item_has_sensitive_parameter_name(child)
+                    for child in item
+                )
+                for key, item in value.items()
+            )
+            sensitive_parameter = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                and cls._metadata_direct_value_contains_sensitive_name(
+                    item, cls._metadata_field_variant(key)
+                )
+                and not (
+                    cls._metadata_field_variant(key)
+                    in {"headers", "httpheaders", "parameters", "params"}
+                    and isinstance(item, list)
+                    and any(isinstance(child, dict) for child in item)
+                    and not has_value_field
+                    and is_metadata_root
+                )
+                for key, item in value.items()
+            ) or (
+                has_sensitive_key
+                and (has_value_field or has_unknown_sibling)
+                and not is_metadata_root
+            )
+            sensitive_parameter = sensitive_parameter or (
+                is_metadata_root
+                and has_sensitive_name_field
+                and (
+                    has_explicit_unknown_value_field
+                    or (
+                        has_unknown_sibling
+                        and has_bare_sensitive_descriptor_collection
+                    )
+                )
+            )
+            sensitive_parameter = sensitive_parameter or (
+                is_metadata_root
+                and has_sensitive_key
+                and (
+                    has_value_field
+                    or has_explicit_unknown_value_field
+                    or (
+                        has_unknown_sibling
+                        and has_sensitive_descriptor_key
+                    )
+                )
+            )
+            has_unambiguous_sensitive_name = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                and cls._metadata_field_variant(key)
+                not in _METADATA_AMBIGUOUS_NAME_FIELD_VARIANTS
+                and cls._metadata_direct_value_contains_sensitive_name(
+                    item, cls._metadata_field_variant(key)
+                )
+                for key, item in value.items()
+            )
+            has_user_name_descriptor = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                and isinstance(item, str)
+                and cls._metadata_field_variant(item) in {"user", "username"}
+                for key, item in value.items()
+            )
+            for key, item in value.items():
+                field_variant = (
+                    cls._metadata_field_variant(key) if isinstance(key, str) else ""
+                )
+                if (
+                    isinstance(item, str)
+                    and field_variant in {"user", "username"}
+                    and cls._is_user_credential_value(item)
+                ):
+                    redacted[key] = cls._redact_user_credential_value(item)
+                elif (
+                    has_user_name_descriptor
+                    and isinstance(item, str)
+                    and field_variant in _METADATA_VALUE_FIELD_VARIANTS
+                    and cls._is_user_credential_value(item)
+                ):
+                    redacted[key] = cls._redact_user_credential_value(item)
+                elif isinstance(key, str) and cls._metadata_key_is_sensitive(key):
+                    redacted[key] = "[redacted]"
+                elif (
+                    sensitive_parameter
+                    and isinstance(key, str)
+                    and not (
+                        cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                        and cls._metadata_value_contains_sensitive_name(item)
+                        and (
+                            cls._metadata_field_variant(key)
+                            not in _METADATA_AMBIGUOUS_NAME_FIELD_VARIANTS
+                            or not has_unambiguous_sensitive_name
+                        )
+                    )
+                    and not (
+                        is_metadata_root
+                        and cls._metadata_field_variant(key)
+                        in _METADATA_ROOT_FIELD_VARIANTS
+                    )
+                ):
+                    redacted[key] = "[redacted]"
+                else:
+                    redacted[key] = cls._redact_metadata(item, depth + 1, budget)
+            return redacted
+        if isinstance(value, list):
+            redacted_list: list[Any] = []
+            pending_sensitive_option = False
+            pending_multi_token = False
+            for item_index, item in enumerate(value):
+                if pending_sensitive_option:
+                    redacted_list.append("[redacted]")
+                    if pending_multi_token:
+                        continue
+                    pending_sensitive_option = bool(
+                        isinstance(item, str)
+                        and cls._is_sensitive_option_flag(item)
+                    )
+                    continue
+                redacted_list.append(cls._redact_metadata(item, depth + 1, budget))
+                if isinstance(item, str) and (
+                    cls._is_sensitive_option_flag(item)
+                    or cls._is_short_sensitive_option_flag(item)
+                ):
+                    pending_sensitive_option = True
+                    pending_multi_token = False
+                else:
+                    authorization_descriptor = (
+                        cls._metadata_item_has_authorization_parameter_name(item)
+                    )
+                    sensitive_descriptor = (
+                        cls._metadata_item_has_sensitive_parameter_name(item)
+                    )
+                    sensitive_string = (
+                        isinstance(item, str)
+                        and cls._metadata_key_is_sensitive(item)
+                    )
+                    if not (
+                        authorization_descriptor
+                        or sensitive_descriptor
+                        or sensitive_string
+                    ):
+                        continue
+                    pending_sensitive_option = True
+                    pending_multi_token = (
+                        authorization_descriptor
+                        or sensitive_descriptor
+                        or
+                        item_index == 0
+                        or (
+                            isinstance(item, str)
+                            and cls._metadata_field_variant(item) == "authorization"
+                        )
+                    )
+            return redacted_list
+        if isinstance(value, str):
+            if value.lstrip().startswith(("{", "[")):
+                try:
+                    parsed = json.loads(value)
+                except (json.JSONDecodeError, ValueError):
+                    return "[redacted]"
+                if isinstance(parsed, (dict, list)):
+                    redacted = cls._redact_metadata(parsed, depth + 1, budget)
+                    return json.dumps(redacted, separators=(",", ":"))
+            if len(value) > MAX_METADATA_REDACTION_WORK:
+                if cls._long_metadata_string_has_sensitive_candidate(value):
+                    raise OperationError(
+                        "framework",
+                        "run metadata redaction exceeds work limit",
+                        "result_too_large",
+                    )
+                return value
+            string_budget = [MAX_METADATA_REDACTION_WORK]
+            string_budget[0] -= len(value)
+            if "\n" in value and any(
+                marker in value for marker in ("$(", "`", "'", '"', "\\")
+            ):
+                # Newlines can split shell syntax across tokens in ways that
+                # static word matching cannot safely reconstruct.
+                return "[redacted]"
+            value = cls._redact_short_password_options(value)
+            value = cls._redact_user_options(value)
+            value = _METADATA_USER_CREDENTIAL_ASSIGNMENT.sub(
+                lambda match: (
+                    f"{match.group('prefix') or ''}{match.group('key')}"
+                    f"{match.group('separator')}{match.group('user')}:[redacted]"
+                ),
+                value,
+            )
+            value = _METADATA_QUOTED_USER_CREDENTIAL_ASSIGNMENT.sub(
+                lambda match: (
+                    f"{match.group('quote')}{match.group('key')}"
+                    f"{match.group('quote')}{match.group('separator')}"
+                    f"{match.group('value_quote')}{match.group('user')}"
+                    f":[redacted]{match.group('value_quote')}"
+                ),
+                value,
+            )
+            bracketed_parts: list[str] = []
+            bracketed_cursor = 0
+            for match in _METADATA_BRACKETED_ASSIGNMENT.finditer(value):
+                if match.start() < bracketed_cursor:
+                    continue
+                if not cls._metadata_key_is_sensitive(match.group("key")):
+                    continue
+                value_start = match.end()
+                value_end = cls._sensitive_value_end(
+                    value,
+                    value_start,
+                    allow_leading_dash=(
+                        ":" in match.group("separator")
+                        or "=" in match.group("separator")
+                    ),
+                )
+                bracketed_parts.append(value[bracketed_cursor:match.start()])
+                bracketed_parts.append(
+                    f"{match.group('prefix') or ''}{match.group('key')}"
+                    f"[{match.group('index')}]"
+                    f"{match.group('separator')}[redacted]"
+                )
+                bracketed_cursor = value_end
+            if bracketed_parts:
+                bracketed_parts.append(value[bracketed_cursor:])
+                return "".join(bracketed_parts)
+            embedded = cls._redact_embedded_json(value, depth, string_budget)
+            if embedded != value:
+                if embedded == "[redacted]":
+                    return embedded
+                value = embedded
+            if (
+                _METADATA_UNSUPPORTED_SHELL_ASSIGNMENT.search(value)
+                or _METADATA_UNSUPPORTED_SHELL_COMMAND.search(value)
+                or _METADATA_UNSUPPORTED_SHELL_OPTION.search(value)
+                or _METADATA_UNSUPPORTED_SHELL_WORD.search(value)
+                or _METADATA_UNSUPPORTED_SHELL_PARAMETER.search(value)
+                or _METADATA_UNSUPPORTED_SHELL_PARAMETER_WORD.search(value)
+                or cls._has_unsupported_shell_assembly(value)
+                or _METADATA_UNSUPPORTED_ANSI_C_WORD.search(value)
+                or cls._has_sensitive_assembled_shell_word(value)
+                or (
+                    (quoted_word := _METADATA_UNSUPPORTED_QUOTED_WORD.search(value))
+                    is not None
+                    and cls._metadata_key_is_sensitive(
+                        _normalize_metadata_shell_key(quoted_word.group("word"))
+                    )
+                )
+                or _METADATA_UNSUPPORTED_COMMAND_WORD.search(value)
+            ):
+                return "[redacted]"
+            decoded = _decode_metadata_unicode_escapes(value)
+            if decoded != value:
+                for match in _METADATA_SECRET_ASSIGNMENT.finditer(decoded):
+                    if cls._metadata_key_is_sensitive(match.group("key")):
+                        return "[redacted]"
+            continued = re.sub(r"\\\r?\n", "", value)
+            if continued != value:
+                for match in _METADATA_SECRET_ASSIGNMENT.finditer(continued):
+                    if cls._metadata_key_is_sensitive(match.group("key")):
+                        return "[redacted]"
+            url_redacted = _METADATA_URL_CREDENTIALS.sub(
+                r"\g<prefix>[redacted]@", value
+            )
+            if url_redacted != value:
+                value = url_redacted
+            for matcher in (
+                _METADATA_SHELL_ASSIGNMENT,
+                _METADATA_QUOTED_SHELL_ASSIGNMENT,
+            ):
+                for match in matcher.finditer(value):
+                    raw_key = match.group("key")
+                    if raw_key[0].isalpha() and raw_key.endswith(("'", '"')):
+                        continue
+                    key = _normalize_metadata_shell_key(raw_key)
+                    if key != raw_key and cls._metadata_key_is_sensitive(key):
+                        return "[redacted]"
+            for matcher in (
+                _METADATA_PUNCTUATED_OPTION_ASSIGNMENT,
+                _METADATA_PUNCTUATED_ASSIGNMENT,
+            ):
+                for match in matcher.finditer(value):
+                    key = match.group("key")
+                    if (
+                        re.search(r"[^A-Za-z0-9_-]", key)
+                        and cls._metadata_key_is_sensitive(key)
+                    ):
+                        return "[redacted]"
+            redacted_parts: list[str] = []
+            cursor = 0
+            for match in _METADATA_SECRET_ASSIGNMENT.finditer(value):
+                if match.start() < cursor:
+                    continue
+                if not cls._metadata_key_is_sensitive(match.group("key")):
+                    continue
+                value_start = match.end()
+                separator = match.group("separator")
+                value_end = cls._sensitive_value_end(
+                    value,
+                    value_start,
+                    allow_leading_dash=":" in separator or "=" in separator,
+                )
+                redacted_parts.append(value[cursor:match.start()])
+                redacted_parts.append(
+                    f"{match.group('prefix') or ''}{match.group('key')}"
+                    f"{match.group('separator')}[redacted]"
+                )
+                if value_end == value_start and value_start < len(value):
+                    redacted_parts.append(" ")
+                cursor = value_end
+            if not redacted_parts:
+                return value
+            redacted_parts.append(value[cursor:])
+            return "".join(redacted_parts)
+        return value
+
+    @classmethod
+    def _metadata_item_has_sensitive_parameter_name(cls, value: Any) -> bool:
+        """Identify descriptor objects whose following list item is secret."""
+
+        if isinstance(value, list):
+            return any(
+                (
+                    isinstance(item, str)
+                    and cls._metadata_key_is_sensitive(item)
+                )
+                or cls._metadata_item_has_sensitive_parameter_name(item)
+                for item in value
+            )
+        if not isinstance(value, dict):
+            return False
+        has_sensitive_name = any(
+            isinstance(key, str)
+            and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+            and cls._metadata_value_contains_sensitive_name(item)
+            for key, item in value.items()
+        )
+        has_sensitive_key = any(
+            isinstance(key, str)
+            and cls._metadata_key_is_sensitive(key)
+            and (
+                (
+                    isinstance(item, str)
+                    and cls._metadata_key_is_sensitive(item)
+                )
+                or (
+                    isinstance(item, (dict, list))
+                    and cls._metadata_value_contains_sensitive_name(item)
+                )
+            )
+            for key, item in value.items()
+        )
+        has_value_field = any(
+            isinstance(key, str)
+            and cls._metadata_field_variant(key) in _METADATA_VALUE_FIELD_VARIANTS
+            and not (
+                cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                and cls._metadata_value_contains_sensitive_name(item)
+            )
+            for key, item in value.items()
+        )
+        return (has_sensitive_name or has_sensitive_key) and not has_value_field
+
+    @classmethod
+    def _metadata_value_contains_authorization(cls, value: Any) -> bool:
+        if isinstance(value, str):
+            return cls._metadata_field_variant(value) == "authorization"
+        if isinstance(value, dict):
+            return any(
+                cls._metadata_value_contains_authorization(item)
+                for item in value.values()
+            )
+        if isinstance(value, list):
+            return any(
+                cls._metadata_value_contains_authorization(item) for item in value
+            )
+        return False
+
+    @staticmethod
+    def _is_user_credential_value(value: str) -> bool:
+        separator = value.find(":")
+        return separator >= 0 and separator + 1 < len(value)
+
+    @staticmethod
+    def _redact_user_credential_value(value: str) -> str:
+        separator = value.find(":")
+        if separator < 0 or separator + 1 >= len(value):
+            return value
+        return f"{value[:separator + 1]}[redacted]"
+
+    @classmethod
+    def _metadata_item_has_authorization_parameter_name(cls, value: Any) -> bool:
+        if isinstance(value, list):
+            return any(
+                cls._metadata_item_has_authorization_parameter_name(item)
+                for item in value
+            )
+        if not isinstance(value, dict):
+            return False
+        return any(
+            isinstance(key, str)
+            and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+            and cls._metadata_value_contains_authorization(item)
+            for key, item in value.items()
+        ) or any(
+            isinstance(key, str)
+            and cls._metadata_key_is_sensitive(key)
+            and (
+                (
+                    isinstance(item, str)
+                    and cls._metadata_field_variant(item) == "authorization"
+                )
+                or cls._metadata_value_contains_authorization(item)
+            )
+            for key, item in value.items()
+        )
+
+    @classmethod
+    def _metadata_value_contains_sensitive_name(cls, value: Any) -> bool:
+        if isinstance(value, str):
+            return cls._metadata_key_is_sensitive(value)
+        if isinstance(value, dict):
+            return any(
+                cls._metadata_value_contains_sensitive_name(item)
+                for item in value.values()
+            )
+        if isinstance(value, list):
+            return any(
+                cls._metadata_value_contains_sensitive_name(item) for item in value
+            )
+        return False
+
+    @classmethod
+    def _metadata_direct_value_contains_sensitive_name(
+        cls, value: Any, field_variant: str = ""
+    ) -> bool:
+        return cls._metadata_value_contains_sensitive_name(value)
+
+    @classmethod
+    def _redact_embedded_json(
+        cls, value: str, depth: int, budget: list[int]
+    ) -> str:
+        """Redact object/array JSON fragments embedded in shell-like text."""
+
+        def suspicious(fragment: str) -> bool:
+            decoded = re.sub(
+                r"\\u([0-9a-fA-F]{4})",
+                lambda match: chr(int(match.group(1), 16)),
+                fragment,
+            )
+            return bool(
+                _METADATA_QUOTED_SENSITIVE_ASSIGNMENT.search(decoded)
+                or (
+                    any(character in decoded for character in "[{")
+                    and _METADATA_SENSITIVE_TEXT.search(decoded)
+                )
+            )
+
+        decoder = json.JSONDecoder()
+        fragments = 0
+        cursor = 0
+        index = 0
+        redacted_parts: list[str] = []
+        while index < len(value):
+            if value[index] not in "[{":
+                index += 1
+                continue
+            fragments += 1
+            if fragments > MAX_METADATA_JSON_FRAGMENTS:
+                return "[redacted]"
+            try:
+                parsed, end = decoder.raw_decode(value, index)
+            except (json.JSONDecodeError, ValueError):
+                index += 1
+                continue
+            if not isinstance(parsed, (dict, list)):
+                index = end
+                continue
+            if suspicious(value[cursor:index]):
+                return "[redacted]"
+            redacted_parts.append(value[cursor:index])
+            redacted = cls._redact_metadata(parsed, depth + 1, budget)
+            redacted_parts.append(json.dumps(redacted, separators=(",", ":")))
+            cursor = end
+            index = end
+        if not redacted_parts:
+            if suspicious(value):
+                return "[redacted]"
+            return value
+        if suspicious(value[cursor:]):
+            return "[redacted]"
+        redacted_parts.append(value[cursor:])
+        return "".join(redacted_parts)
+
+    @classmethod
+    def _shell_word_end(
+        cls, value: str, start: int, allow_leading_dash: bool = False
+    ) -> int:
+        """Find a shell-like option value boundary without evaluating it."""
+
+        index = start
+        quote: str | None = None
+        escaped = False
+        while index < len(value):
+            character = value[index]
+            if escaped:
+                escaped = False
+            elif quote == "'":
+                if character == "'":
+                    quote = None
+            elif quote == '"':
+                if character == "\\":
+                    escaped = True
+                elif character == '"':
+                    quote = None
+            elif character == "\\":
+                escaped = True
+            elif character in {"'", '"'}:
+                quote = character
+            elif character == "-" and index == start and not allow_leading_dash:
+                option = re.match(r"--[A-Za-z][A-Za-z0-9_-]*", value[index:])
+                if option:
+                    break
+            elif character.isspace() or character == ";":
+                break
+            index += 1
+        return index
+
+    @classmethod
+    def _sensitive_value_end(
+        cls,
+        value: str,
+        start: int,
+        allow_leading_dash: bool = False,
+        single_word: bool = False,
+    ) -> int:
+        """Consume a sensitive value through quoted and whitespace-separated words."""
+
+        end = cls._shell_word_end(value, start, allow_leading_dash)
+        if end == start and not allow_leading_dash:
+            option = re.match(r"--[A-Za-z][A-Za-z0-9_-]*", value[start:])
+            if option and cls._is_sensitive_option_flag(option.group(0)):
+                return len(value)
+            end = cls._shell_word_end(value, start, allow_leading_dash=True)
+        if end == start or single_word:
+            return end
+        while end < len(value) and value[end].isspace():
+            next_start = end
+            while next_start < len(value) and value[next_start].isspace():
+                next_start += 1
+            if next_start >= len(value):
+                return len(value)
+            if value.startswith(";", next_start):
+                return end
+            option = re.match(r"--[A-Za-z][A-Za-z0-9_-]*", value[next_start:])
+            assignment = re.match(
+                r"[A-Za-z][A-Za-z0-9_-]*\s*[:=]", value[next_start:]
+            )
+            if option or assignment:
+                return end
+            next_end = cls._shell_word_end(value, next_start, allow_leading_dash=True)
+            if next_end == next_start:
+                return end
+            end = next_end
+        return end
+
+    @classmethod
+    def _redact_short_password_options(cls, value: str) -> str:
+        """Redact values accepted by common short credential options."""
+
+        redacted_parts: list[str] = []
+        cursor = 0
+        search_start = 0
+        while search_start < len(value):
+            match = re.search(
+                r"(?<![A-Za-z0-9_-])-(?P<options>[A-Za-z]*[pu])"
+                r"(?P<attached>[^;\s]*)",
+                value[search_start:],
+            )
+            if match is None:
+                break
+            option_start = search_start + match.start()
+            full_option = re.match(
+                r"-[A-Za-z][A-Za-z0-9_-]*(?:=[^;\s]*)?",
+                value[option_start:],
+            )
+            full_name = (
+                full_option.group(0)[1:].split("=", 1)[0].lower()
+                if full_option
+                else ""
+            )
+            if (
+                full_name
+                and (
+                    "_" in full_name
+                    or "-" in full_name
+                    or full_name
+                    in {
+                        "auth",
+                        "authorization",
+                        "apikey",
+                        "accesskey",
+                        "clientsecret",
+                        "clienttoken",
+                        "credential",
+                        "credentials",
+                        "creds",
+                        "jwt",
+                        "password",
+                        "passwd",
+                        "passphrase",
+                        "private",
+                        "pwd",
+                        "secret",
+                        "secretkey",
+                        "token",
+                        "user",
+                        "username",
+                    }
+                )
+            ):
+                # Let the general assignment redactor handle single-dash
+                # long options. Otherwise a short-option prefix such as
+                # ``-ap`` can consume only part of ``-api_key`` and expose its
+                # value.
+                search_start = option_start + len(full_option.group(0))
+                continue
+            option_end = option_start + 1 + len(match.group("options"))
+            attached = match.group("attached")
+            if attached and not attached.startswith("=") and "-" in attached:
+                return "[redacted]"
+            if attached and not attached.startswith("=") and not (
+                match.group("options").lower() in {"p", "u", "ap"}
+                or (
+                    match.group("options").lower() == "au"
+                    and ":" in attached
+                )
+            ):
+                # A multi-letter single-dash token such as ``-auth`` is
+                # ambiguous: treating its final ``u`` as a short flag leaves
+                # the remainder attached and can expose the following word.
+                # Fail closed rather than guessing at the shell's option
+                # grammar.
+                return "[redacted]"
+            value_start = option_end
+            if value_start < len(value) and value[value_start] == "=":
+                value_start += 1
+                while value_start < len(value) and value[value_start].isspace():
+                    value_start += 1
+            elif match.group("attached"):
+                value_start = option_end
+            elif value_start < len(value) and value[value_start].isspace():
+                while value_start < len(value) and value[value_start].isspace():
+                    value_start += 1
+            if value_start >= len(value) or value[value_start] == ";":
+                search_start = option_end
+                continue
+            value_end = cls._shell_word_end(
+                value, value_start, allow_leading_dash=True
+            )
+            if value_end == value_start:
+                search_start = option_end
+                continue
+            if (
+                match.group("options").lower() in {"p", "u"}
+                and match.group("attached")
+                and not match.group("attached").startswith("=")
+                and value_end < len(value)
+                and value[value_end].isspace()
+            ):
+                return "[redacted]"
+            redacted_parts.append(value[cursor:value_start])
+            redacted_parts.append("[redacted]")
+            cursor = value_end
+            search_start = value_end
+        if not redacted_parts:
+            return value
+        redacted_parts.append(value[cursor:])
+        return "".join(redacted_parts)
+
+    @classmethod
+    def _redact_user_options(cls, value: str) -> str:
+        """Redact credentials passed through curl-style user options."""
+
+        redacted_parts: list[str] = []
+        cursor = 0
+        search_start = 0
+        while search_start < len(value):
+            match = re.search(
+                r"(?<![A-Za-z0-9_-])(?:--user(?=[=;\s]|$)|-u)",
+                value[search_start:],
+            )
+            if match is None:
+                break
+            option_start = search_start + match.start()
+            option_end = search_start + match.end()
+            value_start = option_end
+            if value_start < len(value) and value[value_start] == "=":
+                value_start += 1
+                while value_start < len(value) and value[value_start].isspace():
+                    value_start += 1
+            elif value_start < len(value) and value[value_start].isspace():
+                while value_start < len(value) and value[value_start].isspace():
+                    value_start += 1
+            if value_start >= len(value) or value[value_start] == ";":
+                search_start = option_end
+                continue
+            value_end = cls._shell_word_end(
+                value, value_start, allow_leading_dash=True
+            )
+            if value_end == value_start:
+                search_start = option_end
+                continue
+            redacted_parts.append(value[cursor:value_start])
+            redacted_parts.append("[redacted]")
+            cursor = value_end
+            search_start = value_end
+        if not redacted_parts:
+            return value
+        redacted_parts.append(value[cursor:])
+        return "".join(redacted_parts)
+
+    @classmethod
+    def _is_sensitive_option_flag(cls, value: str) -> bool:
+        if cls._is_user_option_flag(value) or cls._is_short_sensitive_option_flag(value):
+            return True
+        match = re.fullmatch(r"--?([A-Za-z][A-Za-z0-9_-]*)", value)
+        return bool(match and cls._metadata_key_is_sensitive(match.group(1)))
+
+    @staticmethod
+    def _long_metadata_string_has_sensitive_candidate(value: str) -> bool:
+        sensitive_name = (
+            r"(?:auth|authorization|credential|credentials|passphrase|pass|pwd|"
+            r"password|private|secret|token|jwt|bearer|api[_-]?key|"
+            r"access[_-]?key|secret[_-]?key)"
+        )
+        if _METADATA_JSON_SENSITIVE_KEY.search(value):
+            return True
+        if re.search(
+            r"[\"'](?:user|username)[\"']\s*:\s*[\"'][^\"']+:[^\"']+[\"']",
+            value,
+            re.IGNORECASE,
+        ):
+            return True
+        if any(quote in value for quote in ("'", '"')) and re.search(
+            r"(?:pass|word|secret|token|auth|cred|bearer|jwt)",
+            value,
+            re.IGNORECASE,
+        ):
+            return True
+        for descriptor in re.finditer(
+            r"[\"'][A-Za-z_][A-Za-z0-9_-]*[\"']\s*:\s*"
+            r"[\"'](?P<name>[A-Za-z_][A-Za-z0-9_-]*)[\"']",
+            value,
+        ):
+            if CrucibleOperations._metadata_key_is_sensitive(
+                descriptor.group("name")
+            ):
+                return True
+        if re.search(
+            rf"(?<![A-Za-z0-9_-])(?:--)?{sensitive_name}\s*[:=]",
+            value,
+            re.IGNORECASE,
+        ):
+            return True
+        assignments = re.finditer(
+            r"(?<![A-Za-z0-9_-])(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*[:=]",
+            value,
+        )
+        if any(
+            CrucibleOperations._metadata_key_is_sensitive(match.group("key"))
+            for match in assignments
+        ):
+            return True
+        if re.search(
+            rf"(?<![A-Za-z0-9_-])--{sensitive_name}(?=\s|=|:)",
+            value,
+            re.IGNORECASE,
+        ):
+            return True
+        if re.search(
+            rf"(?<![A-Za-z0-9_-])-{sensitive_name}(?=\s|=|:)",
+            value,
+            re.IGNORECASE,
+        ):
+            return True
+        for matcher in (
+            _METADATA_PUNCTUATED_OPTION_ASSIGNMENT,
+            _METADATA_PUNCTUATED_ASSIGNMENT,
+        ):
+            for match in matcher.finditer(value):
+                key = match.group("key")
+                if (
+                    re.search(r"[^A-Za-z0-9_-]", key)
+                    and CrucibleOperations._metadata_key_is_sensitive(key)
+                ):
+                    return True
+        for match in _METADATA_BRACKETED_ASSIGNMENT.finditer(value):
+            if CrucibleOperations._metadata_key_is_sensitive(match.group("key")):
+                return True
+        plain_assignments = re.finditer(
+            rf"(?<![A-Za-z0-9_-]){sensitive_name}\s+(?P<value>\S+)",
+            value,
+            re.IGNORECASE,
+        )
+        if next(plain_assignments, None) is not None:
+            return True
+        if _METADATA_URL_CREDENTIALS.search(value):
+            return True
+        if _METADATA_USER_CREDENTIAL_ASSIGNMENT.search(value):
+            return True
+        for compound in re.finditer(
+            r"(?<![A-Za-z0-9_-])(?P<key>[A-Za-z_][A-Za-z0-9_-]{0,256})"
+            r"\s+(?P<value>\S+)",
+            value,
+        ):
+            if not CrucibleOperations._metadata_key_is_sensitive(
+                compound.group("key")
+            ):
+                continue
+            return True
+        if re.search(
+            r"(?<![A-Za-z0-9_-])-[A-Za-z]*[pu](?:[=\s]|[^;\s])",
+            value,
+        ):
+            return True
+        return any(marker in value for marker in ("$", "`", "\\"))
+
+    @staticmethod
+    def _is_short_sensitive_option_flag(value: str) -> bool:
+        return bool(re.fullmatch(r"-[A-Za-z]*[pu]", value))
+
+    @staticmethod
+    def _is_user_option_flag(value: str) -> bool:
+        return value in {"-u", "--user", "--username", "user", "username"}
+
+    @classmethod
+    def _has_sensitive_assembled_shell_word(cls, value: str) -> bool:
+        for match in _METADATA_UNSUPPORTED_COMMAND_ASSEMBLED_WORD.finditer(value):
+            # The command's output is unknowable without executing it.  Once
+            # it is concatenated with a key fragment, fail closed rather than
+            # attempting to infer whether shell escapes produce a secret name.
+            if match.group("token"):
+                return True
+        for match in _METADATA_UNSUPPORTED_ASSEMBLED_SHELL_WORD.finditer(value):
+            token = match.group("token")
+            if any(marker in token for marker in "{}[]"):
+                continue
+            if not any(marker in token for marker in "\\'\"$`()"):
+                continue
+            if "$" in token and "(" not in token:
+                # Scalar expansions can assemble a sensitive name without
+                # leaving a statically recognizable spelling in the token.
+                return True
+            if "$" in token and "(" in token:
+                if not re.search(r"\)[A-Za-z]|[A-Za-z]\$\(", token):
+                    continue
+            elif not any(token.count(quote) >= 2 for quote in "'\""):
+                continue
+            if cls._metadata_key_is_sensitive(_normalize_metadata_shell_key(token)):
+                return True
+        return False
+
+    @staticmethod
+    def _has_unsupported_shell_assembly(value: str) -> bool:
+        """Detect quoted shell-word assignments with linear work."""
+
+        for token in value.split():
+            equals = token.find("=")
+            if equals <= 0:
+                continue
+            if "'" in token[:equals] or '"' in token[:equals]:
+                return True
+        return False
+
+    @staticmethod
+    def _is_option_flag(value: str) -> bool:
+        return bool(re.fullmatch(r"--?[A-Za-z][A-Za-z0-9_-]*", value))
+
+    @staticmethod
+    def _metadata_key_is_sensitive(key: str) -> bool:
+        if re.fullmatch(r"-[A-Za-z]*[pu]", key):
+            return True
+        key = _decode_metadata_unicode_escapes(key)
+        normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key)
+        normalized = re.sub(r"[^a-z0-9]+", "_", normalized.lower())
+        if any(
+            marker in normalized
+            for marker in ("api_key", "access_key", "secret_key")
+        ):
+            return True
+        if any(
+            marker in normalized
+            for marker in (
+                "apikey",
+                "accesskey",
+                "secretkey",
+                "clientsecret",
+                "clienttoken",
+                "authtoken",
+                "passwd",
+            )
+        ):
+            return True
+        compact = normalized.replace("_", "")
+        if any(
+            marker in compact
+            for marker in (
+                "auth",
+                "authorization",
+                "credential",
+                "credentials",
+                "creds",
+                "cookie",
+                "passphrase",
+                "pass",
+                "pwd",
+                "password",
+                "passwd",
+                "private",
+                "secret",
+                "session",
+                "token",
+                "jwt",
+                "bearer",
+                "apikey",
+                "accesskey",
+                "secretkey",
+                "clientsecret",
+                "clienttoken",
+                "authtoken",
+            )
+        ):
+            return True
+        parts = {
+            part
+            for part in re.split(r"[^a-z0-9]+", normalized)
+            if part
         }
+        return bool(
+            parts
+            & (_SENSITIVE_METADATA_KEY_PARTS | {"passwords", "secrets", "tokens"})
+        )
+
+    @staticmethod
+    def _metadata_field_variant(key: str) -> str:
+        key = _decode_metadata_unicode_escapes(key)
+        normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key)
+        normalized = re.sub(r"[^a-z0-9]+", "_", normalized.lower())
+        return normalized.replace("_", "")
 
     def list_run_artifacts(
         self, run_path: Path, offset: int = 0, limit: int = 100
@@ -431,11 +1753,13 @@ class CrucibleOperations:
             root_fd = os.open(canonical, directory_flags)
             root_iterator = os.scandir(root_fd)
         except OSError as exc:
-            mark_walk_error(exc)
             if root_fd is not None:
                 os.close(root_fd)
-            root_fd = None
-            root_iterator = None
+            raise OperationError(
+                "framework",
+                f"unable to traverse run artifacts: {exc}",
+                "artifact_traversal_failed",
+            ) from exc
 
         stack: list[tuple[int, str, Any]] = []
         if root_iterator is not None:
@@ -453,6 +1777,7 @@ class CrucibleOperations:
                     continue
                 except OSError as exc:
                     mark_walk_error(exc)
+                    next_offset = max(next_offset, offset + 1, scanned)
                     entries.close()
                     stack.pop()
                     os.close(current_fd)
@@ -945,32 +2270,76 @@ class CrucibleOperations:
     def _load_run_metadata(self, run_directory: Path) -> tuple[Path, dict[str, Any]]:
         try:
             canonical = self._canonical_run_directory(run_directory)
-            path = self._run_metadata_path(canonical)
-            document = self._read_bounded_json(path, 1_048_576)
+            path, document = self._read_run_metadata(canonical, 1_048_576)
         except OperationError:
             raise
-        except (OSError, UnicodeDecodeError, lzma.LZMAError, json.JSONDecodeError) as exc:
+        except (
+            RecursionError,
+            OSError,
+            UnicodeDecodeError,
+            lzma.LZMAError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
+            if isinstance(exc, RecursionError):
+                raise OperationError(
+                    "framework",
+                    "run metadata exceeds nesting limit",
+                    "result_too_large",
+                ) from exc
             raise OperationError("user", "run metadata is not valid JSON", "invalid_run") from exc
         if not isinstance(document, dict):
             raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
         return path, document
 
-    @staticmethod
-    def _read_bounded_json(path: Path, max_bytes: int) -> Any:
-        opener = lzma.open if path.suffix == ".xz" else open
-        with opener(path, "rb") as stream:
-            encoded = stream.read(max_bytes + 1)
+    def _read_run_metadata(
+        self, run_directory: Path, max_bytes: int
+    ) -> tuple[Path, Any]:
+        path = self._run_metadata_path(run_directory)
+        if path.suffix != ".xz" and path.stat().st_size > max_bytes:
+            raise OperationError(
+                "framework", "run metadata exceeds size limit", "result_too_large"
+            )
+        relative = path.relative_to(run_directory)
+        stream = self._open_artifact_readonly(run_directory, str(relative))
+        try:
+            if path.suffix == ".xz":
+                decoder = lzma.LZMADecompressor(
+                    format=lzma.FORMAT_XZ,
+                    memlimit=MAX_METADATA_DECOMPRESSOR_MEMORY,
+                )
+                decoded_parts: list[bytes] = []
+                decoded_size = 0
+                while not decoder.eof and decoded_size <= max_bytes:
+                    compressed = stream.read(65_536)
+                    if not compressed:
+                        break
+                    remaining = max_bytes + 1 - decoded_size
+                    decoded = decoder.decompress(compressed, max_length=remaining)
+                    decoded_parts.append(decoded)
+                    decoded_size += len(decoded)
+                encoded = b"".join(decoded_parts)
+                if not decoder.eof and decoded_size <= max_bytes:
+                    raise lzma.LZMAError("truncated metadata compression stream")
+            else:
+                encoded = stream.read(max_bytes + 1)
+        finally:
+            stream.close()
         if len(encoded) > max_bytes:
             raise OperationError(
                 "framework", "run metadata exceeds size limit", "result_too_large"
             )
-        return json.loads(encoded.decode("utf-8"))
+        return path, json.loads(encoded.decode("utf-8"))
 
     def _canonical_run_directory(self, run_directory: Path) -> Path:
         try:
             return self.run_policy.canonical_directory(run_directory)
         except PolicyError as exc:
             raise OperationError("authorization", str(exc), "run_path_rejected") from exc
+        except ValueError as exc:
+            raise OperationError(
+                "user", "run path contains an invalid character", "run_path_rejected"
+            ) from exc
 
     @staticmethod
     def _write_run_metadata(path: Path, document: dict[str, Any]) -> None:
@@ -1060,6 +2429,11 @@ class CrucibleOperations:
         try:
             endpoint_root_resolved = endpoint_root.resolve(strict=True)
             schema_root_resolved = schema_root.resolve(strict=True)
+        except FileNotFoundError:
+            # A checkout without activated subprojects has broken Rickshaw
+            # symlinks.  That is a valid installation state for discovery:
+            # there are no installed endpoints to report yet.
+            return {"endpoints": [], "count": 0, "complete": True}
         except OSError as exc:
             raise OperationError(
                 "framework", "endpoint discovery is unavailable", "discovery_unavailable"

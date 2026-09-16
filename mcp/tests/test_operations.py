@@ -13,6 +13,11 @@ from unittest.mock import Mock, patch
 from crucible_mcp.operations import (
     MAX_ARTIFACT_READ_BYTES,
     MAX_ARTIFACT_RESPONSE_BYTES,
+    MAX_METADATA_DECOMPRESSOR_MEMORY,
+    MAX_METADATA_JSON_FRAGMENTS,
+    MAX_METADATA_REDACTION_WORK,
+    MAX_METADATA_RESPONSE_BYTES,
+    MAX_METADATA_DEPTH,
     CrucibleOperations,
     OperationError,
 )
@@ -144,6 +149,21 @@ class TestCrucibleOperations(unittest.TestCase):
         missing = next(item for item in result["endpoints"] if item["name"] == "missing-schema")
         self.assertIsNone(missing["schema"])
         self.assertEqual(missing["capabilities"], ["validate"])
+
+    def test_list_endpoints_handles_unactivated_subprojects(self):
+        crucible_home = self.root / "without-activated-subprojects"
+        rickshaw_parent = crucible_home / "subprojects" / "core"
+        rickshaw_parent.mkdir(parents=True)
+        (rickshaw_parent / "rickshaw").symlink_to(
+            crucible_home / "repos" / "missing-rickshaw", target_is_directory=True
+        )
+
+        operations = CrucibleOperations(crucible_home, InputPolicy([]))
+
+        self.assertEqual(
+            operations.list_endpoints(),
+            {"endpoints": [], "count": 0, "complete": True},
+        )
 
     def test_list_indexed_results_queries_cdm_with_bounded_filters(self):
         response = Mock()
@@ -322,16 +342,1230 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["run_path"], str(run_directory.resolve()))
         self.assertEqual(result["summary"], {"benchmark": "fio", "samples": 1})
 
+    def test_get_local_run_summary_bounds_serialized_response(self):
+        run_directory = self.root / "run" / "large-summary"
+        summary_path = run_directory / "run" / "result-summary.json"
+        summary_path.parent.mkdir(parents=True)
+        summary_path.write_text(
+            json.dumps({"payload": "x" * 700_000}), encoding="utf-8"
+        )
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_local_run_summary(
+                run_directory, request_id="large-summary-request"
+            )
+        self.assertEqual(raised.exception.code, "result_too_large")
+
     def test_get_local_run_metadata_reads_local_artifact(self):
         run_directory = self.root / "run" / "metadata-run"
         metadata_path = run_directory / "run" / "rickshaw-run.json"
         metadata_path.parent.mkdir(parents=True)
-        metadata_path.write_text(json.dumps({"run-id": "run-2", "benchmarks": []}), encoding="utf-8")
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "run-id": "run-2",
+                    "benchmarks": [],
+                    "roadblock-password": "do-not-return",
+                    "accessToken": "do-not-return",
+                    "clientSecret": "do-not-return",
+                    "pull-secrets": ["do-not-return"],
+                    "api-key": "do-not-return",
+                    "apiKey": "do-not-return",
+                    "access-key": "do-not-return",
+                    "apikey": "do-not-return",
+                    "accesskey": "do-not-return",
+                    "secretkey": "do-not-return",
+                    "clientsecret": "do-not-return",
+                    "passwd": "do-not-return",
+                    "dbpassword": "do-not-return",
+                    "roadblockpassword": "do-not-return",
+                    "registrycredentials": "do-not-return",
+                    "DB_PASS": "do-not-return",
+                    "user-pass": "do-not-return",
+                    "serialized-json": '{"password":"do-not-return"}',
+                    "embedded-json": "--config '{\"password\":\"do-not-return\"}'",
+                    "escaped-config": "--config \"{'password':'do-not-return'}\"",
+                    "mixed-malformed-json": (
+                        'prefix {"safe":1} suffix {"password":"do-not-return",}'
+                    ),
+                    "quoted-assignment": 'prefix "password": "do-not-return"',
+                    "escaped-assignment": r"\u0070assword=do-not-return",
+                    "escaped-shell-option": r"--pa\ssword=do-not-return",
+                    "quoted-shell-option": '--pa"ssword"=do-not-return',
+                    "ansi-c-shell-option": "--pa$'ss'word=do-not-return",
+                    "single-quoted-shell-option": "--'pass'word=do-not-return",
+                    "command-shell-option": "--$(printf password)=do-not-return",
+                    "command-shell-option-with-space": (
+                        "--$(printf password) do-not-return"
+                    ),
+                    "embedded-command-shell-option": (
+                        "--pa$(printf ss)word do-not-return"
+                    ),
+                    "command-shell-colon-option": (
+                        "--pa$(printf ss)word:do-not-return"
+                    ),
+                    "bracketed-option": "password[0]=do-not-return",
+                    "backtick-shell-option": "--pa`printf ss`word do-not-return",
+                    "parameter-expansion-shell-option": (
+                        "--pa${SUFFIX}word=do-not-return"
+                    ),
+                    "parameter-expansion-colon-option": (
+                        "--pa${SUFFIX}ssword:do-not-return"
+                    ),
+                    "unprefixed-command-shell-option": (
+                        "pa$(printf ss)word do-not-return"
+                    ),
+                    "unprefixed-backtick-shell-option": (
+                        "pa`printf ss`word do-not-return"
+                    ),
+                    "unprefixed-parameter-expansion": (
+                        "pa${SUFFIX}word do-not-return"
+                    ),
+                    "ansi-c-hex-shell-option": r"--$'\x70assword' do-not-return",
+                    "ansi-c-octal-shell-option": r"--$'\160assword' do-not-return",
+                    "ansi-c-shell-word": "$'password' do-not-return",
+                    "quoted-double-shell-word": '"password" do-not-return',
+                    "quoted-single-shell-word": "'password' do-not-return",
+                    "command-shell-word": "$(printf password) do-not-return",
+                    "assembled-shell-assignment": (
+                        'x "pa"ssword=do-not-return'
+                    ),
+                    "underscore-assignment": "_PASSWORD=do-not-return",
+                    "underscore-option": "--_password do-not-return",
+                    "whitespace-shell-option": "--'pass'word do-not-return",
+                    "whitespace-escaped-shell-option": (
+                        r"--pa\ssword do-not-return"
+                    ),
+                    "escaped-shell-assignment": r"pa\ssword=do-not-return",
+                    "quoted-shell-assignment": 'pa"ss"word=do-not-return',
+                    "line-continuation-assignment": (
+                        "pa\\" + "\n" + "ssword=do-not-return"
+                    ),
+                    "repository-url": (
+                        "https://user:do-not-return@example.com/repository"
+                    ),
+                    "repository-url-with-at": (
+                        "https://user:P@SSWORD@example.com/repository"
+                    ),
+                    "escaped-unicode-malformed": (
+                        r'prefix {"\u0070wd":"do-not-return",}'
+                    ),
+                    "embedded-json-with-assignment": (
+                        'prefix {"password":"do-not-return"} password=do-not-return'
+                    ),
+                    "nested-descriptor-name-list": [
+                        {"name": ["password"]},
+                        "do-not-return",
+                    ],
+                    "structured-name-list-object": {
+                        "name": ["password"],
+                        "value": "do-not-return",
+                    },
+                    "descriptor-with-payload": {
+                        "name": "password",
+                        "payload": "do-not-return",
+                    },
+                    "nested-descriptor-list": {
+                        "args": [{"name": "password"}],
+                        "value": "do-not-return",
+                    },
+                    "parameters-with-value": {
+                        "parameters": [{"name": "password"}],
+                        "value": "do-not-return",
+                    },
+                    "params-with-value": {
+                        "params": [{"name": "password"}],
+                        "value": "do-not-return",
+                    },
+                    "parameters-with-payload": {
+                        "parameters": [{"name": "password"}],
+                        "payload": "do-not-return",
+                    },
+                    "header-descriptor": {
+                        "authorization_header": "Authorization",
+                        "value": "do-not-return",
+                    },
+                    "header-descriptor-payload": {
+                        "authorization_header": "Authorization",
+                        "payload": "do-not-return",
+                    },
+                    "escaped-descriptor-name": {
+                        r"\u006eame": "password",
+                        "value": "do-not-return",
+                    },
+                    "root-bare-header-descriptor": {
+                        "benchmarks": [],
+                        "headers": [{"name": "password"}],
+                        "opaque": "do-not-return",
+                    },
+                    "escaped-unicode-key": {
+                        r"\u0070assword": "do-not-return",
+                    },
+                    "malformed-json": '{"password":"do-not-return",}',
+                    "malformed-api-json": '{"apiKey":"do-not-return",}',
+                    "quoted-access-assignment": (
+                        'prefix "access-key": "do-not-return"'
+                    ),
+                    "option-array": [
+                        "--password",
+                        "do-not-return",
+                        "--token",
+                        "do-not-return",
+                    ],
+                    "option-array-with-dash": ["--password", "-secret"],
+                    "option-array-with-other": ["--password", "--other", "secret"],
+                    "structured-list-args": {"key": "password", "args": ["secret"]},
+                    "structured-list-option": {"option": ["password", "secret"]},
+                    "nested-option-object": ["--password", {"value": "secret"}],
+                    "header-option": ["Authorization", "Bearer", "secret"],
+                    "request-headers": [
+                        {"header": "Authorization", "value": "do-not-return"}
+                    ],
+                    "sequenced-header": [
+                        {"header": "Authorization"},
+                        "do-not-return",
+                    ],
+                    "sequenced-argument": [
+                        {"argument": "password"},
+                        "do-not-return",
+                    ],
+                    "sequenced-params": [
+                        {"params": "password"},
+                        "do-not-return",
+                    ],
+                    "prefixed-header-sequence": [
+                        "prefix",
+                        {"header": "Authorization"},
+                        "Bearer",
+                        "do-not-return",
+                    ],
+                    "structured-sensitive-key-sequence": {
+                        "args": [{"password": "password"}, "do-not-return"]
+                    },
+                    "split-structured-list": [
+                        {"name": "password"},
+                        "do-not-return",
+                    ],
+                    "nested-split-list": [["password"], "do-not-return"],
+                    "nested-non-leading-list": [
+                        ["command", "password"],
+                        "do-not-return",
+                    ],
+                    "nested-nested-descriptor": [
+                        [{"name": "password"}],
+                        "do-not-return",
+                    ],
+                    "non-leading-sensitive-list": [
+                        "command",
+                        "password",
+                        "secret",
+                        "tail",
+                    ],
+                    "parameters": [
+                        {"arg": "password", "val": "do-not-return"},
+                        {"argument": "password", "value": "do-not-return"},
+                        {"key": "password", "value": "do-not-return"},
+                        {"option": "password", "value": "do-not-return"},
+                        {"flag": "api-key", "value": "do-not-return"},
+                        {"arg": "pwd", "val": "do-not-return"},
+                        {"param": "password", "value": "do-not-return"},
+                        {"field": "password", "argument": "do-not-return"},
+                        {"arg": "password", "values": ["do-not-return"]},
+                        {"parameterName": "password", "parameterValue": "do-not-return"},
+                        [
+                            "prefix",
+                            {"authorization": "Authorization"},
+                            "Bearer",
+                            "do-not-return",
+                        ],
+                        '"pa"ssword do-not-return',
+                        "$'pa'ssword do-not-return",
+                        "$(printf pa)ssword do-not-return",
+                        "`printf pa`ssword do-not-return",
+                        "$(printf pa)-ssword do-not-return",
+                        "`printf pa`.ssword do-not-return",
+                        "password.foo=do-not-return",
+                        "password.foo: do-not-return",
+                        r"$(printf 'pa\n')ssword do-not-return",
+                        r"`printf 'pa\n'`ssword do-not-return",
+                        r'--pa"$SUFFIX"ssword do-not-return',
+                        "--$(printf pa\n)ssword do-not-return",
+                        "`printf pa\n`ssword do-not-return",
+                        '--"pa\\\n"ssword do-not-return',
+                    ],
+                    "opts": (
+                        "host=example password=do-not-return api-key=do-not-return "
+                        "--api-key whitespace-secret --password whitespace-secret "
+                        "--roadblock-password compound-secret --client-secret client-secret "
+                        "--roadblockPassword camel-secret --registryCredentials registry-secret "
+                        r'''--password='a'"'"'b' --token "quoted secret" --access-token="a\"b" --password=secret,remaining --roadblockpassword lower-secret --registrycredentials lower-secret --password --token separate-secret --password=-secret --token=-another-secret --password -secret Authorization: Bearer super-secret Authorization=Bearer secret --region us-east-1 DB_PASS=env-secret --pass option-secret user-pass=user-secret pwd=serialized-secret --password multiword secret --region us-east-1 --bearer=bearer-secret'''
+                    ),
+                    "registries": {
+                        "public": {
+                            "push-token": "do-not-return",
+                            "token-file": "/secret/token",
+                        }
+                    },
+                    "endpoints": [
+                        {"auth": {"password": "do-not-return"}},
+                        {"opts": "--password.foo=do-not-return"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
 
         result = self.operations.get_local_run_metadata(run_directory)
 
         self.assertEqual(result["metadata_path"], str(metadata_path))
-        self.assertEqual(result["metadata"], {"run-id": "run-2", "benchmarks": []})
+        self.assertEqual(result["metadata"]["run-id"], "run-2")
+        self.assertEqual(result["metadata"]["roadblock-password"], "[redacted]")
+        self.assertEqual(result["metadata"]["accessToken"], "[redacted]")
+        self.assertEqual(result["metadata"]["clientSecret"], "[redacted]")
+        self.assertEqual(result["metadata"]["pull-secrets"], "[redacted]")
+        self.assertEqual(result["metadata"]["api-key"], "[redacted]")
+        self.assertEqual(result["metadata"]["apiKey"], "[redacted]")
+        self.assertEqual(result["metadata"]["access-key"], "[redacted]")
+        self.assertEqual(result["metadata"]["apikey"], "[redacted]")
+        self.assertEqual(result["metadata"]["accesskey"], "[redacted]")
+        self.assertEqual(result["metadata"]["secretkey"], "[redacted]")
+        self.assertEqual(result["metadata"]["clientsecret"], "[redacted]")
+        self.assertEqual(result["metadata"]["passwd"], "[redacted]")
+        self.assertEqual(result["metadata"]["dbpassword"], "[redacted]")
+        self.assertEqual(result["metadata"]["roadblockpassword"], "[redacted]")
+        self.assertEqual(result["metadata"]["registrycredentials"], "[redacted]")
+        self.assertEqual(result["metadata"]["DB_PASS"], "[redacted]")
+        self.assertEqual(result["metadata"]["user-pass"], "[redacted]")
+        self.assertEqual(
+            result["metadata"]["serialized-json"], '{"password":"[redacted]"}'
+        )
+        self.assertEqual(
+            result["metadata"]["embedded-json"],
+            "--config '{\"password\":\"[redacted]\"}'",
+        )
+        self.assertEqual(result["metadata"]["escaped-config"], "[redacted]")
+        self.assertEqual(result["metadata"]["mixed-malformed-json"], "[redacted]")
+        self.assertEqual(result["metadata"]["quoted-assignment"], "[redacted]")
+        self.assertEqual(result["metadata"]["escaped-assignment"], "[redacted]")
+        self.assertEqual(
+            result["metadata"]["escaped-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["quoted-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["ansi-c-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["single-quoted-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["command-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["command-shell-option-with-space"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["embedded-command-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["command-shell-colon-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["bracketed-option"],
+            "password[0]=[redacted]",
+        )
+        self.assertEqual(
+            result["metadata"]["backtick-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameter-expansion-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameter-expansion-colon-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["unprefixed-command-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["unprefixed-backtick-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["unprefixed-parameter-expansion"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["ansi-c-hex-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["ansi-c-octal-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["ansi-c-shell-word"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["quoted-double-shell-word"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["quoted-single-shell-word"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["command-shell-word"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["assembled-shell-assignment"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["underscore-assignment"], "_PASSWORD=[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["underscore-option"], "--_password [redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["whitespace-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["whitespace-escaped-shell-option"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["escaped-shell-assignment"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["quoted-shell-assignment"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["line-continuation-assignment"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["repository-url"],
+            "https://[redacted]@example.com/repository",
+        )
+        self.assertEqual(
+            result["metadata"]["repository-url-with-at"],
+            "https://[redacted]@example.com/repository",
+        )
+        self.assertEqual(
+            result["metadata"]["escaped-unicode-malformed"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["embedded-json-with-assignment"],
+            'prefix {"password":"[redacted]"} password=[redacted]',
+        )
+        self.assertEqual(
+            result["metadata"]["nested-descriptor-name-list"],
+            [{"name": ["password"]}, "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["structured-name-list-object"],
+            {"name": ["password"], "value": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["descriptor-with-payload"],
+            {"name": "password", "payload": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["nested-descriptor-list"],
+            {"args": [{"name": "password"}], "value": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["parameters-with-value"],
+            {"parameters": [{"name": "password"}], "value": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["params-with-value"],
+            {"params": [{"name": "password"}], "value": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["parameters-with-payload"],
+            {"parameters": [{"name": "password"}], "payload": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["header-descriptor"],
+            {"authorization_header": "[redacted]", "value": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["header-descriptor-payload"],
+            {"authorization_header": "[redacted]", "payload": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["escaped-descriptor-name"],
+            {r"\u006eame": "password", "value": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["root-bare-header-descriptor"],
+            {
+                "benchmarks": [],
+                "headers": [{"name": "password"}],
+                "opaque": "[redacted]",
+            },
+        )
+        self.assertEqual(
+            result["metadata"]["escaped-unicode-key"][r"\u0070assword"],
+            "[redacted]",
+        )
+        self.assertEqual(result["metadata"]["malformed-json"], "[redacted]")
+        self.assertEqual(
+            result["metadata"]["malformed-api-json"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["quoted-access-assignment"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["option-array"],
+            ["--password", "[redacted]", "--token", "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["option-array-with-dash"],
+            ["--password", "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["option-array-with-other"],
+            ["--password", "[redacted]", "secret"],
+        )
+        self.assertEqual(
+            result["metadata"]["structured-list-args"],
+            {"key": "password", "args": "[redacted]"},
+        )
+        self.assertEqual(
+            result["metadata"]["structured-list-option"],
+            {"option": ["password", "[redacted]"]},
+        )
+        self.assertEqual(
+            result["metadata"]["nested-option-object"],
+            ["--password", "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["header-option"],
+            ["Authorization", "[redacted]", "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["request-headers"],
+            [{"header": "Authorization", "value": "[redacted]"}],
+        )
+        self.assertEqual(
+            result["metadata"]["sequenced-header"],
+            [{"header": "Authorization"}, "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["sequenced-argument"],
+            [{"argument": "password"}, "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["sequenced-params"],
+            [{"params": "password"}, "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["prefixed-header-sequence"],
+            ["prefix", {"header": "Authorization"}, "[redacted]", "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["structured-sensitive-key-sequence"],
+            {"args": [{"password": "[redacted]"}, "[redacted]"]},
+        )
+        self.assertEqual(
+            result["metadata"]["split-structured-list"],
+            [{"name": "password"}, "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["nested-split-list"],
+            [["password"], "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["nested-non-leading-list"],
+            [["command", "password"], "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["nested-nested-descriptor"],
+            [[{"name": "password"}], "[redacted]"],
+        )
+        self.assertEqual(
+            result["metadata"]["non-leading-sensitive-list"],
+            ["command", "password", "[redacted]", "tail"],
+        )
+        self.assertEqual(result["metadata"]["parameters"][0]["arg"], "password")
+        self.assertEqual(result["metadata"]["parameters"][0]["val"], "[redacted]")
+        self.assertEqual(result["metadata"]["parameters"][1]["argument"], "password")
+        self.assertEqual(result["metadata"]["parameters"][1]["value"], "[redacted]")
+        self.assertEqual(result["metadata"]["parameters"][2]["key"], "password")
+        self.assertEqual(result["metadata"]["parameters"][2]["value"], "[redacted]")
+        self.assertEqual(result["metadata"]["parameters"][3]["option"], "password")
+        self.assertEqual(result["metadata"]["parameters"][3]["value"], "[redacted]")
+        self.assertEqual(result["metadata"]["parameters"][4]["flag"], "api-key")
+        self.assertEqual(result["metadata"]["parameters"][4]["value"], "[redacted]")
+        self.assertEqual(result["metadata"]["parameters"][5]["arg"], "pwd")
+        self.assertEqual(result["metadata"]["parameters"][5]["val"], "[redacted]")
+        self.assertEqual(result["metadata"]["parameters"][6]["param"], "password")
+        self.assertEqual(result["metadata"]["parameters"][6]["value"], "[redacted]")
+        self.assertEqual(
+            result["metadata"]["parameters"][7]["argument"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][8]["values"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][9]["parameterValue"], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][10],
+            [
+                "prefix",
+                {"authorization": "[redacted]"},
+                "[redacted]",
+                "[redacted]",
+            ],
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][11], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][12], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][13], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][14], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][15], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][16], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][17], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][18], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][19], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][20], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][21], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][22], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][23], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["parameters"][24], "[redacted]"
+        )
+        self.assertEqual(
+            result["metadata"]["opts"],
+            "host=example password=[redacted] api-key=[redacted] "
+            "--api-key [redacted] --password [redacted] "
+            "--roadblock-password [redacted] --client-secret [redacted] "
+            "--roadblockPassword [redacted] --registryCredentials [redacted] "
+            "--password=[redacted] --token [redacted] --access-token=[redacted] "
+            "--password=[redacted] --roadblockpassword [redacted] "
+            "--registrycredentials [redacted] --password [redacted]",
+        )
+        self.assertEqual(result["metadata"]["registries"]["public"]["push-token"], "[redacted]")
+        self.assertEqual(result["metadata"]["registries"]["public"]["token-file"], "[redacted]")
+        self.assertEqual(result["metadata"]["endpoints"][0]["auth"], "[redacted]")
+        self.assertEqual(result["metadata"]["endpoints"][1]["opts"], "[redacted]")
+
+    def test_redacts_jwt_and_bearer_credentials(self):
+        self.assertEqual(
+            self.operations._redact_metadata(
+                {"arg": "jwt", "val": "do-not-return"}
+            ),
+            {"arg": "jwt", "val": "[redacted]"},
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("--bearer=do-not-return"),
+            "--bearer=[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(
+                {"creds": "do-not-return", "registry-creds": "do-not-return"}
+            ),
+            {"creds": "[redacted]", "registry-creds": "[redacted]"},
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("--creds user:do-not-return"),
+            "--creds [redacted]",
+        )
+
+    def test_get_local_run_metadata_redacts_cookie_credentials(self):
+        run_directory = self.root / "run" / "cookie-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "run-id": "cookie-run",
+                    "headers": {
+                        "Cookie": "session=COOKIESECRET",
+                        "session": "SESSIONSECRET",
+                    },
+                    "opts": "Cookie: session=COOKIESECRET",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(
+            result["metadata"]["headers"],
+            {"Cookie": "[redacted]", "session": "[redacted]"},
+        )
+        self.assertEqual(result["metadata"]["opts"], "[redacted]")
+
+    def test_redacts_short_password_options(self):
+        self.assertEqual(
+            self.operations._redact_metadata("mysql -pSECRET"),
+            "mysql -p[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("mysql -p SECRET"),
+            "mysql -p [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("mysql -p=SECRET"),
+            "mysql -p=[redacted]",
+        )
+
+        self.assertEqual(
+            self.operations._redact_metadata(["mysql", "-p", "SECRET"]),
+            ["mysql", "-p", "[redacted]"],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("mysql -apSECRET"),
+            "mysql -ap[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("curl -auadmin:SECRET"),
+            "curl -au[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("-api-key S3CR3T"),
+            "-api-key [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("-password RANDOMVALUE"),
+            "-password [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("-auth SENTINEL"),
+            "-auth [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("-api_key S3CR3T"),
+            "-api_key [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("-apikey S3CR3T"),
+            "-apikey [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("mysql -P 3306"),
+            "mysql -P 3306",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(["mysql", "-ap", "SECRET"]),
+            ["mysql", "-ap", "[redacted]"],
+        )
+
+    def test_redacts_user_password_options(self):
+        self.assertEqual(
+            self.operations._redact_metadata("curl -u user:SECRET"),
+            "curl -u [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("curl --user=user:SECRET"),
+            "curl --user=[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(["curl", "-u", "user:SECRET"]),
+            ["curl", "-u", "[redacted]"],
+        )
+
+    def test_redacts_structured_user_credentials(self):
+        self.assertEqual(
+            self.operations._redact_metadata({"user": "admin:SECRET"}),
+            {"user": "admin:[redacted]"},
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(
+                {"name": "user", "value": "admin:SECRET"}
+            ),
+            {"name": "user", "value": "admin:[redacted]"},
+        )
+        self.assertEqual(
+            self.operations._redact_metadata('{"user":"admin:SECRET"}'),
+            '{"user":"admin:[redacted]"}',
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("username=admin:SECRET"),
+            "username=admin:[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("user admin:SECRET"),
+            "user admin:[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("username admin:SECRET"),
+            "username admin:[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("--username admin:SECRET"),
+            "--username admin:[redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(["user", "admin:SECRET"]),
+            ["user", "[redacted]"],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(["--username", "admin:SECRET"]),
+            ["--username", "[redacted]"],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata('"user": "admin:SECRET"'),
+            '"user": "admin:[redacted]"',
+        )
+
+    def test_redacts_short_option_descriptor_values(self):
+        metadata = {
+            "iterations": [
+                {
+                    "params": [
+                        {"arg": "-p", "val": "SECRET"},
+                        {"arg": "-u", "val": "admin:SECRET"},
+                        {"arg": "-ap", "val": "SECRET"},
+                    ]
+                }
+            ]
+        }
+
+        self.assertEqual(
+            self.operations._redact_metadata(metadata),
+            {
+                "iterations": [
+                    {
+                        "params": [
+                            {"arg": "-p", "val": "[redacted]"},
+                            {"arg": "-u", "val": "[redacted]"},
+                            {"arg": "-ap", "val": "[redacted]"},
+                        ]
+                    }
+                ]
+            },
+        )
+
+    def test_redacts_option_looking_sensitive_values(self):
+        self.assertEqual(
+            self.operations._redact_metadata("--password --SECRET"),
+            "--password [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata("--password --token"),
+            "--password [redacted]",
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(["--password", "--SECRET"]),
+            ["--password", "[redacted]"],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(["--password", "--abc"]),
+            ["--password", "[redacted]"],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(["--password", "--token", "SECRET"]),
+            ["--password", "[redacted]", "[redacted]"],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(
+                ["--password", "--token", "--region", "SECRET"]
+            ),
+            ["--password", "[redacted]", "[redacted]", "SECRET"],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(
+                "--password --token --region SECRET"
+            ),
+            "--password [redacted]",
+        )
+
+    def test_redacts_container_valued_sensitive_descriptors(self):
+        self.assertEqual(
+            self.operations._redact_metadata(
+                [
+                    "prefix",
+                    {"authorization": ["Authorization"]},
+                    "Bearer",
+                    "do-not-return",
+                ]
+            ),
+            [
+                "prefix",
+                {"authorization": "[redacted]"},
+                "[redacted]",
+                "[redacted]",
+            ],
+        )
+        self.assertEqual(
+            self.operations._redact_metadata(
+                [
+                    "prefix",
+                    {"password": ["password"]},
+                    "Bearer",
+                    "do-not-return",
+                ]
+            ),
+            [
+                "prefix",
+                {"password": "[redacted]"},
+                "[redacted]",
+                "[redacted]",
+            ],
+        )
+
+    def test_redacts_root_container_descriptor_siblings(self):
+        self.assertEqual(
+            self.operations._redact_metadata(
+                {
+                    "benchmarks": [],
+                    "authorization": ["Authorization"],
+                    "config": "Bearer secret",
+                }
+            ),
+            {
+                "benchmarks": [],
+                "authorization": "[redacted]",
+                "config": "[redacted]",
+            },
+        )
+
+    def test_bounds_adversarial_shell_redaction_work(self):
+        value = ('"' + ("a" * 256) + "$" + ("b" * 256) + "x") * 2020
+        with self.assertRaises(OperationError) as raised:
+            self.operations._redact_metadata(value)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_redaction_handles_large_unmatched_quote_tokens(self):
+        value = "x {" + ('"' * 10_000)
+
+        self.assertEqual(self.operations._redact_metadata(value), value)
+
+    def test_redaction_work_limit_does_not_mask_later_safe_metadata(self):
+        metadata = {
+            "first": "a" * 12_000,
+            "second": "b" * 5_000,
+            "later-safe": "preserve-this-value",
+        }
+
+        self.assertEqual(self.operations._redact_metadata(metadata), metadata)
+
+    def test_redaction_work_limit_preserves_long_plain_text(self):
+        value = "plain-text " * 2_000
+
+        self.assertGreater(len(value), MAX_METADATA_REDACTION_WORK)
+        self.assertEqual(self.operations._redact_metadata(value), value)
+
+        prose = "This explains that a field name is documented here. " * 500
+        self.assertGreater(len(prose), MAX_METADATA_REDACTION_WORK)
+        self.assertEqual(self.operations._redact_metadata(prose), prose)
+
+        safe_option = "plain-text " * 2_000 + "--region us-east-1"
+        self.assertEqual(self.operations._redact_metadata(safe_option), safe_option)
+
+    def test_get_local_run_metadata_rejects_long_attached_credentials(self):
+        run_directory = self.root / "run" / "long-attached-credential-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps({
+                    "opts": (
+                        "plain-text " * 2_000
+                    + "mysql -p9f81d2 curl -uadmin:9f81d2 password SECRET "
+                    "DB_PASS=S3CR3T password_secret=S3CR3T "
+                    "--password.foo=S3CR3T password[0]=S3CR3T"
+                )
+            }),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_long_metadata_scans_past_benign_prefixes(self):
+        value = (
+            "plain-text " * 2_000
+            + "password is a field name; password ACTUAL_SECRET "
+            + "DB_PASS SECRET clientSecret SECRET username=admin:SECRET "
+            + 'clientsecret SECRET {"name":"password","value":"SECRET"} '
+            + '{"user":"admin:SECRET"} '
+            + "'password': RANDOMVALUE pa\"ss\"word RANDOMVALUE "
+            + "-token SECRET -token=SECRET"
+        )
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations._redact_metadata(value)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+        for suffix in ("client-secret SECRET", "DB_PASS SECRET", "password_secret SECRET"):
+            with self.assertRaises(OperationError) as raised:
+                self.operations._redact_metadata("x" * 17_000 + " " + suffix)
+            self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_get_local_run_metadata_rejects_excessive_nesting(self):
+        run_directory = self.root / "run" / "deep-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata: dict[str, object] = {"run-id": "run-deep"}
+        cursor = metadata
+        for index in range(MAX_METADATA_DEPTH + 1):
+            child: dict[str, object] = {f"level-{index}": {}}
+            cursor.update(child)
+            cursor = child[f"level-{index}"]  # type: ignore[assignment]
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_get_local_run_metadata_redacts_root_descriptor_unknown_payload(self):
+        run_directory = self.root / "run" / "root-descriptor-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "benchmarks": [],
+                    "parameters": [{"name": "password"}],
+                    "payload": "do-not-return",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(
+            result["metadata"],
+            {
+                "benchmarks": [],
+                "parameters": [{"name": "password"}],
+                "payload": "[redacted]",
+            },
+        )
+
+    def test_redaction_fails_closed_at_embedded_fragment_limit(self):
+        value = "prefix " + "{}" * (MAX_METADATA_JSON_FRAGMENTS + 1)
+
+        self.assertEqual(CrucibleOperations._redact_metadata(value), "[redacted]")
+
+    def test_get_local_run_metadata_redacts_root_sensitive_key_payload(self):
+        run_directory = self.root / "run" / "root-sensitive-key-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "benchmarks": [],
+                    "authorization": "Authorization",
+                    "payload": "do-not-return",
+                    "value": "do-not-return",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(
+            result["metadata"],
+            {
+                "benchmarks": [],
+                "authorization": "[redacted]",
+                "payload": "[redacted]",
+                "value": "[redacted]",
+            },
+        )
+
+    def test_get_local_run_metadata_redacts_root_sensitive_key_opaque(self):
+        run_directory = self.root / "run" / "root-sensitive-opaque-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "benchmarks": [],
+                    "authorization": "Authorization",
+                    "opaque": "do-not-return",
+                    "run-id": "root-sensitive-opaque",
+                    "benchmark": "fio",
+                    "samples": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(
+            result["metadata"],
+            {
+                "benchmarks": [],
+                "authorization": "[redacted]",
+                "opaque": "[redacted]",
+                "run-id": "root-sensitive-opaque",
+                "benchmark": "fio",
+                "samples": [],
+            },
+        )
+
+    def test_get_local_run_metadata_maps_parser_recursion_error(self):
+        run_directory = self.root / "run" / "parser-deep-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        depth = 5000
+        metadata_path.write_text(
+            '{"level":' * depth + "null" + "}" * depth,
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_get_local_run_metadata_maps_embedded_json_recursion_error(self):
+        run_directory = self.root / "run" / "embedded-deep-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        depth = 5000
+        embedded = '{"level":' * depth + "null" + "}" * depth
+        metadata_path.write_text(json.dumps({"embedded": embedded}), encoding="utf-8")
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_load_run_metadata_maps_embedded_json_recursion_error(self):
+        run_directory = self.root / "run" / "loader-embedded-deep-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        depth = 10000
+        metadata_path.write_text(
+            '{"level":' * depth + "null" + "}" * depth,
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations._load_run_metadata(run_directory)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_get_local_run_metadata_maps_oversized_integer_error(self):
+        run_directory = self.root / "run" / "oversized-integer-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            '{"value":' + ("9" * 5000) + "}",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(raised.exception.code, "invalid_run")
+
+    def test_get_local_run_metadata_redacts_compressed_artifact(self):
+        run_directory = self.root / "run" / "compressed-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json.xz"
+        metadata_path.parent.mkdir(parents=True)
+        with lzma.open(metadata_path, "wt", encoding="utf-8") as stream:
+            json.dump(
+                {
+                    "run-id": "run-compressed",
+                    "password": "do-not-return",
+                    "nested": {"accessToken": "do-not-return"},
+                    "serialized-json": '{"token":"do-not-return"}',
+                },
+                stream,
+            )
+
+        result = self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(result["metadata"]["run-id"], "run-compressed")
+        self.assertEqual(result["metadata"]["password"], "[redacted]")
+        self.assertEqual(result["metadata"]["nested"]["accessToken"], "[redacted]")
+        self.assertEqual(
+            result["metadata"]["serialized-json"], '{"token":"[redacted]"}'
+        )
+
+    def test_get_local_run_metadata_bounds_decompressed_compressed_artifact(self):
+        run_directory = self.root / "run" / "small-compressed-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json.xz"
+        metadata_path.parent.mkdir(parents=True)
+        with lzma.open(metadata_path, "wt", encoding="utf-8") as stream:
+            json.dump({"run-id": "compressed-small"}, stream)
+
+        decoded_size = len('{"run-id": "compressed-small"}')
+        self.assertGreater(metadata_path.stat().st_size, decoded_size + 1)
+        result = self.operations.get_local_run_metadata(
+            run_directory, max_bytes=decoded_size + 1
+        )
+
+        self.assertEqual(result["metadata"]["run-id"], "compressed-small")
+
+    def test_get_local_run_metadata_uses_bounded_xz_decoder(self):
+        run_directory = self.root / "run" / "bounded-decoder-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json.xz"
+        metadata_path.parent.mkdir(parents=True)
+        with lzma.open(metadata_path, "wt", encoding="utf-8") as stream:
+            json.dump({"run-id": "bounded-decoder"}, stream)
+
+        with patch(
+            "crucible_mcp.operations.lzma.LZMADecompressor",
+            wraps=lzma.LZMADecompressor,
+        ) as decoder:
+            result = self.operations.get_local_run_metadata(run_directory)
+
+        decoder.assert_called_once_with(
+            format=lzma.FORMAT_XZ,
+            memlimit=MAX_METADATA_DECOMPRESSOR_MEMORY,
+        )
+        self.assertEqual(result["metadata"]["run-id"], "bounded-decoder")
+
+    def test_get_local_run_metadata_accepts_high_preset_xz(self):
+        run_directory = self.root / "run" / "high-preset-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json.xz"
+        metadata_path.parent.mkdir(parents=True)
+        with lzma.open(metadata_path, "wt", encoding="utf-8", preset=9) as stream:
+            json.dump({"run-id": "high-preset"}, stream)
+
+        result = self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(result["metadata"]["run-id"], "high-preset")
+
+    def test_get_local_run_metadata_rejects_expanded_redacted_response(self):
+        run_directory = self.root / "run" / "expanded-metadata-run"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps({"entries": [{"password": "x"} for _ in range(40000)]}),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(OperationError) as raised:
+            self.operations.get_local_run_metadata(run_directory)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
 
     def test_list_run_artifacts_returns_bounded_metadata_for_approved_paths(self):
         run_directory = self.root / "run" / "artifact-run"
@@ -432,9 +1666,10 @@ class TestCrucibleOperations(unittest.TestCase):
             "crucible_mcp.operations.os.scandir",
             side_effect=PermissionError("unreadable"),
         ):
-            result = self.operations.list_run_artifacts(run_directory)
+            with self.assertRaises(OperationError) as raised:
+                self.operations.list_run_artifacts(run_directory)
 
-        self.assertFalse(result["complete"])
+        self.assertEqual(raised.exception.code, "artifact_traversal_failed")
 
     def test_list_run_artifacts_handles_entry_inspection_errors(self):
         run_directory = self.root / "run" / "entry-error"
@@ -480,6 +1715,33 @@ class TestCrucibleOperations(unittest.TestCase):
             result = self.operations.list_run_artifacts(run_directory)
 
         self.assertFalse(result["complete"])
+
+    def test_list_run_artifacts_advances_after_iterator_errors(self):
+        run_directory = self.root / "run" / "iterator-error"
+        (run_directory / "run" / "iterations").mkdir(parents=True)
+
+        class FailingIterator:
+            def __next__(self):
+                raise OSError("iterator failed")
+
+            def close(self):
+                return None
+
+        real_scandir = os.scandir
+        calls = 0
+
+        def failing_scandir(path):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                return FailingIterator()
+            return real_scandir(path)
+
+        with patch("crucible_mcp.operations.os.scandir", side_effect=failing_scandir):
+            result = self.operations.list_run_artifacts(run_directory)
+
+        self.assertFalse(result["complete"])
+        self.assertGreater(result["next_offset"], result["offset"])
 
     def test_list_run_artifacts_does_not_follow_raced_directory_symlinks(self):
         run_directory = self.root / "run" / "directory-symlink-race"
@@ -740,6 +2002,18 @@ class TestCrucibleOperations(unittest.TestCase):
             lambda: self.operations.list_local_run_tags(outside),
             lambda: self.operations.get_local_run_summary(outside),
             lambda: self.operations.get_local_run_metadata(outside),
+        ):
+            with self.subTest(operation=operation):
+                with self.assertRaises(OperationError) as raised:
+                    operation()
+                self.assertEqual(raised.exception.code, "run_path_rejected")
+
+    def test_nul_run_paths_are_structured_operation_errors(self):
+        invalid_path = Path(f"{self.root}/run\x00invalid")
+        for operation in (
+            lambda: self.operations.get_local_run_summary(invalid_path),
+            lambda: self.operations.get_local_run_metadata(invalid_path),
+            lambda: self.operations.get_run_artifact(invalid_path, "run/result-summary.json"),
         ):
             with self.subTest(operation=operation):
                 with self.assertRaises(OperationError) as raised:

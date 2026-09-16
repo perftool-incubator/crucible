@@ -30,7 +30,11 @@ class TestServer(unittest.TestCase):
 
         server.jobs = JobStore(root / "jobs.db")
         crucible_home = Path(os.environ.get("CRUCIBLE_HOME", Path.cwd()))
-        server.operations = CrucibleOperations(crucible_home, InputPolicy([root / "inputs"]))
+        server.operations = CrucibleOperations(
+            crucible_home,
+            InputPolicy([root / "inputs"]),
+            run_root=root / "runs",
+        )
         server.max_request_bytes = 1024 * 1024
         self.server = server
         self.thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -152,6 +156,32 @@ class TestServer(unittest.TestCase):
         })
         _, payload = self.request("POST", "/mcp", body, self.token)
         self.assertIn("endpoints", payload["result"]["structuredContent"])
+
+    def test_metadata_response_bound_includes_wire_request_id(self):
+        run_directory = self.server.operations.local_run_root / "wire-metadata"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps({"entries": [{"password": "x"} for _ in range(20000)]}),
+            encoding="utf-8",
+        )
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "request-" + ("x" * 100000),
+                "method": "tools/call",
+                "params": {
+                    "name": "get_local_run_metadata",
+                    "arguments": {"run_path": str(run_directory)},
+                },
+            }
+        )
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("result_too_large", payload["error"]["message"])
 
     def test_list_active_runs_is_bounded_and_paginated(self):
         jobs = [

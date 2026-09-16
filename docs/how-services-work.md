@@ -268,7 +268,10 @@ configured OpenSearch/CDM result; it does not remove local run files.
 `get_local_run_summary` reads the local `run/result-summary.json` artifact and
 does not query CDM.
 `get_local_run_metadata` reads the local `rickshaw-run.json[.xz]` artifact and
-does not query CDM.
+does not query CDM. Credential-like fields are recursively replaced with
+`[redacted]` before metadata is returned; this includes passwords, tokens,
+credentials, secrets, and authorization fields in compressed and uncompressed
+metadata.
 `list_run_artifacts` returns only metadata and stable relative paths from the
 approved result subtrees: `run/iterations`, `run/tool-data`, `run/sysinfo`, and
 `run/opensearch`, plus `run/result-summary.json`. `get_run_artifact` accepts

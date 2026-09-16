@@ -787,9 +787,13 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "list_local_runs":
                 value = self.server.operations.list_local_runs(arguments.get("limit", 1000))
             elif name == "get_local_run_summary":
-                value = self.server.operations.get_local_run_summary(Path(arguments["run_path"]))
+                value = self.server.operations.get_local_run_summary(
+                    Path(arguments["run_path"]), request_id=request_id
+                )
             elif name == "get_local_run_metadata":
-                value = self.server.operations.get_local_run_metadata(Path(arguments["run_path"]))
+                value = self.server.operations.get_local_run_metadata(
+                    Path(arguments["run_path"]), request_id=request_id
+                )
             elif name in {"list_run_artifacts", "get_run_artifact"}:
                 if "run_path" in arguments:
                     artifact_run_path = Path(arguments["run_path"])
