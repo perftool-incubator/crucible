@@ -5,6 +5,29 @@
 # run file name when copied into base_run_dir
 run_file_json="run-file.json"
 
+function mcp_event() {
+    if [ -z "${CRUCIBLE_MCP_EVENT_FILE}" ]; then
+        return 0
+    fi
+    local state="${1}"
+    local run_directory="${2:-}"
+    local rickshaw_run_id="${3:-}"
+    local cdm_run_id="${4:-}"
+    local runner_container_id="${5:-}"
+    if [ -n "${run_directory}" ]; then
+        jq -cn --arg state "${state}" --arg run_directory "${run_directory}" \
+            --arg rickshaw_run_id "${rickshaw_run_id}" --arg cdm_run_id "${cdm_run_id}" \
+            --arg runner_container_id "${runner_container_id}" \
+            '{state: $state, run_directory: $run_directory} +
+             (if $rickshaw_run_id != "" then {rickshaw_run_id: $rickshaw_run_id} else {} end) +
+             (if $cdm_run_id != "" then {cdm_run_id: $cdm_run_id} else {} end) +
+             (if $runner_container_id != "" then {runner_container_id: $runner_container_id} else {} end)' \
+            >> "${CRUCIBLE_MCP_EVENT_FILE}"
+    else
+        jq -cn --arg state "${state}" '{state: $state}' >> "${CRUCIBLE_MCP_EVENT_FILE}"
+    fi
+}
+
 LOG_DB="${1}"
 shift
 
@@ -264,6 +287,9 @@ elif [ "${1}" == "index" ]; then
 
     if start_opensearch; then
         index_run "${access_opt}" "${cdmver_opt}" "$base_run_dir"
+        EXIT_VAL=$?
+    else
+        EXIT_VAL=$?
     fi
 elif [ "${1}" == "extract" ]; then
     shift
@@ -404,6 +430,7 @@ elif [ "${1}" == "run" ]; then
     benchmarks=$(echo ${benchmark_names[@]} | sed -e 's/ /-and-/g')
     base_run_dir="${var_run_crucible}/${benchmarks}--${datetime}--${SESSION_ID}"
     mkdir -pv "${base_run_dir}/config" >/dev/null
+    mcp_event starting "${base_run_dir}"
 
     # Copy the all-in-one json inside the temp base run dir / config
     # so containers can access on blockbreaker commands
@@ -565,6 +592,7 @@ elif [ "${1}" == "run" ]; then
     echo "Adding run SSH key as an authorized key"
     cat ${RUN_SSH_DIR}/${SESSION_ID}.pub >> ${SSH_AUTH_KEYS_FILE}
 
+    mcp_event running "${base_run_dir}"
     ${podman_run} --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_run_cmd}
     RC=$?
 
@@ -573,9 +601,11 @@ elif [ "${1}" == "run" ]; then
     sed -i "/${SSH_KEY_PREFIX}-${SESSION_ID}/d" ${SSH_AUTH_KEYS_FILE}
 
     if [ ${RC} == 0 ]; then
+        mcp_event postprocessing "${base_run_dir}"
         post_process_run ${base_run_dir} &&\
         get_instance_metadata "" &&\
         echo "Using instance ${instance} for indexing" &&\
+        mcp_event indexing "${base_run_dir}" &&\
         index_run "${access_opt}" "${cdmver_opt}" "$base_run_dir" &&\
         get_result_to_file "${base_run_dir}" --run $(extract_run_id "${base_run_dir}")
         EXIT_VAL=$?
@@ -595,6 +625,12 @@ elif [ "${1}" == "run" ]; then
     done
     if [ ${EXIT_VAL} == 0 ]; then
         EXIT_VAL=${RC}
+    fi
+    if [ ${EXIT_VAL} == 0 ]; then
+        rickshaw_run_id=$(extract_run_id "${base_run_dir}" 2>/dev/null)
+        cdm_run_id=$(jq -r '.cdm_run_id // .["cdm-run-id"] // empty' \
+            "${base_run_dir}/run/result-summary.json" 2>/dev/null)
+        mcp_event completed "${base_run_dir}" "${rickshaw_run_id}" "${cdm_run_id}"
     fi
 elif [ "${1}" == "archive" ]; then
     shift

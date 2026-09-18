@@ -578,7 +578,7 @@ _complete_start_stop() {
     done
 
     local remaining
-    remaining=$(_crucible_filter_used_flags 2 all cdm-server httpd image-sourcing opensearch valkey)
+    remaining=$(_crucible_filter_used_flags 2 all cdm-server httpd image-sourcing mcp-server opensearch valkey)
     COMPREPLY=($(compgen -W "${remaining}" -- "${cur}"))
 }
 
@@ -632,15 +632,15 @@ _crucible_completions() {
 
     # Position 2: top-level commands
     if [ "${num_words}" -eq 2 ]; then
-        COMPREPLY=($(compgen -W "help log repo registries validate userenvs tools benchmarks update run run-ci wrapper console start stop ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${cur}"))
+        COMPREPLY=($(compgen -W "help log repo registries validate userenvs tools benchmarks update run run-ci wrapper console start stop mcp ps images get rm index postprocess opensearch extract ls tags archive unarchive reset" -- "${cur}"))
         return
     fi
 
     # Position 3: subcommands
     if [ "${num_words}" -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
-            help)
-                COMPREPLY=($(compgen -W "archive benchmarks console extract get images index log ls opensearch postprocess ps registries repo reset rm run run-ci start stop tags tools unarchive update userenvs validate wrapper" -- "${cur}"))
+                help)
+                COMPREPLY=($(compgen -W "archive benchmarks console extract get images index log ls mcp opensearch postprocess ps registries repo reset rm run run-ci start stop tags tools unarchive update userenvs validate wrapper" -- "${cur}"))
                 ;;
             tools|benchmarks)
                 COMPREPLY=($(compgen -W "list" -- "${cur}"))
@@ -675,6 +675,9 @@ _crucible_completions() {
                 ;;
             start|stop)
                 _complete_start_stop
+                ;;
+            mcp)
+                COMPREPLY=($(compgen -W "rotate-token" -- "${cur}"))
                 ;;
             rm)
                 _complete_rm

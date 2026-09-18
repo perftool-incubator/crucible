@@ -208,6 +208,7 @@ before they cause runtime failures.
 | How engines are synchronized | [How roadblock works](how-roadblock-works.md) |
 | How results are stored and queried | [How CDM works](how-cdm-works.md) |
 | How supporting services run | [How services work](how-services-work.md) |
+| How agentic-perf uses Crucible MCP | [Agentic-perf MCP workflow](mcp-agentic-perf-workflow.md) |
 | What the controller container is | [How the controller image works](how-the-controller-image-works.md) |
 | How repos are managed | [How the repo system works](how-the-repo-system-works.md) |
 | How releases work | [How releases work](how-releases-work.md) |
