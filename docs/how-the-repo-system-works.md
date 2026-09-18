@@ -248,8 +248,10 @@ For each repo, the `_update-git` script:
 3. Checks out the target branch
 4. In **follow mode**: merges upstream changes via
    `git pull --ff-only`
-5. In **locked mode**: stays at the current commit (fetch
-   only, no checkout of new changes)
+5. In **locked mode**: stays at the configured commit. If
+   `repos.json` changes the pinned target, the update does not
+   migrate the checkout automatically; it rejects the mismatched
+   checkout until an operator explicitly activates the new target
 6. Reapplies stashed modifications
 
 ### New subproject discovery

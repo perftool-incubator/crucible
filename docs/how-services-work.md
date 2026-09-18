@@ -210,6 +210,8 @@ through the standard `tools/list` request; the current interface is:
 | `unarchive_local_run` | Restore a local run archive into the approved run root. |
 | `describe_benchmark` | Return metadata for one installed benchmark. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
+| `prepare_run` | Build a bounded, side-effect-free plan showing benchmark expansion, samples, tools, and static topology. |
+| `estimate_run` | Return derived run counts and runtime-confidence information without executing the run. |
 | `start_run` | Submit an asynchronous, idempotent Crucible run. |
 | `postprocess_local_run` | Post-process an approved local run directory asynchronously. |
 | `index_local_run` | Generate CDM documents and index an approved local run directory asynchronously. |
@@ -236,6 +238,25 @@ validation types—such as multiplex, workshop, tool metadata, repository,
 service, and registry configuration—remain CLI-only because they support
 benchmark/tool development or host administration rather than normal MCP run
 execution.
+
+`prepare_run` and `estimate_run` are read-only planning operations. They reuse
+Rickshaw's canonical parameter-expansion rules through the installed planning
+library, return bounded parameter prefixes with exact cardinalities, and honor
+client-supplied ceilings for parameter sets, engine IDs, tool entries, and
+serialized response bytes. They do not
+create run directories, generate credentials, contact endpoints, start
+containers, write CDM data, or execute benchmark runtime helpers. Runtime
+duration is reported as unavailable unless a future trusted static source is
+provided; neither operation predicts benchmark performance. To bound planning
+work, Crucible accepts at most 100 benchmark occurrences and rejects requests
+whose requested parameter-set ceiling would allow more than 100,000 aggregate
+expansions or 1,000,000 aggregate parameter entries; reduce the client-supplied
+ceiling or split the workload when the `planning_limit` error is returned. The
+planner tools require the companion planner APIs from the managed Rickshaw and
+Multiplex checkouts. Those repositories follow their configured upstream
+branches until the planner commits are published as fetchable release targets;
+when the APIs are absent, the tools return `planner_unavailable` rather than
+silently using an unrelated globally installed package.
 
 #### MCP documentation resources
 

@@ -1,12 +1,16 @@
 """Typed, non-execution Crucible operations for the MCP contract."""
 
+import copy
+from contextlib import contextmanager
 import errno
 import json
 import lzma
+import logging
 import os
 import re
 import sqlite3
 import stat
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -15,10 +19,12 @@ from urllib.error import URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-from jsonschema import Draft201909Validator
+from jsonschema import Draft201909Validator, SchemaError
 
 from .documentation import DocumentationCatalog
 from .policy import InputPolicy, PolicyError
+
+_PLANNING_LOCK = threading.RLock()
 
 MAX_LOG_RESPONSE_BYTES = 1_048_576
 MAX_ARTIFACT_LIST_LIMIT = 1000
@@ -29,6 +35,16 @@ MAX_ARTIFACT_METADATA_BYTES = 262_144
 MAX_ARTIFACT_READ_BYTES = 131_072
 MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
 MAX_METADATA_RESPONSE_BYTES = 1_048_576
+MAX_PLAN_RESPONSE_BYTES = 1_048_576
+MAX_PLAN_BENCHMARKS = 100
+MAX_PLAN_PARAMETER_WORK = 100_000
+MAX_PLAN_PARAMETER_ENTRY_WORK = 1_000_000
+MAX_PLAN_RAW_PARAMETER_BYTES = 262_144
+MAX_PLAN_RAW_PARAMETER_ENTRIES = 10_000
+MAX_PLAN_REQUIREMENTS_BYTES = 262_144
+MAX_PLAN_MATERIALIZED_BYTES = 8 * MAX_PLAN_RESPONSE_BYTES
+MAX_PLAN_ENGINE_ID_TOKEN_CHARS = 256
+MAX_PLAN_ENGINE_ID_BYTES = 8 * MAX_PLAN_RESPONSE_BYTES
 MAX_LOCAL_RUN_OFFSET = 1_000_000
 # XZ preset 9 uses a 64 MiB dictionary and needs additional decoder memory;
 # keep the decompressed-output bound separate so valid high-preset metadata is
@@ -434,6 +450,8 @@ class CrucibleOperations:
                 "get_log_session",
                 "search_logs",
                 "validate_run",
+                "prepare_run",
+                "estimate_run",
                 "start_run",
                 "get_run_status",
                 "get_run_logs",
@@ -3257,6 +3275,972 @@ class CrucibleOperations:
         except (OSError, json.JSONDecodeError) as exc:
             raise OperationError("user", "run-file is not valid JSON", "invalid_json") from exc
         return self.validate_run(document)
+
+    def prepare_run(
+        self,
+        document: Any,
+        max_parameter_sets: int = 1000,
+        max_engine_ids: int = 1000,
+        max_tool_entries: int = 1000,
+        max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
+        *,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Return a bounded, side-effect-free plan for an inline run document."""
+
+        self._validate_plan_response_limit(max_response_bytes)
+        plan = self._build_run_plan(
+            document, max_parameter_sets, max_engine_ids, max_tool_entries
+        )
+        return self._bound_plan_response(plan, max_response_bytes, request_id)
+
+    def _build_run_plan(
+        self,
+        document: Any,
+        max_parameter_sets: int = 1000,
+        max_engine_ids: int = 1000,
+        max_tool_entries: int = 1000,
+    ) -> dict[str, Any]:
+        """Build a plan without applying an operation-specific response projection."""
+
+        # Let the planner produce its structured validation result for invalid
+        # documents before applying expansion limits.  Otherwise a malformed
+        # document can be reported as a resource-limit failure merely because
+        # it contains a large invalid benchmark list.
+        if isinstance(document, dict):
+            validation = self.validate_run(document)
+            if validation.get("valid"):
+                self._validate_plan_work(document, max_parameter_sets, max_engine_ids)
+
+        rickshaw_dir = self.crucible_home / "subprojects" / "core" / "rickshaw"
+        multiplex_dir = self.crucible_home / "subprojects" / "core" / "multiplex"
+        for path in (multiplex_dir, rickshaw_dir):
+            path_string = str(path)
+            if path_string in sys.path:
+                sys.path.remove(path_string)
+            sys.path.insert(0, path_string)
+        try:
+            import importlib
+
+            for module_name, module_root in (
+                ("rickshaw_lib.run_planner", rickshaw_dir),
+                ("rickshaw_lib", rickshaw_dir),
+                ("multiplex", multiplex_dir),
+            ):
+                loaded = sys.modules.get(module_name)
+                if loaded is not None and not self._module_under_root(loaded, module_root):
+                    del sys.modules[module_name]
+            planner_module = importlib.import_module("rickshaw_lib.run_planner")
+            multiplex = importlib.import_module("multiplex")
+            if not self._module_under_root(planner_module, rickshaw_dir) or not self._module_under_root(
+                multiplex, multiplex_dir
+            ):
+                raise ImportError("planner dependencies are not from managed checkouts")
+            self._require_planner_api(multiplex)
+            PlannerLimits = planner_module.PlannerLimits
+            RunPlanner = planner_module.RunPlanner
+        except (ImportError, AttributeError) as exc:
+            raise OperationError(
+                "framework",
+                "Rickshaw run planner is unavailable",
+                "planner_unavailable",
+            ) from exc
+        try:
+            planner = RunPlanner(
+                self.crucible_home / "subprojects" / "core" / "rickshaw",
+                multiplex,
+                self.crucible_home / "subprojects" / "benchmarks",
+                benchmark_resolver=self._benchmark_directory,
+            )
+            # Multiplex's general expansion path has its own internal lock,
+            # but apply_flat_params() also mutates module-global validation
+            # state without taking that lock. Serialize both planner phases
+            # through one process-wide lock so a tool plan cannot overwrite
+            # another request's requirements while it is being expanded.
+            with _PLANNING_LOCK, self._suppress_planner_diagnostics(multiplex):
+                plan = planner.plan(
+                    document,
+                    PlannerLimits(
+                        max_parameter_sets=max_parameter_sets,
+                        max_engine_ids=max_engine_ids,
+                        max_tool_entries=max_tool_entries,
+                    ),
+                )
+            for benchmark in plan.get("benchmarks", []):
+                parameter_sets = benchmark.get("parameter_sets", {})
+                if "items" in parameter_sets:
+                    parameter_sets["items"] = self._redact_metadata(
+                        parameter_sets["items"]
+                    )
+            if "tools" in plan and "entries" in plan["tools"]:
+                plan["tools"]["entries"] = self._redact_metadata(
+                    plan["tools"]["entries"]
+                )
+            if plan.get("validation", {}).get("valid"):
+                integration_errors = self._validate_and_resolve_plan_inputs(
+                    document, plan, multiplex, max_tool_entries
+                )
+                if integration_errors:
+                    plan["validation"]["valid"] = False
+                    plan["validation"].setdefault("errors", []).extend(
+                        integration_errors
+                    )
+            return plan
+        except OperationError:
+            raise
+        except ImportError as exc:
+            raise OperationError(
+                "framework", "Multiplex expansion library is unavailable", "planner_unavailable"
+            ) from exc
+        except ValueError as exc:
+            raise OperationError("user", str(exc), "invalid_plan") from exc
+        except OSError as exc:
+            raise OperationError(
+                "framework", "run planner is unavailable", "planner_unavailable"
+            ) from exc
+
+    def _validate_and_resolve_plan_inputs(
+        self,
+        document: dict[str, Any],
+        plan: dict[str, Any],
+        multiplex: Any,
+        max_tool_entries: int,
+    ) -> list[dict[str, str]]:
+        """Validate installed integrations and project their effective inputs."""
+
+        errors: list[dict[str, str]] = []
+        errors.extend(self._validate_plan_endpoints(document, plan))
+
+        raw_tool_entries = document.get("tool-params")
+        all_tool_entries = raw_tool_entries
+        if all_tool_entries is None:
+            all_tool_entries = plan.get("tools", {}).get("entries", [])
+        if not isinstance(all_tool_entries, list):
+            return errors + [{
+                "code": "invalid_tool_params",
+                "message": "tool-params must be an array",
+            }]
+
+        explicit_tools = raw_tool_entries is not None
+        input_truncated = len(all_tool_entries) > max_tool_entries
+        if explicit_tools:
+            errors.extend(self._validate_tool_params_schema(all_tool_entries))
+
+        installed_tools = {
+            entry["name"]
+            for entry in self.list_tools()
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+        }
+        active_entries: list[tuple[int, dict[str, Any]]] = []
+        tool_counts: dict[str, int] = {}
+        malformed_count = 0
+        invalid_name_count = 0
+        unknown_tools: set[str] = set()
+        for index, raw_entry in enumerate(all_tool_entries):
+            if not isinstance(raw_entry, dict):
+                malformed_count += 1
+                continue
+            if raw_entry.get("enabled") == "no":
+                continue
+            entry = copy.deepcopy(raw_entry)
+            tool_name = entry.get("tool")
+            if not isinstance(tool_name, str) or not tool_name:
+                invalid_name_count += 1
+                continue
+            if tool_name not in installed_tools:
+                unknown_tools.add(tool_name)
+                continue
+            active_entries.append((index, entry))
+            tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+
+        if malformed_count:
+            errors.append({
+                "code": "invalid_tool_params",
+                "message": f"{malformed_count} tool-params entries must be objects",
+            })
+        if invalid_name_count:
+            errors.append({
+                "code": "invalid_tool_params",
+                "message": f"{invalid_name_count} tool-params entries have no valid tool name",
+            })
+        if unknown_tools:
+            names = sorted(unknown_tools)
+            preview = ", ".join(names[:8])
+            suffix = " and more" if len(names) > 8 else ""
+            errors.append({
+                "code": "not_found",
+                "message": f"tools are not installed: {preview}{suffix}",
+            })
+
+        seen_tool_ids: set[str] = set()
+        invalid_entry_indexes: set[int] = set()
+        resolved_entries: list[dict[str, Any]] = []
+        for index, entry in active_entries:
+            tool_name = entry["tool"]
+            tool_id = entry.get("id")
+            is_multiple = tool_counts[tool_name] > 1
+            if is_multiple and not isinstance(tool_id, str):
+                invalid_entry_indexes.add(index)
+                errors.append({
+                    "code": "invalid_tool_params",
+                    "message": (
+                        f"tool {tool_name} appears multiple times and each active "
+                        "entry requires an id"
+                    ),
+                })
+                continue
+            if not is_multiple and tool_id is not None:
+                invalid_entry_indexes.add(index)
+                errors.append({
+                    "code": "invalid_tool_params",
+                    "message": f"tool {tool_name} has an id but is only specified once",
+                })
+                continue
+            if tool_id is not None:
+                if not isinstance(tool_id, str):
+                    invalid_entry_indexes.add(index)
+                    errors.append({
+                        "code": "invalid_tool_params",
+                        "message": f"tool id for {tool_name} must be a string",
+                    })
+                    continue
+                if not tool_id.startswith(f"{tool_name}-") or len(tool_id) == len(tool_name) + 1:
+                    invalid_entry_indexes.add(index)
+                    errors.append({
+                        "code": "invalid_tool_params",
+                        "message": f"tool id {tool_id!r} must start with {tool_name}-",
+                    })
+                    continue
+                if tool_id in seen_tool_ids:
+                    invalid_entry_indexes.add(index)
+                    errors.append({
+                        "code": "invalid_tool_params",
+                        "message": f"duplicate tool id: {tool_id}",
+                    })
+                    continue
+                seen_tool_ids.add(tool_id)
+
+        for index, entry in active_entries:
+            if index >= max_tool_entries or index in invalid_entry_indexes:
+                continue
+
+            tool_name = entry["tool"]
+            tool_directory = self._tool_directory(tool_name)
+            if tool_directory is None:
+                errors.append({
+                    "code": "not_found",
+                    "message": f"tool is not installed: {tool_name}",
+                })
+                continue
+            params = entry.get("params", [])
+            if isinstance(params, list):
+                params = [
+                    {
+                        key: value
+                        for key, value in copy.deepcopy(param).items()
+                        if key != "enabled"
+                    }
+                    for param in params
+                    if isinstance(param, dict) and param.get("enabled") != "no"
+                ]
+            elif "params" in entry:
+                errors.append({
+                    "code": "invalid_tool_params",
+                    "message": f"tool {tool_name} params must be an array",
+                })
+                continue
+            multiplex_path = tool_directory / "multiplex.json"
+            has_multiplex = multiplex_path.is_file()
+            if has_multiplex:
+                try:
+                    requirements = json.loads(
+                        self._read_bounded_utf8(
+                            multiplex_path, MAX_PLAN_REQUIREMENTS_BYTES
+                        )
+                    )
+                    with _PLANNING_LOCK, self._suppress_planner_diagnostics(multiplex):
+                        expanded = multiplex.apply_flat_params(params, requirements)
+                    if expanded is None:
+                        raise ValueError("tool parameters produced no effective set")
+                    params = expanded
+                except (Exception, SystemExit) as exc:
+                    errors.append({
+                        "code": "invalid_tool_params",
+                        "message": f"tool {tool_name} parameter expansion failed: {exc}",
+                    })
+                    continue
+            if "params" in entry or has_multiplex:
+                entry["params"] = params
+            entry.pop("enabled", None)
+            resolved_entries.append(entry)
+
+        tool_plan = plan.setdefault("tools", {})
+        tool_plan["entries"] = self._redact_metadata(
+            resolved_entries[:max_tool_entries]
+        )
+        tool_plan["truncated"] = (
+            bool(tool_plan.get("truncated"))
+            or input_truncated
+            or len(resolved_entries) > max_tool_entries
+        )
+        plan.setdefault("limits", {})["truncated"] = (
+            plan.get("limits", {}).get("truncated", False) or tool_plan["truncated"]
+        )
+        return errors
+
+    @staticmethod
+    def _module_under_root(module: Any, root: Path) -> bool:
+        module_path = getattr(module, "__file__", None)
+        if not isinstance(module_path, str):
+            return False
+        try:
+            Path(module_path).resolve().relative_to(root.resolve())
+        except (OSError, ValueError):
+            return False
+        return True
+
+    @staticmethod
+    def _require_planner_api(multiplex: Any) -> None:
+        if not callable(getattr(multiplex, "expand_parameters", None)) or not callable(
+            getattr(multiplex, "apply_flat_params", None)
+        ):
+            raise ImportError("the installed Multiplex API is incomplete")
+
+    @staticmethod
+    @contextmanager
+    def _suppress_planner_diagnostics(multiplex: Any):
+        """Prevent delegated planners from logging raw user parameter values."""
+
+        logger_name = getattr(multiplex, "__name__", None)
+        if not isinstance(logger_name, str):
+            logger_name = "multiplex"
+        logger = logging.getLogger(logger_name)
+        previous_level = logger.level
+        logger.setLevel(logging.CRITICAL + 1)
+        try:
+            yield
+        finally:
+            logger.setLevel(previous_level)
+
+    def _validate_plan_endpoints(
+        self, document: dict[str, Any], plan: dict[str, Any]
+    ) -> list[dict[str, str]]:
+        try:
+            discovery = self.list_endpoints()
+        except OperationError as exc:
+            plan.setdefault("topology", {})["confidence"] = "unknown"
+            return [{"code": exc.code, "message": exc.message}]
+        installed = {
+            entry["name"]
+            for entry in discovery.get("endpoints", [])
+            if isinstance(entry, dict)
+            and isinstance(entry.get("name"), str)
+            and entry.get("schema") is not None
+        }
+        errors: list[dict[str, str]] = []
+        schema_root = (
+            self.crucible_home
+            / "subprojects"
+            / "core"
+            / "rickshaw"
+            / "schema"
+        )
+        schema_cache: dict[str, tuple[Any | None, str | None]] = {}
+        for endpoint in document.get("endpoints", []):
+            endpoint_type = endpoint.get("type") if isinstance(endpoint, dict) else None
+            if not isinstance(endpoint_type, str) or endpoint_type not in installed:
+                errors.append({
+                    "code": "not_found",
+                    "message": f"endpoint type is not installed: {endpoint_type!r}",
+                })
+                continue
+
+            if endpoint_type not in schema_cache:
+                schema_path = schema_root / f"{endpoint_type}.json"
+                try:
+                    if schema_path.is_symlink() or not schema_path.is_file():
+                        raise OSError("endpoint schema is unavailable")
+                    schema_resolved = schema_path.resolve(strict=True)
+                    if not self._under_managed_root(schema_resolved, schema_root):
+                        raise OSError("endpoint schema is outside the managed root")
+                    schema_cache[endpoint_type] = (
+                        json.loads(
+                            self._read_bounded_utf8(
+                                schema_resolved, MAX_ENDPOINT_SCHEMA_BYTES
+                            )
+                        ),
+                        None,
+                    )
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, OperationError) as exc:
+                    schema_cache[endpoint_type] = (None, str(exc))
+                except SchemaError as exc:
+                    schema_cache[endpoint_type] = (None, str(exc))
+
+            schema, schema_error = schema_cache[endpoint_type]
+            if schema_error is not None or schema is None:
+                errors.append({
+                    "code": "planner_unavailable",
+                    "message": f"endpoint schema is unavailable: {endpoint_type}",
+                })
+                continue
+            try:
+                endpoint_errors = sorted(
+                    Draft201909Validator(schema).iter_errors(endpoint),
+                    key=lambda error: list(error.path),
+                )
+            except SchemaError:
+                endpoint_errors = []
+                schema_cache[endpoint_type] = (None, "invalid endpoint schema")
+            if schema_cache[endpoint_type][0] is None:
+                errors.append({
+                    "code": "planner_unavailable",
+                    "message": f"endpoint schema is unavailable: {endpoint_type}",
+                })
+                continue
+            for endpoint_error in endpoint_errors[:32]:
+                location = ".".join(str(part) for part in endpoint_error.absolute_path)
+                errors.append({
+                    "code": "invalid_endpoint",
+                    "message": (
+                        f"endpoint {endpoint_type} configuration is invalid"
+                        + (f" at {location}" if location else "")
+                    ),
+                })
+        if errors:
+            topology = plan.setdefault("topology", {})
+            topology["confidence"] = "unknown"
+            warnings = topology.setdefault("warnings", [])
+            if any(error["code"] == "not_found" for error in errors) and \
+                "one or more endpoint types are unavailable" not in warnings:
+                warnings.append("one or more endpoint types are unavailable")
+            if any(error["code"] == "invalid_endpoint" for error in errors) and \
+                "one or more endpoint configurations are invalid" not in warnings:
+                warnings.append("one or more endpoint configurations are invalid")
+        return errors
+
+    def _validate_tool_params_schema(self, entries: list[Any]) -> list[dict[str, str]]:
+        schema_path = self.crucible_home / "subprojects" / "core" / "rickshaw" / "schema" / "tool-params.json"
+        try:
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return [{
+                "code": "planner_unavailable",
+                "message": "tool-params schema is unavailable",
+            }]
+        errors = sorted(
+            Draft201909Validator(schema).iter_errors(entries),
+            key=lambda error: list(error.path),
+        )
+        return [
+            {"code": "invalid_tool_params", "message": error.message}
+            for error in errors[:32]
+        ]
+
+    def _tool_directory(self, name: str) -> Path | None:
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            return None
+        root = self.crucible_home / "subprojects" / "tools"
+        candidate = root / name
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            return None
+        repository_root = self.crucible_home / "repos"
+        if not (
+            self._under_managed_root(resolved, root)
+            or self._under_managed_root(resolved, repository_root)
+        ) or not resolved.is_dir():
+            return None
+        return candidate
+
+    def prepare_run_file(
+        self,
+        path: Path,
+        max_parameter_sets: int = 1000,
+        max_engine_ids: int = 1000,
+        max_tool_entries: int = 1000,
+        max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
+        *,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Read an approved run file and return its bounded static plan."""
+
+        return self.prepare_run(
+            self._read_plan_run_file(path),
+            max_parameter_sets,
+            max_engine_ids,
+            max_tool_entries,
+            max_response_bytes,
+            request_id=request_id,
+        )
+
+    def estimate_run_file(
+        self,
+        path: Path,
+        max_parameter_sets: int = 1000,
+        max_engine_ids: int = 1000,
+        max_tool_entries: int = 1000,
+        max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
+        *,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Read an approved run file and return its bounded estimate."""
+
+        return self.estimate_run(
+            self._read_plan_run_file(path),
+            max_parameter_sets=max_parameter_sets,
+            max_engine_ids=max_engine_ids,
+            max_tool_entries=max_tool_entries,
+            max_response_bytes=max_response_bytes,
+            request_id=request_id,
+        )
+
+    def _read_plan_run_file(self, path: Path) -> Any:
+        try:
+            canonical = self.input_policy.canonical_input(path)
+            return json.loads(canonical.read_text(encoding="utf-8"))
+        except PolicyError as exc:
+            raise OperationError("authorization", str(exc), "input_path_rejected") from exc
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise OperationError("user", "run-file is not valid JSON", "invalid_json") from exc
+
+    def estimate_run(
+        self,
+        document: Any,
+        max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
+        *,
+        request_id: Any = None,
+        **limits: int,
+    ) -> dict[str, Any]:
+        """Return only the derived counts and runtime confidence from a plan."""
+
+        self._validate_plan_response_limit(max_response_bytes)
+        plan = self._build_run_plan(
+            document,
+            limits.get("max_parameter_sets", 1000),
+            limits.get("max_engine_ids", 1000),
+            limits.get("max_tool_entries", 1000),
+        )
+        estimate = {
+            "contract_version": plan["contract_version"],
+            "input_digest": plan["input_digest"],
+            "validation": plan["validation"],
+            "totals": plan["totals"],
+            "runtime": plan["runtime"],
+            "limits": plan["limits"],
+        }
+        return self._bound_plan_response(estimate, max_response_bytes, request_id)
+
+    @staticmethod
+    def _validate_plan_response_limit(max_response_bytes: int) -> None:
+        if (
+            isinstance(max_response_bytes, bool)
+            or not isinstance(max_response_bytes, int)
+            or max_response_bytes < 1024
+            or max_response_bytes > MAX_PLAN_RESPONSE_BYTES
+        ):
+            raise OperationError(
+                "user",
+                f"max_response_bytes must be an integer between 1024 and {MAX_PLAN_RESPONSE_BYTES}",
+                "invalid_limit",
+            )
+
+    def _validate_plan_work(
+        self,
+        document: Any,
+        max_parameter_sets: int,
+        max_engine_ids: int = 1000,
+    ) -> None:
+        """Reject worst-case expansion requests before the planner materializes them."""
+
+        if not isinstance(document, dict):
+            return
+        benchmarks = document.get("benchmarks")
+        if not isinstance(benchmarks, list):
+            return
+        benchmark_count = len(benchmarks)
+        if benchmark_count > MAX_PLAN_BENCHMARKS:
+            raise OperationError(
+                "user",
+                f"run planning supports at most {MAX_PLAN_BENCHMARKS} benchmark occurrences",
+                "planning_limit",
+            )
+        if (
+            isinstance(max_parameter_sets, bool)
+            or not isinstance(max_parameter_sets, int)
+            or max_parameter_sets < 1
+        ):
+            return
+        if benchmark_count * max_parameter_sets > MAX_PLAN_PARAMETER_WORK:
+            raise OperationError(
+                "user",
+                "requested benchmark expansion exceeds the aggregate planning work limit; "
+                "reduce max_parameter_sets or the number of benchmark occurrences",
+                "planning_limit",
+            )
+        parameter_entry_work = 0
+        materialized_bytes = 0
+        engine_id_bytes = 0
+        for benchmark in benchmarks:
+            raw_parameter_bytes = self._validate_raw_parameter_work(benchmark)
+            parameter_entry_count, preset_bytes = self._plan_parameter_entry_upper_bound(benchmark)
+            parameter_entry_work += max(1, parameter_entry_count) * max_parameter_sets
+            materialized_bytes += (raw_parameter_bytes + preset_bytes) * max_parameter_sets
+            engine_id_bytes += self._validate_engine_id_work(benchmark, max_engine_ids)
+            if parameter_entry_work > MAX_PLAN_PARAMETER_ENTRY_WORK:
+                raise OperationError(
+                    "user",
+                    "requested benchmark parameter entries exceed the aggregate planning "
+                    "work limit; reduce max_parameter_sets or the parameter definitions",
+                    "planning_limit",
+                )
+            if engine_id_bytes > MAX_PLAN_ENGINE_ID_BYTES:
+                raise OperationError(
+                    "user",
+                    "expanded engine IDs exceed the planning work limit; reduce engine ID ranges",
+                    "planning_limit",
+                )
+            if materialized_bytes > MAX_PLAN_MATERIALIZED_BYTES:
+                raise OperationError(
+                    "user",
+                    "expanded benchmark details exceed the planning work limit; "
+                    "reduce max_parameter_sets or parameter value sizes",
+                    "planning_limit",
+                )
+
+    def _validate_raw_parameter_work(self, benchmark: Any) -> int:
+        if not isinstance(benchmark, dict) or "mv-params" not in benchmark:
+            return 0
+        raw_parameters = benchmark["mv-params"]
+        selected_parameters = (
+            raw_parameters[0]
+            if isinstance(raw_parameters, list)
+            and raw_parameters
+            and isinstance(raw_parameters[0], dict)
+            else raw_parameters
+        )
+        try:
+            encoded_size = len(
+                json.dumps(
+                    selected_parameters, ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+            )
+        except (TypeError, ValueError) as exc:
+            raise OperationError(
+                "user", "benchmark parameters are not JSON-serializable", "invalid_plan"
+            ) from exc
+        if encoded_size > MAX_PLAN_RAW_PARAMETER_BYTES:
+            raise OperationError(
+                "user",
+                "raw benchmark parameter definitions exceed the planning work limit",
+                "planning_limit",
+            )
+        if self._count_raw_parameter_entries(selected_parameters) > MAX_PLAN_RAW_PARAMETER_ENTRIES:
+            raise OperationError(
+                "user",
+                "raw benchmark parameter entries exceed the planning work limit",
+                "planning_limit",
+            )
+        return encoded_size
+
+    @staticmethod
+    def _count_raw_parameter_entries(value: Any) -> int:
+        # Match the planner's legacy-array selection while bounding the full
+        # parameter object that Multiplex will validate and expand.
+        if isinstance(value, list):
+            value = value[0] if value and isinstance(value[0], dict) else {}
+        count = 0
+        pending = [value]
+        while pending:
+            current = pending.pop()
+            if isinstance(current, dict):
+                if current.get("enabled") == "no":
+                    continue
+                if "arg" in current and ("val" in current or "vals" in current):
+                    count += 1
+                pending.extend(current.values())
+            elif isinstance(current, list):
+                pending.extend(current)
+        return count
+
+    def _plan_parameter_entry_upper_bound(self, benchmark: Any) -> tuple[int, int]:
+        if not isinstance(benchmark, dict):
+            return 1, 0
+        count = self._count_plan_parameter_entries(benchmark.get("mv-params"))
+        name = benchmark.get("name")
+        if not isinstance(name, str):
+            return max(1, count), 0
+        directory = self._benchmark_directory(name)
+        if directory is None:
+            return max(1, count), 0
+        requirements_path = directory / "multiplex.json"
+        try:
+            if requirements_path.stat().st_size > MAX_PLAN_REQUIREMENTS_BYTES:
+                raise OperationError(
+                    "framework",
+                    "benchmark requirements exceed the planning metadata limit",
+                    "planning_limit",
+                )
+            requirements = json.loads(requirements_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return max(1, count), 0
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return max(1, count), 0
+        presets = requirements.get("presets") if isinstance(requirements, dict) else None
+        try:
+            preset_bytes = len(
+                json.dumps(presets, ensure_ascii=False, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            )
+        except (TypeError, ValueError):
+            preset_bytes = 0
+        return max(1, count + self._count_requirement_parameter_entries(presets)), preset_bytes
+
+    @staticmethod
+    def _validate_engine_id_work(benchmark: Any, max_engine_ids: int) -> int:
+        if (
+            not isinstance(benchmark, dict)
+            or isinstance(max_engine_ids, bool)
+            or not isinstance(max_engine_ids, int)
+            or max_engine_ids < 1
+        ):
+            return 0
+        raw_ids = benchmark.get("ids")
+        raw_values = raw_ids if isinstance(raw_ids, list) else [raw_ids]
+        estimated_bytes = 0
+        for raw_value in raw_values:
+            if not isinstance(raw_value, (str, int)) or isinstance(raw_value, bool):
+                continue
+            for token in re.split(r"[,+]", str(raw_value)):
+                if len(token) > MAX_PLAN_ENGINE_ID_TOKEN_CHARS:
+                    raise OperationError(
+                        "user",
+                        "engine ID token exceeds the planning work limit",
+                        "planning_limit",
+                    )
+                range_match = re.fullmatch(r"(\d+)-(\d+)", token)
+                if range_match:
+                    start_text, end_text = range_match.groups()
+                    start, end = int(start_text), int(end_text)
+                    if start > end:
+                        continue
+                    count = min(max_engine_ids, end - start + 1)
+                    width = max(len(str(start)), len(str(end)))
+                elif token.isdigit():
+                    count = 1
+                    width = len(str(int(token)))
+                else:
+                    continue
+                estimated_bytes += count * (width + 8)
+                if estimated_bytes > MAX_PLAN_ENGINE_ID_BYTES:
+                    return estimated_bytes
+        return estimated_bytes
+
+    @staticmethod
+    def _count_enabled_parameter_list(entries: Any) -> int:
+        if not isinstance(entries, list):
+            return 0
+        return sum(
+            1
+            for entry in entries
+            if isinstance(entry, dict)
+            and "arg" in entry
+            and ("val" in entry or "vals" in entry)
+            and entry.get("enabled") != "no"
+        )
+
+    @classmethod
+    def _count_plan_parameter_entries(cls, value: Any) -> int:
+        """Count effective entries from the representation multiplex expands."""
+
+        # Rickshaw accepts the legacy mv-params array but selects only its
+        # first object before passing it to multiplex.
+        if isinstance(value, list):
+            value = value[0] if value and isinstance(value[0], dict) else {}
+        if not isinstance(value, dict):
+            return 0
+
+        global_options = {
+            group.get("name"): group.get("params", [])
+            for group in value.get("global-options", [])
+            if isinstance(group, dict) and isinstance(group.get("name"), str)
+        }
+        sets = value.get("sets")
+        if not isinstance(sets, list) or not sets:
+            return cls._count_enabled_parameter_list(value.get("params"))
+
+        counts = []
+        for parameter_set in sets:
+            if not isinstance(parameter_set, dict) or parameter_set.get("enabled") == "no":
+                continue
+            count = cls._count_enabled_parameter_list(parameter_set.get("params"))
+            includes = parameter_set.get("include", [])
+            if isinstance(includes, str):
+                includes = [includes]
+            if isinstance(includes, list):
+                for name in includes:
+                    count += cls._count_enabled_parameter_list(global_options.get(name))
+            counts.append(count)
+        return max(counts, default=0)
+
+    @classmethod
+    def _count_requirement_parameter_entries(cls, presets: Any) -> int:
+        if not isinstance(presets, dict):
+            return 0
+        return sum(cls._count_enabled_parameter_list(entries) for entries in presets.values())
+
+    def _bound_plan_response(
+        self, plan: dict[str, Any], max_response_bytes: int, request_id: Any
+    ) -> dict[str, Any]:
+        bounded = dict(plan)
+        if "benchmarks" in plan:
+            bounded["benchmarks"] = []
+        detail_lists: list[tuple[dict[str, Any], dict[str, Any], str, list[Any]]] = []
+
+        for source_benchmark in plan.get("benchmarks", []):
+            if not isinstance(source_benchmark, dict):
+                bounded["benchmarks"].append(source_benchmark)
+                continue
+            target_benchmark = dict(source_benchmark)
+            source_parameter_sets = source_benchmark.get("parameter_sets")
+            if isinstance(source_parameter_sets, dict):
+                target_parameter_sets = dict(source_parameter_sets)
+                items = source_parameter_sets.get("items")
+                if isinstance(items, list) and items:
+                    target_parameter_sets["items"] = []
+                    target_parameter_sets["returned"] = 0
+                    target_parameter_sets["truncated"] = True
+                    detail_lists.append(
+                        (target_parameter_sets, source_parameter_sets, "items", items)
+                    )
+                target_benchmark["parameter_sets"] = target_parameter_sets
+
+            source_engine_ids = source_benchmark.get("engine_ids")
+            if isinstance(source_engine_ids, dict):
+                target_engine_ids = dict(source_engine_ids)
+                items = source_engine_ids.get("items")
+                if isinstance(items, list) and items:
+                    target_engine_ids["items"] = []
+                    target_engine_ids["truncated"] = True
+                    detail_lists.append(
+                        (target_engine_ids, source_engine_ids, "items", items)
+                    )
+                target_benchmark["engine_ids"] = target_engine_ids
+            bounded["benchmarks"].append(target_benchmark)
+
+        source_tools = plan.get("tools")
+        if isinstance(source_tools, dict):
+            target_tools = dict(source_tools)
+            entries = source_tools.get("entries")
+            if isinstance(entries, list) and entries:
+                target_tools["entries"] = []
+                target_tools["truncated"] = True
+                detail_lists.append((target_tools, source_tools, "entries", entries))
+            bounded["tools"] = target_tools
+
+        source_limits = plan.get("limits")
+        if isinstance(source_limits, dict):
+            bounded["limits"] = dict(source_limits)
+            if isinstance(source_limits.get("warnings"), list):
+                bounded["limits"]["warnings"] = list(source_limits["warnings"])
+
+        # Estimate the detail contribution item-by-item.  This stops after the
+        # response budget is exceeded, avoiding a full serialization of a
+        # potentially enormous expansion just to discover that its prefix must
+        # be omitted.
+        base_size = self._mcp_response_size(bounded, request_id)
+        if base_size > max_response_bytes:
+            raise OperationError(
+                "framework",
+                "run plan exceeds the response-byte limit",
+                "result_too_large",
+            )
+        estimated_size = base_size
+        details_fit = True
+        for _, _, _, items in detail_lists:
+            for item in items:
+                try:
+                    item_json = json.dumps(item)
+                    estimated_size += (
+                        len(item_json.encode("utf-8"))
+                        + len(json.dumps(item_json).encode("utf-8"))
+                        + 64
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise OperationError(
+                        "framework",
+                        "run plan contains unserializable detail",
+                        "invalid_plan",
+                    ) from exc
+                if estimated_size > max_response_bytes:
+                    details_fit = False
+                    break
+            if not details_fit:
+                break
+
+        if details_fit:
+            for target, source, key, items in detail_lists:
+                target.clear()
+                target.update(source)
+                target[key] = list(items)
+            if self._mcp_response_size(bounded, request_id) <= max_response_bytes:
+                return bounded
+            # The estimate is intentionally conservative, but retain a safe
+            # fallback if JSON encoding has more envelope overhead than it
+            # predicted.
+            bounded = self._bound_plan_detail_skeleton(plan)
+
+        limits = bounded.setdefault("limits", {})
+        warnings = limits.setdefault("warnings", [])
+        if "detail prefixes omitted to stay within the response-byte limit" not in warnings:
+            warnings.append("detail prefixes omitted to stay within the response-byte limit")
+        limits["truncated"] = True
+        if self._mcp_response_size(bounded, request_id) > max_response_bytes:
+            raise OperationError(
+                "framework",
+                "run plan exceeds the response-byte limit",
+                "result_too_large",
+            )
+        return bounded
+
+    def _bound_plan_detail_skeleton(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Copy plan structure while dropping potentially large detail lists."""
+
+        bounded = dict(plan)
+        if "benchmarks" in plan:
+            bounded["benchmarks"] = []
+        for source_benchmark in plan.get("benchmarks", []):
+            if not isinstance(source_benchmark, dict):
+                bounded["benchmarks"].append(source_benchmark)
+                continue
+            target_benchmark = dict(source_benchmark)
+            for section_name in ("parameter_sets", "engine_ids"):
+                source_section = source_benchmark.get(section_name)
+                if not isinstance(source_section, dict):
+                    continue
+                target_section = dict(source_section)
+                items = source_section.get("items")
+                if isinstance(items, list) and items:
+                    target_section["items"] = []
+                    if section_name == "parameter_sets":
+                        target_section["returned"] = 0
+                    target_section["truncated"] = True
+                target_benchmark[section_name] = target_section
+            bounded["benchmarks"].append(target_benchmark)
+        source_tools = plan.get("tools")
+        if isinstance(source_tools, dict):
+            bounded["tools"] = dict(source_tools)
+            entries = source_tools.get("entries")
+            if isinstance(entries, list) and entries:
+                bounded["tools"]["entries"] = []
+                bounded["tools"]["truncated"] = True
+        source_limits = plan.get("limits")
+        if isinstance(source_limits, dict):
+            bounded["limits"] = dict(source_limits)
+            if isinstance(source_limits.get("warnings"), list):
+                bounded["limits"]["warnings"] = list(source_limits["warnings"])
+        return bounded
 
     def _benchmark_directory(self, name: str) -> Path | None:
         """Resolve a benchmark name without allowing filesystem escapes.

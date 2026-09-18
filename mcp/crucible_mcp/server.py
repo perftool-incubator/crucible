@@ -20,7 +20,7 @@ from jsonschema import Draft201909Validator
 
 from .jobs import JobConflictError, JobNotFoundError, JobStore
 from .models import Job, JobState
-from .operations import CrucibleOperations, OperationError
+from .operations import CrucibleOperations, OperationError, MAX_PLAN_RESPONSE_BYTES
 from .policy import InputPolicy, PolicyError, read_token, token_matches
 from .runner import RunManager
 from .audit import AuditLogger
@@ -50,6 +50,8 @@ TOOL_NAMES = (
     "describe_benchmark",
     "list_endpoints",
     "validate_run",
+    "prepare_run",
+    "estimate_run",
     "start_run",
     "get_run_status",
     "get_run_logs",
@@ -278,6 +280,40 @@ TOOL_DEFINITIONS = (
             "properties": {
                 "document": {"type": "object"},
                 "path": {"type": "string", "minLength": 1},
+            },
+            "additionalProperties": False,
+            "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
+        },
+    },
+    {
+        "name": "prepare_run",
+        "description": "Build a bounded, side-effect-free plan for an inline run document or approved run-file path.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document": {"type": "object"},
+                "path": {"type": "string", "minLength": 1},
+                "max_parameter_sets": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "max_engine_ids": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "max_tool_entries": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "max_response_bytes": {"type": "integer", "minimum": 1024, "maximum": MAX_PLAN_RESPONSE_BYTES},
+            },
+            "additionalProperties": False,
+            "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
+        },
+    },
+    {
+        "name": "estimate_run",
+        "description": "Estimate static run counts and report runtime confidence without executing the run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document": {"type": "object"},
+                "path": {"type": "string", "minLength": 1},
+                "max_parameter_sets": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "max_engine_ids": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "max_tool_entries": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "max_response_bytes": {"type": "integer", "minimum": 1024, "maximum": MAX_PLAN_RESPONSE_BYTES},
             },
             "additionalProperties": False,
             "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
@@ -881,6 +917,36 @@ class MCPHandler(BaseHTTPRequestHandler):
                     value = self.server.operations.validate_run_file(Path(arguments["path"]))
                 else:
                     return self._error(request_id, -32602, "validate_run requires document or path")
+            elif name in {"prepare_run", "estimate_run"}:
+                if "document" in arguments and "path" in arguments:
+                    return self._error(request_id, -32602, "provide exactly one of document or path")
+                limits = {
+                    key: arguments[key]
+                    for key in ("max_parameter_sets", "max_engine_ids", "max_tool_entries")
+                    if key in arguments
+                }
+                response_limit = arguments.get("max_response_bytes", MAX_PLAN_RESPONSE_BYTES)
+                if "document" in arguments:
+                    value = getattr(self.server.operations, name)(
+                        arguments["document"],
+                        max_response_bytes=response_limit,
+                        request_id=request_id,
+                        **limits,
+                    )
+                elif "path" in arguments:
+                    operation = (
+                        self.server.operations.prepare_run_file
+                        if name == "prepare_run"
+                        else self.server.operations.estimate_run_file
+                    )
+                    value = operation(
+                        Path(arguments["path"]),
+                        max_response_bytes=response_limit,
+                        request_id=request_id,
+                        **limits,
+                    )
+                else:
+                    return self._error(request_id, -32602, f"{name} requires document or path")
             elif name == "start_run":
                 if "document" in arguments and "path" in arguments:
                     return self._error(request_id, -32602, "provide exactly one of document or path")

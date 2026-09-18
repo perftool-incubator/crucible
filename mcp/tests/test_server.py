@@ -141,6 +141,7 @@ class TestServer(unittest.TestCase):
             "list_run_artifacts", "get_run_artifact", "list_local_archives",
             "archive_local_run", "unarchive_local_run", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
+            "prepare_run", "estimate_run",
             "get_log_session",
             "search_logs",
             "list_local_run_tags", "add_local_run_tags", "remove_local_run_tags",
@@ -157,6 +158,45 @@ class TestServer(unittest.TestCase):
         })
         _, payload = self.request("POST", "/mcp", body, self.token)
         self.assertIn("endpoints", payload["result"]["structuredContent"])
+
+    def test_run_planning_tools_dispatch_inline_documents(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False},
+        }
+        document = {"benchmarks": [], "endpoints": []}
+
+        for request_id, name in ((30, "prepare_run"), (31, "estimate_run")):
+            operation = Mock(return_value=plan)
+            setattr(self.server.operations, name, operation)
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {
+                    "name": name,
+                    "arguments": {
+                        "document": document,
+                        "max_parameter_sets": 7,
+                    },
+                },
+            })
+
+            status, payload = self.request("POST", "/mcp", body, self.token)
+
+            with self.subTest(name=name):
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["result"]["structuredContent"], plan)
+                operation.assert_called_once_with(
+                    document,
+                    max_parameter_sets=7,
+                    max_response_bytes=1048576,
+                    request_id=request_id,
+                )
 
     def test_metadata_response_bound_includes_wire_request_id(self):
         run_directory = self.server.operations.local_run_root / "wire-metadata"
@@ -183,6 +223,40 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32000)
         self.assertIn("result_too_large", payload["error"]["message"])
+
+    def test_estimate_path_dispatches_projected_operation(self):
+        estimate = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False},
+        }
+        operation = Mock(return_value=estimate)
+        self.server.operations.estimate_run_file = operation
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {
+                "name": "estimate_run",
+                "arguments": {
+                    "path": "/approved/run.json",
+                    "max_response_bytes": 1500,
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["structuredContent"], estimate)
+        operation.assert_called_once_with(
+            Path("/approved/run.json"),
+            max_response_bytes=1500,
+            request_id=32,
+        )
 
     def test_list_active_runs_is_bounded_and_paginated(self):
         jobs = [

@@ -1,12 +1,16 @@
 import errno
+import io
 import json
 import lzma
+import logging
 import os
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -18,6 +22,8 @@ from crucible_mcp.operations import (
     MAX_METADATA_REDACTION_WORK,
     MAX_METADATA_RESPONSE_BYTES,
     MAX_METADATA_DEPTH,
+    MAX_PLAN_BENCHMARKS,
+    MAX_PLAN_PARAMETER_WORK,
     CrucibleOperations,
     OperationError,
 )
@@ -44,6 +50,10 @@ class TestCrucibleOperations(unittest.TestCase):
             "required": ["benchmarks"],
         }
         (schema / "run-file.json").write_text(json.dumps(schema_document), encoding="utf-8")
+        (schema / "tool-params.json").write_text(
+            json.dumps({"type": "array", "items": {"type": "object"}}),
+            encoding="utf-8",
+        )
         self.operations = CrucibleOperations(self.root, InputPolicy([self.root / "inputs"]))
 
     def tearDown(self):
@@ -53,6 +63,214 @@ class TestCrucibleOperations(unittest.TestCase):
         benchmarks = self.operations.list_benchmarks()
         self.assertEqual(benchmarks[0]["name"], "example")
         self.assertEqual(self.operations.describe_benchmark("example")["description"], "Example benchmark")
+
+    def test_plan_response_bound_drops_detail_prefixes(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{
+                "parameter_sets": {
+                    "count": 1,
+                    "returned": 1,
+                    "items": [{"arg": "payload", "val": "x" * 10000}],
+                    "truncated": False,
+                },
+                "engine_ids": {"count": 1, "items": ["1"], "truncated": False},
+            }],
+            "tools": {"mode": "explicit", "entries": [{"tool": "sysstat"}], "truncated": False},
+            "limits": {"truncated": False, "warnings": []},
+        }
+
+        bounded = self.operations._bound_plan_response(plan, 1024, "request")
+
+        self.assertEqual(bounded["benchmarks"][0]["parameter_sets"]["items"], [])
+        self.assertEqual(bounded["benchmarks"][0]["engine_ids"]["items"], [])
+        self.assertEqual(bounded["tools"]["entries"], [])
+        self.assertTrue(bounded["benchmarks"][0]["parameter_sets"]["truncated"])
+        self.assertTrue(bounded["benchmarks"][0]["engine_ids"]["truncated"])
+        self.assertTrue(bounded["tools"]["truncated"])
+        self.assertTrue(bounded["limits"]["truncated"])
+        self.assertLessEqual(
+            self.operations._mcp_response_size(bounded, "request"), 1024
+        )
+
+    def test_plan_response_bound_does_not_serialize_oversized_detail_expansion(self):
+        large_value = "x" * 250_000
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{
+                "parameter_sets": {
+                    "count": 1000,
+                    "returned": 1000,
+                    "items": [
+                        {"arg": "payload", "val": large_value}
+                        for _ in range(1000)
+                    ],
+                    "truncated": False,
+                },
+                "engine_ids": {"count": 1, "items": ["1"], "truncated": False},
+            }],
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "limits": {"truncated": False, "warnings": []},
+        }
+
+        bounded = self.operations._bound_plan_response(
+            plan, MAX_METADATA_RESPONSE_BYTES, "request"
+        )
+
+        self.assertEqual(bounded["benchmarks"][0]["parameter_sets"]["items"], [])
+        self.assertLessEqual(
+            self.operations._mcp_response_size(bounded, "request"),
+            MAX_METADATA_RESPONSE_BYTES,
+        )
+
+    def test_plan_work_bound_rejects_aggregate_expansion(self):
+        document = {"benchmarks": [{}] * MAX_PLAN_BENCHMARKS}
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(
+                document, MAX_PLAN_PARAMETER_WORK // MAX_PLAN_BENCHMARKS + 1
+            )
+        self.assertEqual(context.exception.code, "planning_limit")
+
+        large_value = "x" * 200_000
+        materialization_document = {
+            "benchmarks": [{
+                "mv-params": {
+                    "sets": [{
+                        "params": [
+                            {"arg": "payload", "vals": [large_value]},
+                            {"arg": "sweep", "vals": [str(index) for index in range(1000)]},
+                        ]
+                    }]
+                }
+            }]
+        }
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(materialization_document, 1000)
+        self.assertEqual(context.exception.code, "planning_limit")
+
+        benchmark = self.root / "subprojects" / "benchmarks" / "example"
+        (benchmark / "multiplex.json").write_text(
+            json.dumps({
+                "presets": {
+                    "defaults": [{"arg": "payload", "val": "x" * 200_000}]
+                }
+            }),
+            encoding="utf-8",
+        )
+        preset_document = {
+            "benchmarks": [{
+                "name": "example",
+                "ids": ["1"],
+                "mv-params": {
+                    "sets": [{
+                        "params": [{"arg": "sweep", "vals": [str(index) for index in range(1000)]}]
+                    }]
+                },
+            }]
+        }
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(preset_document, 1000)
+        self.assertEqual(context.exception.code, "planning_limit")
+
+    def test_plan_work_bounds_engine_id_materialization(self):
+        wide_range = "1-" + ("9" * 200)
+        document = {
+            "benchmarks": [
+                {"ids": [wide_range]}
+                for _ in range(MAX_PLAN_BENCHMARKS)
+            ]
+        }
+
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(document, 1)
+        self.assertEqual(context.exception.code, "planning_limit")
+
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(
+                {"benchmarks": [{"ids": ["1-" + ("9" * 4000)]}]}, 1
+            )
+        self.assertEqual(context.exception.code, "planning_limit")
+
+        document["benchmarks"].append({})
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(document, 1)
+        self.assertEqual(context.exception.code, "planning_limit")
+
+        parameter_document = {
+            "benchmarks": [{
+                "mv-params": {
+                    "sets": [{
+                        "params": [
+                            {"arg": f"arg-{index}", "vals": ["value"]}
+                            for index in range(100)
+                        ]
+                    }]
+                }
+            } for _ in range(100)]
+        }
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(parameter_document, 101)
+        self.assertEqual(context.exception.code, "planning_limit")
+
+        effective = {
+            "sets": [{
+                "params": [
+                    {"arg": "enabled", "vals": ["1"]},
+                    *[
+                        {"arg": f"disabled-{index}", "vals": ["x"], "enabled": "no"}
+                        for index in range(1001)
+                    ],
+                ]
+            }]
+        }
+        self.operations._validate_plan_work(
+            {"benchmarks": [{"mv-params": [effective] + [effective] * 100}]}, 1
+        )
+
+        oversized_raw = {
+            "sets": [{
+                "params": [
+                    {"arg": f"arg-{index}", "vals": ["value"]}
+                    for index in range(10001)
+                ]
+            }]
+        }
+        with self.assertRaises(OperationError) as context:
+            self.operations._validate_plan_work(
+                {"benchmarks": [{"mv-params": oversized_raw}]}, 1
+            )
+        self.assertEqual(context.exception.code, "planning_limit")
+
+    def test_prepare_run_file_rejects_invalid_utf8(self):
+        run_file = self.root / "inputs" / "invalid-utf8.json"
+        run_file.parent.mkdir(parents=True)
+        run_file.write_bytes(b"\xff")
+        run_file.chmod(0o600)
+
+        with self.assertRaises(OperationError) as context:
+            self.operations.prepare_run_file(run_file)
+        self.assertEqual(context.exception.code, "invalid_json")
+
+    def test_estimate_projects_before_applying_response_limit(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{"parameter_sets": {"items": ["x" * 10000]}}],
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False, "warnings": []},
+        }
+        with patch.object(self.operations, "_build_run_plan", return_value=plan):
+            estimate = self.operations.estimate_run({}, max_response_bytes=1500)
+
+        self.assertEqual(set(estimate), {
+            "contract_version", "input_digest", "validation", "totals", "runtime", "limits"
+        })
 
     def test_list_tools_returns_installed_tool_metadata(self):
         tool_repository = self.root / "repos" / "git@github.com:perftool-incubator/tool-sysstat.git"
@@ -74,6 +292,263 @@ class TestCrucibleOperations(unittest.TestCase):
             }],
         )
         self.assertEqual(self.operations.list_tools("missing"), [])
+
+    def test_plan_input_resolution_filters_disabled_and_unknown_tools(self):
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.mkdir(parents=True)
+        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        endpoints = self.root / "subprojects" / "core" / "rickshaw" / "endpoints"
+        endpoint = endpoints / "remotehosts"
+        endpoint.mkdir(parents=True)
+        (endpoint / "remotehosts.py").write_text("def validate(): pass\n", encoding="utf-8")
+        (self.root / "subprojects" / "core" / "rickshaw" / "schema" / "remotehosts.json").write_text(
+            "{}", encoding="utf-8"
+        )
+        document = {
+            "endpoints": [{"type": "remotehosts"}],
+            "tool-params": [
+                {"tool": "sysstat"},
+                {"tool": "disabled-unknown", "enabled": "no"},
+                {"tool": "missing"},
+            ],
+        }
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {
+                "mode": "explicit",
+                "entries": document["tool-params"],
+                "truncated": False,
+            },
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, Mock(), 100
+        )
+
+        self.assertEqual(plan["tools"]["entries"], [{"tool": "sysstat"}])
+        self.assertTrue(any(error["code"] == "not_found" for error in errors))
+        self.assertFalse(any("disabled-unknown" in error["message"] for error in errors))
+
+    def test_plan_input_resolution_marks_unknown_endpoint_types(self):
+        document = {
+            "endpoints": [{"type": "bogus"}],
+            "tool-params": [],
+        }
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, Mock(), 100
+        )
+
+        self.assertTrue(any("bogus" in error["message"] for error in errors))
+        self.assertEqual(plan["topology"]["confidence"], "unknown")
+
+    def test_plan_input_resolution_validates_endpoint_schema(self):
+        endpoints = self.root / "subprojects" / "core" / "rickshaw" / "endpoints"
+        schemas = self.root / "subprojects" / "core" / "rickshaw" / "schema"
+        endpoint = endpoints / "remotehosts"
+        endpoint.mkdir(parents=True)
+        (endpoint / "remotehosts.py").write_text("def validate(): pass\n", encoding="utf-8")
+        (schemas / "remotehosts.json").write_text(
+            json.dumps({
+                "type": "object",
+                "properties": {"type": {"const": "remotehosts"}, "remotes": {"type": "array"}},
+                "required": ["type", "remotes"],
+            }),
+            encoding="utf-8",
+        )
+        document = {"endpoints": [{"type": "remotehosts"}], "tool-params": []}
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, Mock(), 100
+        )
+
+        self.assertTrue(any(error["code"] == "invalid_endpoint" for error in errors))
+        self.assertEqual(plan["topology"]["confidence"], "unknown")
+
+    def test_plan_input_resolution_applies_tool_multiplexing(self):
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.mkdir(parents=True)
+        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        (tool / "multiplex.json").write_text('{}', encoding="utf-8")
+        document = {
+            "endpoints": [],
+            "tool-params": [{"tool": "sysstat", "params": []}],
+        }
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+        multiplex = Mock()
+        multiplex.apply_flat_params.return_value = [{"arg": "interval", "val": "3"}]
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, multiplex, 100
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            plan["tools"]["entries"],
+            [{"tool": "sysstat", "params": [{"arg": "interval", "val": "3"}]}],
+        )
+        multiplex.apply_flat_params.assert_called_once_with([], {})
+
+    def test_plan_input_resolution_preserves_default_tool_truncation(self):
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.mkdir(parents=True)
+        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        document = {"endpoints": []}
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {
+                "mode": "default",
+                "entries": [{"tool": "sysstat"}],
+                "truncated": True,
+            },
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": True},
+        }
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, Mock(), 1
+        )
+
+        self.assertEqual(errors, [])
+        self.assertTrue(plan["tools"]["truncated"])
+
+    def test_planner_diagnostics_are_suppressed(self):
+        logger_name = "test.multiplex"
+        logger = logging.getLogger(logger_name)
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        previous_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            with self.operations._suppress_planner_diagnostics(
+                SimpleNamespace(__name__=logger_name)
+            ):
+                logger.warning("raw-secret-value")
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(previous_level)
+
+        self.assertEqual(stream.getvalue(), "")
+
+    def test_planner_api_validation_rejects_incomplete_multiplex(self):
+        incomplete = SimpleNamespace(expand_parameters=lambda *args: [])
+        with self.assertRaises(ImportError):
+            self.operations._require_planner_api(incomplete)
+
+    def test_tool_multiplex_expansion_is_serialized(self):
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.mkdir(parents=True)
+        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        (tool / "multiplex.json").write_text("{}", encoding="utf-8")
+        document = {
+            "endpoints": [],
+            "tool-params": [{"tool": "sysstat", "params": []}],
+        }
+
+        calls = 0
+        calls_lock = threading.Lock()
+        first_started = threading.Event()
+        release_first = threading.Event()
+
+        def apply_flat_params(params, requirements):
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+                call_number = calls
+            if call_number == 1:
+                first_started.set()
+                release_first.wait(timeout=2)
+            return [{"arg": "interval", "val": str(call_number)}]
+
+        multiplex = Mock()
+        multiplex.apply_flat_params.side_effect = apply_flat_params
+
+        def resolve_plan():
+            plan = {
+                "validation": {"valid": True, "errors": []},
+                "tools": {"mode": "explicit", "entries": [], "truncated": False},
+                "topology": {"confidence": "derived", "warnings": []},
+                "limits": {"truncated": False},
+            }
+            return self.operations._validate_and_resolve_plan_inputs(
+                document, plan, multiplex, 100
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(resolve_plan)
+            self.assertTrue(first_started.wait(timeout=1))
+            second = executor.submit(resolve_plan)
+            try:
+                time.sleep(0.05)
+                with calls_lock:
+                    self.assertEqual(calls, 1)
+            finally:
+                release_first.set()
+            self.assertEqual(first.result(timeout=1), [])
+            self.assertEqual(second.result(timeout=1), [])
+
+    def test_plan_input_resolution_bounds_tool_work_before_validation(self):
+        document = {
+            "endpoints": [],
+            "tool-params": [{"tool": f"missing-{index}"} for index in range(1000)],
+        }
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, Mock(), 1
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(plan["tools"]["truncated"])
+        self.assertTrue(plan["limits"]["truncated"])
+
+    def test_plan_input_resolution_validates_tools_beyond_response_prefix(self):
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.mkdir(parents=True)
+        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        document = {
+            "endpoints": [],
+            "tool-params": [{"tool": "sysstat"}, {"tool": "missing"}],
+        }
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, Mock(), 1
+        )
+
+        self.assertTrue(any("missing" in error["message"] for error in errors))
+        self.assertEqual(plan["tools"]["entries"], [{"tool": "sysstat"}])
+        self.assertTrue(plan["tools"]["truncated"])
 
     def test_list_endpoints_returns_safe_metadata_and_capabilities(self):
         endpoints = self.root / "subprojects" / "core" / "rickshaw" / "endpoints"
