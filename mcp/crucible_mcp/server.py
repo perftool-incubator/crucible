@@ -98,7 +98,10 @@ TOOL_DEFINITIONS = (
         "description": "List local run artifacts from approved run roots.",
         "inputSchema": {
             "type": "object",
-            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000}},
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+            },
             "additionalProperties": False,
         },
     },
@@ -785,7 +788,11 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "list_benchmarks":
                 value = {"benchmarks": self.server.operations.list_benchmarks()}
             elif name == "list_local_runs":
-                value = self.server.operations.list_local_runs(arguments.get("limit", 1000))
+                value = self.server.operations.list_local_runs(
+                    arguments.get("limit", 1000),
+                    arguments.get("offset", 0),
+                    request_id=request_id,
+                )
             elif name == "get_local_run_summary":
                 value = self.server.operations.get_local_run_summary(
                     Path(arguments["run_path"]), request_id=request_id

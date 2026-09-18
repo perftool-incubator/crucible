@@ -299,6 +299,120 @@ class TestCrucibleOperations(unittest.TestCase):
 
         self.assertEqual(result["count"], 1)
 
+    def test_list_local_runs_paginates_after_incomplete_entry(self):
+        run_root = self.root / "run"
+        (run_root / "a-incomplete").mkdir(parents=True)
+        complete_metadata = run_root / "b-complete" / "run" / "rickshaw-run.json"
+        complete_metadata.parent.mkdir(parents=True)
+        complete_metadata.write_text(json.dumps({"run-id": "run-1", "tags": []}), encoding="utf-8")
+
+        first = self.operations.list_local_runs(limit=1)
+        second = self.operations.list_local_runs(limit=1, offset=first["next_offset"])
+
+        self.assertFalse(first["complete"])
+        self.assertTrue(first["truncated"])
+        self.assertEqual(first["next_offset"], 1)
+        self.assertEqual(second["runs"][0]["name"], "b-complete")
+
+    def test_list_local_runs_marks_resolution_races_incomplete(self):
+        run_root = self.root / "run"
+        (run_root / "a-raced").mkdir(parents=True)
+        (run_root / "b-present").mkdir(parents=True)
+
+        with patch(
+            "crucible_mcp.operations.Path.resolve",
+            side_effect=[OSError("directory disappeared"), run_root / "b-present"],
+        ), patch.object(
+            self.operations,
+            "_load_run_metadata",
+            return_value=(
+                run_root / "b-present" / "run" / "rickshaw-run.json",
+                {"run-id": "run-1", "tags": []},
+            ),
+        ):
+            result = self.operations.list_local_runs()
+
+        self.assertFalse(result["complete"])
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["next_offset"], 2)
+
+    def test_list_local_runs_bounds_empty_response_for_large_request_id(self):
+        request_id = "x" * 1_048_300
+        with self.assertRaisesRegex(OperationError, "response exceeds size limit"):
+            self.operations.list_local_runs(request_id=request_id)
+
+        (self.root / "run").mkdir()
+        with self.assertRaisesRegex(OperationError, "response exceeds size limit"):
+            self.operations.list_local_runs(offset=1, request_id=request_id)
+
+    def test_list_local_runs_bounds_incomplete_entry_response(self):
+        run_root = self.root / "run"
+        for index in range(100):
+            (run_root / f"incomplete-{index:03d}").mkdir(parents=True)
+
+        with patch("crucible_mcp.operations.MAX_METADATA_RESPONSE_BYTES", 10_000):
+            result = self.operations.list_local_runs(
+                limit=100, request_id="request-id"
+            )
+
+        self.assertLessEqual(
+            self.operations._mcp_response_size(result, "request-id"),
+            10_000,
+        )
+        self.assertFalse(result["complete"])
+        self.assertTrue(result["truncated"])
+        self.assertGreater(result["next_offset"], 0)
+
+    def test_list_local_runs_bounds_large_tag_response(self):
+        run_directory = self.root / "run" / "large-tags"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps({"run-id": "large-tags", "tags": [{"name": "tag", "val": "x" * 900_000}]}),
+            encoding="utf-8",
+        )
+
+        result = self.operations.list_local_runs(request_id="request-id")
+
+        self.assertLessEqual(
+            self.operations._mcp_response_size(result, "request-id"),
+            MAX_METADATA_RESPONSE_BYTES,
+        )
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["runs"][0]["tags"], [])
+        self.assertTrue(result["runs"][0]["tags_truncated"])
+
+    def test_list_local_runs_paginates_when_response_budget_is_exhausted(self):
+        run_root = self.root / "run"
+        for index in range(1100):
+            metadata_path = run_root / f"run-{index:04d}" / "run" / "rickshaw-run.json"
+            metadata_path.parent.mkdir(parents=True)
+            metadata_path.write_text(
+                json.dumps({"run-id": f"run-{index}", "tags": [{"name": "tag", "val": "x" * 2_000}]}),
+                encoding="utf-8",
+            )
+
+        first = self.operations.list_local_runs(request_id="request-id")
+        second = self.operations.list_local_runs(
+            offset=first["next_offset"], request_id="request-id"
+        )
+
+        self.assertLessEqual(
+            self.operations._mcp_response_size(first, "request-id"),
+            MAX_METADATA_RESPONSE_BYTES,
+        )
+        self.assertFalse(first["complete"])
+        self.assertGreater(first["next_offset"], first["offset"])
+        self.assertLessEqual(
+            self.operations._mcp_response_size(second, "request-id"),
+            MAX_METADATA_RESPONSE_BYTES,
+        )
+        self.assertEqual(
+            {run["name"] for run in first["runs"]}
+            & {run["name"] for run in second["runs"]},
+            set(),
+        )
+
     def test_list_local_runs_keeps_config_only_metadata_incomplete(self):
         run_directory = self.root / "run" / "config-only"
         metadata_path = run_directory / "config" / "rickshaw-run.json"

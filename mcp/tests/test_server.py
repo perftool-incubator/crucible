@@ -135,6 +135,7 @@ class TestServer(unittest.TestCase):
         self.assertIn("inputSchema", tools["start_run"])
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("inputSchema", tools["get_run_logs"])
+        self.assertIn("offset", tools["list_local_runs"]["inputSchema"]["properties"])
         for tool_name in (
             "list_tools", "list_endpoints", "list_active_runs", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
             "list_run_artifacts", "get_run_artifact", "list_local_archives",

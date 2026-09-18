@@ -200,7 +200,7 @@ through the standard `tools/list` request; the current interface is:
 | `list_endpoints` | List installed endpoint implementations, schemas, and coarse capabilities. |
 | `list_active_runs` | List active MCP jobs, including runs and maintenance operations, with cursor pagination. |
 | `list_benchmarks` | List installed benchmarks. |
-| `list_local_runs` | List local run artifacts from approved run roots. |
+| `list_local_runs` | List local run artifacts from approved run roots with bounded responses and offset pagination. |
 | `get_local_run_summary` | Read a completed result summary from an approved local run artifact. |
 | `get_local_run_metadata` | Read rickshaw run metadata from an approved local run artifact. |
 | `list_run_artifacts` | List metadata for approved artifacts in a local run. |

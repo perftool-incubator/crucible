@@ -29,6 +29,7 @@ MAX_ARTIFACT_METADATA_BYTES = 262_144
 MAX_ARTIFACT_READ_BYTES = 131_072
 MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
 MAX_METADATA_RESPONSE_BYTES = 1_048_576
+MAX_LOCAL_RUN_OFFSET = 1_000_000
 # XZ preset 9 uses a 64 MiB dictionary and needs additional decoder memory;
 # keep the decompressed-output bound separate so valid high-preset metadata is
 # accepted without allowing an unbounded expansion.
@@ -533,22 +534,80 @@ class CrucibleOperations:
             )
         return tags
 
-    def list_local_runs(self, limit: int = 1000) -> dict[str, Any]:
+    def list_local_runs(
+        self,
+        limit: int = 1000,
+        offset: int = 0,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
         """List local run directories without querying indexed result data."""
 
-        if limit < 1 or limit > 1000:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 1000:
             raise OperationError("user", "limit must be between 1 and 1000", "invalid_limit")
+        if (
+            isinstance(offset, bool)
+            or not isinstance(offset, int)
+            or offset < 0
+            or offset > MAX_LOCAL_RUN_OFFSET
+        ):
+            raise OperationError(
+                "user",
+                f"offset must be between 0 and {MAX_LOCAL_RUN_OFFSET}",
+                "invalid_offset",
+            )
+
+        def build_result(
+            runs: list[dict[str, Any]],
+            complete: bool,
+            truncated: bool,
+            next_offset: int,
+        ) -> dict[str, Any]:
+            return {
+                "runs": runs,
+                "count": len(runs),
+                "offset": offset,
+                "next_offset": next_offset,
+                "complete": complete,
+                "truncated": truncated,
+            }
+
+        def build_bounded_result(
+            runs: list[dict[str, Any]],
+            complete: bool,
+            truncated: bool,
+            next_offset: int,
+        ) -> dict[str, Any]:
+            result = build_result(runs, complete, truncated, next_offset)
+            if self._mcp_response_size(result, request_id) > MAX_METADATA_RESPONSE_BYTES:
+                raise OperationError(
+                    "framework",
+                    "local run list response exceeds size limit",
+                    "result_too_large",
+                )
+            return result
+
         entries: list[dict[str, Any]] = []
         seen: set[Path] = set()
         root = self.local_run_root
         if not root.is_dir():
-            return {"runs": [], "count": 0}
-        for directory in sorted(root.iterdir(), key=lambda path: path.name):
-            if directory.is_symlink() or not directory.is_dir():
-                continue
+            return build_bounded_result([], True, False, offset)
+        directories = [
+            directory
+            for directory in sorted(root.iterdir(), key=lambda path: path.name)
+            if not directory.is_symlink() and directory.is_dir()
+        ]
+        complete = True
+        truncated = False
+        next_offset = offset
+        entry_response_bytes = 0
+        for index in range(offset, len(directories)):
+            directory = directories[index]
+            next_offset = index + 1
             try:
                 canonical = directory.resolve(strict=True)
             except OSError:
+                complete = False
+                truncated = True
                 continue
             if canonical in seen:
                 continue
@@ -563,21 +622,57 @@ class CrucibleOperations:
             try:
                 metadata_path, metadata = self._load_run_metadata(canonical)
             except OperationError:
-                entries.append(entry)
-                if len(entries) >= limit:
+                pass
+            else:
+                entry["status"] = "complete" if metadata_path.parent == canonical / "run" else "incomplete"
+                entry["run_id"] = metadata.get("run-id") or metadata.get("id")
+                try:
+                    entry["tags"] = self._validated_tags(metadata)
+                except OperationError:
+                    entry["status"] = "incomplete"
+                    entry["tags"] = []
+            entry_bytes = 3 * len(json.dumps(entry).encode("utf-8")) + 64
+            base_response_bytes = self._mcp_response_size(
+                build_result([], False, truncated, next_offset), request_id
+            )
+            if (
+                base_response_bytes + entry_response_bytes + entry_bytes
+                > MAX_METADATA_RESPONSE_BYTES
+            ):
+                minimal_entry = dict(entry)
+                if entry["tags"]:
+                    minimal_entry["tags"] = []
+                    minimal_entry["tags_truncated"] = True
+                minimal_entry_bytes = 3 * len(json.dumps(minimal_entry).encode("utf-8")) + 64
+                minimal_base_response_bytes = self._mcp_response_size(
+                    build_result([], False, True, next_offset), request_id
+                )
+                if (
+                    minimal_base_response_bytes + entry_response_bytes + minimal_entry_bytes
+                    <= MAX_METADATA_RESPONSE_BYTES
+                ):
+                    entry = minimal_entry
+                    entry_bytes = minimal_entry_bytes
+                    truncated = True
+                elif entries:
+                    complete = False
+                    truncated = True
+                    next_offset = index
                     break
-                continue
-            entry["status"] = "complete" if metadata_path.parent == canonical / "run" else "incomplete"
-            entry["run_id"] = metadata.get("run-id") or metadata.get("id")
-            try:
-                entry["tags"] = self._validated_tags(metadata)
-            except OperationError:
-                entry["status"] = "incomplete"
-                entry["tags"] = []
+                else:
+                    raise OperationError(
+                        "framework",
+                        "local run list response exceeds size limit",
+                        "result_too_large",
+                    )
             entries.append(entry)
+            entry_response_bytes += entry_bytes
             if len(entries) >= limit:
+                complete = complete and next_offset >= len(directories)
+                if not complete:
+                    truncated = True
                 break
-        return {"runs": entries, "count": len(entries)}
+        return build_bounded_result(entries, complete, truncated, next_offset)
 
     def get_local_run_summary(
         self,
