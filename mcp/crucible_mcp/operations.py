@@ -2271,6 +2271,7 @@ class CrucibleOperations:
         try:
             canonical = self._canonical_run_directory(run_directory)
             path, document = self._read_run_metadata(canonical, 1_048_576)
+            self._validate_metadata_depth(document)
         except OperationError:
             raise
         except (
@@ -2291,6 +2292,22 @@ class CrucibleOperations:
         if not isinstance(document, dict):
             raise OperationError("user", "run metadata must be a JSON object", "invalid_run")
         return path, document
+
+    @staticmethod
+    def _validate_metadata_depth(value: Any) -> None:
+        pending: list[tuple[Any, int]] = [(value, 0)]
+        while pending:
+            current, depth = pending.pop()
+            if depth > MAX_METADATA_DEPTH:
+                raise OperationError(
+                    "framework",
+                    "run metadata exceeds nesting limit",
+                    "result_too_large",
+                )
+            if isinstance(current, dict):
+                pending.extend((child, depth + 1) for child in current.values())
+            elif isinstance(current, list):
+                pending.extend((child, depth + 1) for child in current)
 
     def _read_run_metadata(
         self, run_directory: Path, max_bytes: int
