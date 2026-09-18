@@ -1,6 +1,14 @@
 {
     "title": "Crucible Services Schema",
     "description": "This schema defines the Crucible services configuration file",
+    "$defs": {
+        "port": {
+            "description": "A valid service listening port",
+            "type": "integer",
+            "minimum": 1025,
+            "maximum": 32768
+        }
+    },
     "type": "object",
     "properties": {
         "image-sourcing": {
@@ -34,10 +42,7 @@
                                             "minLength": 1
                                         },
                                         "port": {
-                                            "description": "This parameter contains the network port where the image sourcing service is running",
-                                            "type": "integer",
-                                            "minimum": 1025,
-                                            "maximum": 32768
+                                            "$ref": "#/$defs/port"
                                         },
                                         "protocol": {
                                             "description": "This parameter contains the protocol that is used to communicate with the image sourcing service",
@@ -76,10 +81,7 @@
             "type": "object",
             "properties": {
                 "port": {
-                    "description": "This parameter contains the network port where the CDM query server listens",
-                    "type": "integer",
-                    "minimum": 1025,
-                    "maximum": 32768
+                    "$ref": "#/$defs/port"
                 }
             },
             "additionalProperties": false,
@@ -87,15 +89,119 @@
                 "port"
             ]
         },
+        "mcp-server": {
+            "description": "Configuration for the managed Crucible MCP service",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Whether the MCP service is enabled for start all",
+                    "type": "boolean"
+                },
+                "bind": {
+                    "description": "Bind address; localhost is the secure default",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "port": {
+                    "$ref": "#/$defs/port"
+                },
+                "transport": {
+                    "description": "MCP network transport",
+                    "type": "string",
+                    "enum": [
+                        "streamable-http"
+                    ]
+                },
+                "tls-cert": {
+                    "description": "PEM certificate for explicitly enabled remote MCP access",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "tls-key": {
+                    "description": "PEM private key for explicitly enabled remote MCP access",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "allowed-origins": {
+                    "description": "HTTPS origins permitted for wildcard MCP binds",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "uniqueItems": true
+                },
+                "token-file": {
+                    "description": "Root-owned bearer-token file",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "database": {
+                    "description": "Durable MCP job database",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "input-root": {
+                    "description": "Default approved run-file input root",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "max-inline-bytes": {
+                    "description": "Maximum inline JSON request size",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "max-run-file-bytes": {
+                    "description": "Maximum approved run-file size",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "cdm-readiness-timeout": {
+                    "description": "Maximum seconds to wait for CDM consistency",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600
+                },
+                "audit-log": {
+                    "description": "Bounded MCP security audit log",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "audit-max-bytes": {
+                    "description": "Maximum size of the active MCP audit log",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "audit-retained-files": {
+                    "description": "Number of rotated MCP audit files to retain",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "enabled",
+                "bind",
+                "port",
+                "transport",
+                "token-file",
+                "database",
+                "input-root",
+                "max-inline-bytes",
+                "max-run-file-bytes",
+                "cdm-readiness-timeout",
+                "audit-log",
+                "audit-max-bytes",
+                "audit-retained-files"
+            ]
+        },
         "httpd": {
             "description": "The httpd object contains configuration settings for the Apache HTTP server",
             "type": "object",
             "properties": {
                 "port": {
-                    "description": "This parameter contains the network port where the HTTP server listens",
-                    "type": "integer",
-                    "minimum": 1025,
-                    "maximum": 32768
+                    "$ref": "#/$defs/port"
                 }
             },
             "additionalProperties": false,

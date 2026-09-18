@@ -2,6 +2,21 @@
     "cdm-server": {
         "port": 3000
     },
+    "mcp-server": {
+        "enabled": false,
+        "bind": "127.0.0.1",
+        "port": 8889,
+        "transport": "streamable-http",
+        "token-file": "/etc/crucible/mcp-server.token",
+        "database": "/var/lib/crucible/mcp/jobs.db",
+        "input-root": "/var/lib/crucible/mcp/inputs",
+        "max-inline-bytes": 1048576,
+        "max-run-file-bytes": 1048576,
+        "cdm-readiness-timeout": 60,
+        "audit-log": "/var/lib/crucible/logs/mcp-audit.jsonl",
+        "audit-max-bytes": 10485760,
+        "audit-retained-files": 5
+    },
     "httpd": {
         "port": 8080
     },
