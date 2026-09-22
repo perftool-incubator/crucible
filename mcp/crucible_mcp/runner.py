@@ -28,6 +28,18 @@ _MAINTENANCE_OPERATIONS = frozenset(
 )
 
 
+def _plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
+    """Keep only bounded, non-sensitive planner data on the durable job."""
+
+    return {
+        "contract_version": plan.get("contract_version"),
+        "input_digest": plan.get("input_digest"),
+        "totals": plan.get("totals", {}),
+        "runtime": plan.get("runtime", {}),
+        "limits": plan.get("limits", {}),
+    }
+
+
 class RunManager:
     """Submit and supervise Crucible runs without shell interpolation.
 
@@ -61,6 +73,8 @@ class RunManager:
         *,
         document: Any | None = None,
         path: Path | None = None,
+        plan_digest: str | None = None,
+        verified_plan: dict[str, Any] | None = None,
     ) -> tuple[Job, bool]:
         if not idempotency_key:
             raise OperationError("user", "idempotency_key is required", "missing_idempotency_key")
@@ -89,9 +103,40 @@ class RunManager:
             if not validation["valid"]:
                 raise OperationError("user", json.dumps(validation), "invalid_run")
 
+        if plan_digest is not None and (not isinstance(plan_digest, str) or not plan_digest):
+            raise OperationError("user", "plan_digest is required", "invalid_plan")
+
+        request = {"run_document": canonical_document}
+        if plan_digest is not None:
+            request["plan_digest"] = plan_digest
+        existing = self.store.get_by_idempotency_key(idempotency_key)
+        if existing is not None:
+            if existing.request_hash != request_hash(request):
+                raise JobConflictError(
+                    "idempotency key was already used for a different request"
+                )
+            return existing, False
+
+        if plan_digest is not None:
+            if verified_plan is None:
+                verified_plan = self.operations.prepare_run(canonical_document)
+            if not isinstance(verified_plan, dict):
+                raise OperationError("framework", "verified plan is invalid", "invalid_plan")
+            if not verified_plan.get("validation", {}).get("valid", False):
+                raise OperationError("user", json.dumps(verified_plan), "invalid_run")
+            if verified_plan.get("input_digest") != plan_digest:
+                raise OperationError(
+                    "user",
+                    "plan digest does not match the submitted run",
+                    "stale_plan",
+                )
+
+        plan_summary = _plan_summary(verified_plan) if verified_plan else None
         job, created = self.store.create_or_get(
             idempotency_key,
-            {"run_document": canonical_document},
+            request,
+            plan_digest=plan_digest,
+            plan_summary=plan_summary,
         )
         if not created:
             return job, False
@@ -120,6 +165,8 @@ class RunManager:
             logger_session_id=session_id,
             run_directory=str(job_directory),
             supervision_directory=str(job_directory),
+            plan_digest=plan_digest,
+            plan_summary=plan_summary,
         )
         self._launch(job.mcp_job_id, session_id, run_file, job_directory)
         return self.store.get(job.mcp_job_id), True

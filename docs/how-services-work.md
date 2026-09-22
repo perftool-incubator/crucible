@@ -212,7 +212,7 @@ through the standard `tools/list` request; the current interface is:
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `prepare_run` | Build a bounded, side-effect-free plan showing benchmark expansion, samples, tools, and static topology. |
 | `estimate_run` | Return derived run counts and runtime-confidence information without executing the run. |
-| `start_run` | Submit an asynchronous, idempotent Crucible run. |
+| `start_run` | Submit an asynchronous, idempotent Crucible run; optionally verify a `prepare_run` digest. |
 | `postprocess_local_run` | Post-process an approved local run directory asynchronously. |
 | `index_local_run` | Generate CDM documents and index an approved local run directory asynchronously. |
 | `delete_indexed_result` | Delete one indexed CDM result without deleting its local run artifacts. |
@@ -257,6 +257,13 @@ Multiplex checkouts. Those repositories follow their configured upstream
 branches until the planner commits are published as fetchable release targets;
 when the APIs are absent, the tools return `planner_unavailable` rather than
 silently using an unrelated globally installed package.
+
+After inspecting a run with `prepare_run`, a client can pass the returned
+`input_digest` as `plan_digest` to `start_run`. Crucible re-plans the submitted
+input immediately before launch, rejects a changed document with `stale_plan`,
+and stores the verified digest and bounded plan summary on the asynchronous job
+for later status polling. Omitting `plan_digest` preserves the normal
+validation and execution path.
 
 #### MCP documentation resources
 

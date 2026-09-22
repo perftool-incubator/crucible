@@ -265,18 +265,17 @@ bounded `prepare_run` response.
 
 ## Relationship to `start_run`
 
-`start_run` remains the authoritative execution path. It should eventually use
-the same internal planning/validation entry point where practical, but the
-planner must not become a second approval gate with different semantics.
+`start_run` remains the authoritative execution path. Clients that call
+`prepare_run` can pass its `input_digest` as `plan_digest`; `start_run` then
+re-plans the submitted input immediately before launch and rejects a stale
+digest rather than executing a document that no longer matches the inspected
+plan. The submission response includes the verified digest, derived counts,
+runtime confidence, and planning limits alongside the MCP job.
 
-Two useful future integrations are:
-
-1. `start_run` can return the `input_digest` and plan counts alongside the MCP
-   job, allowing a client to correlate the submitted job with its inspection.
-2. `start_run` can optionally accept a plan digest created immediately before
-   submission and reject it if the normalized input or installed component
-   versions changed. This is an integrity check, not a promise that remote
-   capacity has remained unchanged.
+This is an integrity check, not a promise that remote capacity or mutable
+deployment state has remained unchanged. Clients that omit `plan_digest` retain
+the normal validation and execution behavior without the additional planning
+gate.
 
 The first implementation should not persist plan documents as durable jobs.
 Plans are cheap, deterministic views of input; persistence would add lifecycle,
@@ -341,8 +340,9 @@ continue with a partial plan, or stop.
 4. **MCP operations:** implement and test `prepare_run` and `estimate_run` in
    Crucible as thin planner adapters, including tool schemas, discovery
    metadata, structured errors, and response bounds.
-5. **Execution integration:** optionally return the plan digest/counts from
-   `start_run` after verifying that shared validation semantics remain intact.
+5. **Execution integration:** return the plan digest/counts from `start_run`
+   when a client supplies `plan_digest`, and reject stale plans after
+   re-planning the submitted input.
 6. **Documentation:** update the MCP interface table and agent workflow only
    after the public contract is implemented; add examples that handle valid,
    truncated, unknown, and invalid plans.

@@ -3811,6 +3811,11 @@ class CrucibleOperations:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise OperationError("user", "run-file is not valid JSON", "invalid_json") from exc
 
+    def read_run_document(self, path: Path) -> Any:
+        """Read and authorize a run file for a caller that will reuse it."""
+
+        return self._read_plan_run_file(path)
+
     def estimate_run(
         self,
         document: Any,

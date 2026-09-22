@@ -9,7 +9,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
 
-from crucible_mcp.operations import CrucibleOperations
+from crucible_mcp.operations import CrucibleOperations, OperationError
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.audit import AuditLogger
 from crucible_mcp.models import Job, JobState, ResultStatus
@@ -134,6 +134,7 @@ class TestServer(unittest.TestCase):
         self.assertIn("start_run", tools)
         self.assertIn("inputSchema", tools["start_run"])
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
+        self.assertIn("plan_digest", tools["start_run"]["inputSchema"]["properties"])
         self.assertIn("inputSchema", tools["get_run_logs"])
         self.assertIn("offset", tools["list_local_runs"]["inputSchema"]["properties"])
         for tool_name in (
@@ -197,6 +198,93 @@ class TestServer(unittest.TestCase):
                     max_response_bytes=1048576,
                     request_id=request_id,
                 )
+
+    def test_start_run_passes_plan_digest_and_returns_plan_summary(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False},
+        }
+        document = {"benchmarks": []}
+        job = Job(
+            mcp_job_id="planned-job",
+            idempotency_key="planned-key",
+            request_hash="hash",
+            state=JobState.QUEUED,
+            result_status=ResultStatus.NOT_AVAILABLE,
+            plan_digest="digest",
+            plan_summary={
+                "contract_version": "1",
+                "input_digest": "digest",
+                "totals": {"global_iteration_count": 2},
+                "runtime": {"confidence": "unavailable"},
+                "limits": {"truncated": False},
+            },
+        )
+        self.server.run_manager = Mock()
+        self.server.run_manager.submit.return_value = (job, True)
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {
+                "name": "start_run",
+                "arguments": {
+                    "idempotency_key": "planned-key",
+                    "document": document,
+                    "plan_digest": "digest",
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["structuredContent"]["job"]["plan"], {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False},
+        })
+        self.server.run_manager.submit.assert_called_once_with(
+            "planned-key",
+            document=document,
+            plan_digest="digest",
+        )
+
+    def test_start_run_rejects_stale_plan_digest(self):
+        self.server.run_manager = Mock()
+        self.server.run_manager.submit.side_effect = OperationError(
+            "user", "plan digest does not match the submitted run", "stale_plan"
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 33,
+            "method": "tools/call",
+            "params": {
+                "name": "start_run",
+                "arguments": {
+                    "idempotency_key": "stale-key",
+                    "document": {"benchmarks": []},
+                    "plan_digest": "old",
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("stale_plan", payload["error"]["message"])
+        self.server.run_manager.submit.assert_called_once_with(
+            "stale-key",
+            document={"benchmarks": []},
+            plan_digest="old",
+        )
 
     def test_metadata_response_bound_includes_wire_request_id(self):
         run_directory = self.server.operations.local_run_root / "wire-metadata"

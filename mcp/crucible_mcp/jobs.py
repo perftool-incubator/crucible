@@ -138,6 +138,8 @@ class JobStore:
                         idempotency_key TEXT NOT NULL UNIQUE,
                         request_hash TEXT NOT NULL,
                         operation TEXT NOT NULL DEFAULT 'run',
+                        plan_digest TEXT,
+                        plan_summary TEXT,
                         supervision_directory TEXT,
                         state TEXT NOT NULL,
                         result_status TEXT NOT NULL,
@@ -155,15 +157,23 @@ class JobStore:
                     )
                     """
                 )
-                connection.execute("UPDATE schema_version SET version = 3")
+                connection.execute("UPDATE schema_version SET version = 4")
             elif version[0] == 1:
                 connection.execute("ALTER TABLE jobs ADD COLUMN operation TEXT NOT NULL DEFAULT 'run'")
                 connection.execute("ALTER TABLE jobs ADD COLUMN supervision_directory TEXT")
-                connection.execute("UPDATE schema_version SET version = 3")
+                connection.execute("ALTER TABLE jobs ADD COLUMN plan_digest TEXT")
+                connection.execute("ALTER TABLE jobs ADD COLUMN plan_summary TEXT")
+                connection.execute("UPDATE schema_version SET version = 4")
             elif version[0] == 2:
                 connection.execute("ALTER TABLE jobs ADD COLUMN supervision_directory TEXT")
-                connection.execute("UPDATE schema_version SET version = 3")
-            elif version[0] != 3:
+                connection.execute("ALTER TABLE jobs ADD COLUMN plan_digest TEXT")
+                connection.execute("ALTER TABLE jobs ADD COLUMN plan_summary TEXT")
+                connection.execute("UPDATE schema_version SET version = 4")
+            elif version[0] == 3:
+                connection.execute("ALTER TABLE jobs ADD COLUMN plan_digest TEXT")
+                connection.execute("ALTER TABLE jobs ADD COLUMN plan_summary TEXT")
+                connection.execute("UPDATE schema_version SET version = 4")
+            elif version[0] != 4:
                 raise JobError(f"unsupported MCP job database schema: {version[0]}")
 
     @contextmanager
@@ -179,10 +189,23 @@ class JobStore:
             else:
                 connection.commit()
 
-    def create_or_get(self, idempotency_key: str, request: Any, operation: str = "run") -> tuple[Job, bool]:
+    def create_or_get(
+        self,
+        idempotency_key: str,
+        request: Any,
+        operation: str = "run",
+        *,
+        plan_digest: str | None = None,
+        plan_summary: dict[str, Any] | None = None,
+    ) -> tuple[Job, bool]:
         if not idempotency_key:
             raise ValueError("idempotency_key is required")
         hashed_request = request_hash(request)
+        encoded_plan_summary = (
+            json.dumps(plan_summary, separators=(",", ":"), sort_keys=True)
+            if plan_summary is not None
+            else None
+        )
         now = _now()
         with self._transaction() as connection:
             existing = connection.execute(
@@ -199,15 +222,18 @@ class JobStore:
             connection.execute(
                 """
                 INSERT INTO jobs(
-                    mcp_job_id, idempotency_key, request_hash, operation, state, result_status,
+                    mcp_job_id, idempotency_key, request_hash, operation,
+                    plan_digest, plan_summary, state, result_status,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
                     idempotency_key,
                     hashed_request,
                     operation,
+                    plan_digest,
+                    encoded_plan_summary,
                     JobState.QUEUED.value,
                     ResultStatus.NOT_AVAILABLE.value,
                     now,
@@ -263,10 +289,15 @@ class JobStore:
             "result_status", "logger_session_id", "rickshaw_run_id", "cdm_run_id",
             "run_directory", "runner_pid", "runner_container_id", "exit_code",
             "error_category", "error_message", "supervision_directory",
+            "plan_digest", "plan_summary",
         }
         unknown = set(updates) - allowed_columns
         if unknown:
             raise ValueError(f"unknown job fields: {', '.join(sorted(unknown))}")
+        if "plan_summary" in updates:
+            updates["plan_summary"] = json.dumps(
+                updates["plan_summary"], separators=(",", ":"), sort_keys=True
+            )
         updates["state"] = state.value
         updates["updated_at"] = _now()
         assignments = ", ".join(f"{column} = ?" for column in updates)
@@ -290,4 +321,9 @@ class JobStore:
         values = dict(row)
         values["state"] = JobState(values["state"])
         values["result_status"] = ResultStatus(values["result_status"])
+        if values.get("plan_summary") is not None:
+            try:
+                values["plan_summary"] = json.loads(values["plan_summary"])
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise JobError("stored plan summary is invalid JSON") from exc
         return Job(**values)
