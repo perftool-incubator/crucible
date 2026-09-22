@@ -17,7 +17,7 @@ Keep those responsibilities separate when configuring MCP access:
 
 | Agent role | Crucible MCP access | Purpose |
 | --- | --- | --- |
-| Benchmark | Documentation resources, discovery, `validate_run`, `start_run`, `get_run_status`, `get_run_logs`, `get_run_summary`, and processing tools | Understand Crucible, construct a run, execute it, and monitor progress. |
+| Benchmark | Documentation resources, discovery, `validate_run`, `prepare_run`, `estimate_run`, `start_run`, `get_run_status`, `get_run_logs`, `get_run_summary`, and processing tools | Understand Crucible, inspect a bounded plan, construct a run, execute it, and monitor progress. |
 | Review | `get_run_status`, `get_run_summary`, `list_indexed_periods`, `get_indexed_metric`, and indexed-result reads | Determine result readiness and analyze measurements. |
 | Operator/admin | Explicitly approved maintenance tools only | Perform local archive, tag, or indexed-result maintenance when required. |
 
@@ -115,6 +115,27 @@ validation = call_tool("validate_run", {"path": approved_input_path})
 Do not pass a path from an arbitrary workspace. The MCP policy canonicalizes
 the path, rejects symlink escapes and unsafe permissions, and limits the
 retained input size.
+
+For a valid document, inspect the static execution plan before submission when
+the workload is large or parameter expansion is significant:
+
+```text
+plan = call_tool("prepare_run", {"document": run_document})
+if not plan["validation"]["valid"]:
+    stop and report plan["validation"]["errors"]
+
+if plan["limits"]["truncated"]:
+    report that parameter or engine details are a bounded prefix
+
+counts = call_tool("estimate_run", {"document": run_document})
+report(counts["totals"], counts["runtime"])
+```
+
+`prepare_run` and `estimate_run` are read-only and side-effect-free. They reuse
+Rickshaw's installed expansion rules, but they do not deploy endpoints, start
+containers, create run directories or credentials, write CDM data, or predict
+benchmark duration. A runtime confidence of `unavailable` is expected unless a
+future trusted static source is configured.
 
 ## 4. Submit an idempotent run
 
