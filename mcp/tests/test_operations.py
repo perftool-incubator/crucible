@@ -408,6 +408,25 @@ class TestCrucibleOperations(unittest.TestCase):
         )
         multiplex.apply_flat_params.assert_called_once_with([], {})
 
+    def test_invalid_tool_params_schema_is_structured(self):
+        schema_path = (
+            self.root
+            / "subprojects"
+            / "core"
+            / "rickshaw"
+            / "schema"
+            / "tool-params.json"
+        )
+        schema_path.write_text(json.dumps({"type": "not-a-json-schema-type"}), encoding="utf-8")
+
+        self.assertEqual(
+            self.operations._validate_tool_params_schema([]),
+            [{
+                "code": "planner_unavailable",
+                "message": "tool-params schema is unavailable",
+            }],
+        )
+
     def test_plan_input_resolution_preserves_default_tool_truncation(self):
         tool = self.root / "subprojects" / "tools" / "sysstat"
         tool.mkdir(parents=True)

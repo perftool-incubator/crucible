@@ -3727,10 +3727,17 @@ class CrucibleOperations:
                 "code": "planner_unavailable",
                 "message": "tool-params schema is unavailable",
             }]
-        errors = sorted(
-            Draft201909Validator(schema).iter_errors(entries),
-            key=lambda error: list(error.path),
-        )
+        try:
+            Draft201909Validator.check_schema(schema)
+            errors = sorted(
+                Draft201909Validator(schema).iter_errors(entries),
+                key=lambda error: list(error.path),
+            )
+        except SchemaError:
+            return [{
+                "code": "planner_unavailable",
+                "message": "tool-params schema is unavailable",
+            }]
         return [
             {"code": "invalid_tool_params", "message": error.message}
             for error in errors[:32]
