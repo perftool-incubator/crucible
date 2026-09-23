@@ -42,6 +42,9 @@ MAX_PLAN_PARAMETER_ENTRY_WORK = 1_000_000
 MAX_PLAN_RAW_PARAMETER_BYTES = 262_144
 MAX_PLAN_RAW_PARAMETER_ENTRIES = 10_000
 MAX_PLAN_REQUIREMENTS_BYTES = 262_144
+MAX_BENCHMARK_VALIDATION_RULES = 100
+MAX_BENCHMARK_VALIDATION_DETAIL_BYTES = 64 * 1024
+MAX_BENCHMARK_VALIDATION_PATTERN_CHARS = 512
 MAX_PLAN_MATERIALIZED_BYTES = 8 * MAX_PLAN_RESPONSE_BYTES
 MAX_PLAN_ENGINE_ID_TOKEN_CHARS = 256
 MAX_PLAN_ENGINE_ID_BYTES = 8 * MAX_PLAN_RESPONSE_BYTES
@@ -3261,6 +3264,7 @@ class CrucibleOperations:
         metadata = self._benchmark_metadata(directory)
         if metadata is None:
             raise OperationError("framework", f"benchmark metadata is unavailable: {name}")
+        metadata["parameter_validation"] = self._benchmark_parameter_validation(directory)
         return metadata
 
     def validate_run(self, document: Any) -> dict[str, Any]:
@@ -3377,7 +3381,7 @@ class CrucibleOperations:
             # state without taking that lock. Serialize both planner phases
             # through one process-wide lock so a tool plan cannot overwrite
             # another request's requirements while it is being expanded.
-            with _PLANNING_LOCK, self._suppress_planner_diagnostics(multiplex):
+            with _PLANNING_LOCK, self._suppress_planner_diagnostics(multiplex) as diagnostics:
                 plan = planner.plan(
                     document,
                     PlannerLimits(
@@ -3386,6 +3390,9 @@ class CrucibleOperations:
                         max_tool_entries=max_tool_entries,
                     ),
                 )
+            self._enrich_parameter_expansion_errors(
+                document, plan, diagnostics["parameter_validation_failed"]
+            )
             for benchmark in plan.get("benchmarks", []):
                 parameter_sets = benchmark.get("parameter_sets", {})
                 if "items" in parameter_sets:
@@ -3418,6 +3425,133 @@ class CrucibleOperations:
             raise OperationError(
                 "framework", "run planner is unavailable", "planner_unavailable"
             ) from exc
+
+    @staticmethod
+    def _enrich_parameter_expansion_errors(
+        document: Any, plan: dict[str, Any], parameter_validation_failed: bool
+    ) -> None:
+        """Classify known value-validation failures without exposing values."""
+
+        if not parameter_validation_failed:
+            return
+        validation = plan.get("validation")
+        errors = validation.get("errors") if isinstance(validation, dict) else None
+        benchmarks = document.get("benchmarks") if isinstance(document, dict) else None
+        if not isinstance(errors, list) or not isinstance(benchmarks, list):
+            return
+        names = [
+            entry.get("name")
+            for entry in benchmarks
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+        ]
+        for error in errors:
+            if not isinstance(error, dict) or error.get("code") != "expansion_failed":
+                continue
+            message = error.get("message")
+            if not isinstance(message, str):
+                continue
+            for name in names:
+                if message.startswith(f"benchmark {name} parameter expansion failed:"):
+                    error.update({
+                        "code": "invalid_parameter",
+                        "benchmark": name,
+                        "guidance_tool": "describe_benchmark",
+                        "guidance_field": "parameter_validation.rules",
+                        "message": (
+                            f"parameter validation failed for benchmark {name}; "
+                            "inspect describe_benchmark parameter_validation.rules "
+                            "for accepted forms"
+                        ),
+                    })
+                    break
+
+    def _benchmark_parameter_validation(self, directory: Path) -> dict[str, Any]:
+        """Expose bounded validation metadata from the benchmark's source file."""
+
+        result: dict[str, Any] = {
+            "source": "multiplex.json",
+            "available": False,
+            "complete": True,
+            "rules": [],
+        }
+        requirements_path = directory / "multiplex.json"
+        try:
+            requirements = json.loads(
+                self._read_bounded_utf8(requirements_path, MAX_PLAN_REQUIREMENTS_BYTES)
+            )
+        except FileNotFoundError:
+            return result
+        except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            result["complete"] = False
+            return result
+
+        if not isinstance(requirements, dict):
+            result["complete"] = False
+            return result
+        if "validations" not in requirements:
+            result["available"] = True
+            result["complete"] = False
+            return result
+        validations = requirements["validations"]
+        if not isinstance(validations, dict):
+            result["available"] = True
+            result["complete"] = False
+            return result
+
+        result["available"] = True
+        rules: list[dict[str, Any]] = []
+        detail_bytes = 0
+        for group, definition in sorted(validations.items(), key=lambda item: str(item[0])):
+            if len(rules) >= MAX_BENCHMARK_VALIDATION_RULES:
+                result["complete"] = False
+                break
+            if not isinstance(group, str) or not isinstance(definition, dict):
+                result["complete"] = False
+                continue
+            args = definition.get("args")
+            raw_patterns = definition.get("vals")
+            patterns = [raw_patterns] if isinstance(raw_patterns, str) else raw_patterns
+            if (
+                not isinstance(args, list)
+                or not args
+                or any(not isinstance(arg, str) for arg in args)
+                or not isinstance(patterns, list)
+                or not patterns
+                or any(not isinstance(pattern, str) for pattern in patterns)
+            ):
+                result["complete"] = False
+                continue
+
+            rule: dict[str, Any] = {
+                "group": group[:128],
+                "parameters": [arg[:128] for arg in args[:100]],
+                "accepted_patterns": [
+                    pattern[:MAX_BENCHMARK_VALIDATION_PATTERN_CHARS]
+                    for pattern in patterns[:20]
+                ],
+                "repeatable": definition.get("repeatable", False) is True,
+            }
+            description = definition.get("description")
+            if isinstance(description, str):
+                rule["description"] = description[:512]
+            if (
+                len(group) > 128
+                or len(args) > 100
+                or any(len(arg) > 128 for arg in args)
+                or len(patterns) > 20
+                or any(len(pattern) > MAX_BENCHMARK_VALIDATION_PATTERN_CHARS for pattern in patterns)
+                or (isinstance(description, str) and len(description) > 512)
+                or ("repeatable" in definition and not isinstance(definition["repeatable"], bool))
+            ):
+                result["complete"] = False
+            encoded_size = len(json.dumps(rule, separators=(",", ":")).encode("utf-8"))
+            if detail_bytes + encoded_size > MAX_BENCHMARK_VALIDATION_DETAIL_BYTES:
+                result["complete"] = False
+                break
+            rules.append(rule)
+            detail_bytes += encoded_size
+        result["rules"] = rules
+        return result
 
     def _validate_and_resolve_plan_inputs(
         self,
@@ -3629,18 +3763,44 @@ class CrucibleOperations:
     @staticmethod
     @contextmanager
     def _suppress_planner_diagnostics(multiplex: Any):
-        """Prevent delegated planners from logging raw user parameter values."""
+        """Suppress planner logs while retaining only a safe validation signal."""
 
         logger_name = getattr(multiplex, "__name__", None)
         if not isinstance(logger_name, str):
             logger_name = "multiplex"
         logger = logging.getLogger(logger_name)
         previous_level = logger.level
+        diagnostics = {"parameter_validation_failed": False}
+        original_validator = getattr(multiplex, "param_validated", None)
+        validator_patched = False
+        if callable(original_validator):
+            def track_validation_result(*args: Any, **kwargs: Any) -> Any:
+                accepted = original_validator(*args, **kwargs)
+                param = args[0] if args else kwargs.get("param")
+                validation_dict = getattr(multiplex, "validation_dict", None)
+                if (
+                    not accepted
+                    and isinstance(validation_dict, dict)
+                    and param in validation_dict
+                ):
+                    diagnostics["parameter_validation_failed"] = True
+                return accepted
+
+            try:
+                # The canonical expander resolves this module global. Observe
+                # its final boolean result, not warnings for individual regex
+                # alternatives, some of which may fail for an accepted value.
+                setattr(multiplex, "param_validated", track_validation_result)
+                validator_patched = True
+            except (AttributeError, TypeError):
+                pass
         logger.setLevel(logging.CRITICAL + 1)
         try:
-            yield
+            yield diagnostics
         finally:
             logger.setLevel(previous_level)
+            if validator_patched:
+                setattr(multiplex, "param_validated", original_validator)
 
     def _validate_plan_endpoints(
         self, document: dict[str, Any], plan: dict[str, Any]

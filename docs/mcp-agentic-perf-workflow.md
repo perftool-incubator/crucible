@@ -79,6 +79,9 @@ endpoint = choose_endpoint(endpoints["endpoints"], requested_endpoint)
 ```
 
 Use the returned metadata to choose a benchmark and construct its parameters.
+Check `benchmark["parameter_validation"]["rules"]` for accepted parameter
+patterns. If `parameter_validation.complete` is false, treat the rules as a
+partial guide rather than an exhaustive list.
 The endpoint, engine IDs, user environment, and tool configuration are
 deployment-specific; the generic run-file skeleton in
 `how-run-files-work.md` is not necessarily executable without those details.
@@ -104,6 +107,11 @@ if not validation["valid"]:
 `validate_run` validates Crucible run documents only. It does not replace the
 CLI's development and administration validation modes for multiplex,
 workshop, tool metadata, repository, service, or registry configuration.
+It also does not expand benchmark parameters. Use `prepare_run` for that
+check; a confirmed parameter-value mismatch is reported with code
+`invalid_parameter`, identifies the benchmark, and points to accepted forms
+in `describe_benchmark` without echoing the rejected value. Other expansion
+failures retain their expansion error.
 
 For a larger document, stage it under the configured MCP `input-root` and use
 an approved path instead:

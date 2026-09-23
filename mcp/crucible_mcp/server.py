@@ -269,7 +269,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "describe_benchmark",
-        "description": "Describe an installed benchmark.",
+        "description": "Describe an installed benchmark, including accepted parameter validation rules when available.",
         "inputSchema": {
             "type": "object",
             "properties": {"name": {"type": "string", "minLength": 1}},

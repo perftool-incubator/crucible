@@ -60,9 +60,130 @@ class TestCrucibleOperations(unittest.TestCase):
         self.directory.cleanup()
 
     def test_list_and_describe_benchmark(self):
+        benchmark = self.root / "subprojects" / "benchmarks" / "example"
+        (benchmark / "multiplex.json").write_text(
+            json.dumps({
+                "validations": {
+                    "positive_integer": {
+                        "description": "a whole number greater than 0",
+                        "args": ["seconds"],
+                        "vals": "^[1-9][0-9]*$",
+                    }
+                }
+            }),
+            encoding="utf-8",
+        )
         benchmarks = self.operations.list_benchmarks()
         self.assertEqual(benchmarks[0]["name"], "example")
-        self.assertEqual(self.operations.describe_benchmark("example")["description"], "Example benchmark")
+        description = self.operations.describe_benchmark("example")
+        self.assertEqual(description["description"], "Example benchmark")
+        self.assertEqual(description["parameter_validation"], {
+            "source": "multiplex.json",
+            "available": True,
+            "complete": True,
+            "rules": [{
+                "group": "positive_integer",
+                "parameters": ["seconds"],
+                "accepted_patterns": ["^[1-9][0-9]*$"],
+                "repeatable": False,
+                "description": "a whole number greater than 0",
+            }],
+        })
+
+    def test_parameter_value_failure_has_safe_structured_guidance(self):
+        plan = {
+            "validation": {
+                "valid": False,
+                "errors": [{
+                    "code": "expansion_failed",
+                    "message": (
+                        "benchmark sleep parameter expansion failed: "
+                        "parameter expansion failed with exit code 4"
+                    ),
+                }],
+            }
+        }
+        document = {"benchmarks": [{"name": "sleep"}]}
+
+        self.operations._enrich_parameter_expansion_errors(document, plan, True)
+
+        self.assertEqual(plan["validation"]["errors"], [{
+            "code": "invalid_parameter",
+            "benchmark": "sleep",
+            "guidance_tool": "describe_benchmark",
+            "guidance_field": "parameter_validation.rules",
+            "message": (
+                "parameter validation failed for benchmark sleep; inspect "
+                "describe_benchmark parameter_validation.rules for accepted forms"
+            ),
+        }])
+
+    def test_ambiguous_parameter_expansion_failure_stays_generic(self):
+        error = {
+            "code": "expansion_failed",
+            "message": (
+                "benchmark sleep parameter expansion failed: "
+                "parameter expansion failed with exit code 4"
+            ),
+        }
+        plan = {"validation": {"valid": False, "errors": [error]}}
+
+        self.operations._enrich_parameter_expansion_errors(
+            {"benchmarks": [{"name": "sleep"}]}, plan, False
+        )
+
+        self.assertEqual(error["code"], "expansion_failed")
+
+    def test_planner_diagnostics_track_confirmed_rejection_only(self):
+        logger_name = "test_multiplex_diagnostics"
+        logger = logging.getLogger(logger_name)
+        result = {"accepted": True}
+
+        def validate_parameter(param, value):
+            if result["accepted"]:
+                # Multiplex can log a failed alternative even though a later
+                # alternative accepts the value.
+                logger.warning(
+                    "Validation failed for param='%s', val='%s'. "
+                    "Values didn't match the pattern '%s'.",
+                    param,
+                    value,
+                    "first-pattern",
+                )
+            return result["accepted"]
+
+        multiplex = SimpleNamespace(
+            __name__=logger_name,
+            param_validated=validate_parameter,
+            validation_dict={"seconds": "^[1-9][0-9]*$"},
+        )
+
+        with self.operations._suppress_planner_diagnostics(multiplex) as diagnostics:
+            self.assertTrue(multiplex.param_validated("seconds", "accepted"))
+            self.assertFalse(diagnostics["parameter_validation_failed"])
+            result["accepted"] = False
+            self.assertFalse(multiplex.param_validated("seconds", "rejected"))
+            self.assertTrue(diagnostics["parameter_validation_failed"])
+
+        self.assertIs(multiplex.param_validated, validate_parameter)
+
+        with self.operations._suppress_planner_diagnostics(multiplex) as diagnostics:
+            self.assertFalse(multiplex.param_validated("unknown", "value"))
+            self.assertFalse(diagnostics["parameter_validation_failed"])
+
+    def test_missing_benchmark_validations_are_reported_incomplete(self):
+        benchmark = self.root / "subprojects" / "benchmarks" / "example"
+        (benchmark / "multiplex.json").write_text('{"presets": {}}', encoding="utf-8")
+
+        self.assertEqual(
+            self.operations._benchmark_parameter_validation(benchmark),
+            {
+                "source": "multiplex.json",
+                "available": True,
+                "complete": False,
+                "rules": [],
+            },
+        )
 
     def test_plan_response_bound_drops_detail_prefixes(self):
         plan = {

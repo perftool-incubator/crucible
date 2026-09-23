@@ -208,7 +208,7 @@ through the standard `tools/list` request; the current interface is:
 | `list_local_archives` | List local run archives without accessing remote archive backends. |
 | `archive_local_run` | Archive an approved local run and remove the live run after success. |
 | `unarchive_local_run` | Restore a local run archive into the approved run root. |
-| `describe_benchmark` | Return metadata for one installed benchmark. |
+| `describe_benchmark` | Return metadata for one installed benchmark, including accepted parameter validation rules from `multiplex.json` when available. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `prepare_run` | Build a bounded, side-effect-free plan showing benchmark expansion, samples, tools, and static topology. |
 | `estimate_run` | Return derived run counts and runtime-confidence information without executing the run. |
@@ -242,6 +242,15 @@ validation types—such as multiplex, workshop, tool metadata, repository,
 service, and registry configuration—remain CLI-only because they support
 benchmark/tool development or host administration rather than normal MCP run
 execution.
+
+`validate_run` checks Crucible's run-file schema and installed benchmark names;
+it does not expand benchmark parameters. `describe_benchmark` exposes each
+benchmark's bounded `parameter_validation.rules` from its `multiplex.json`,
+including the parameter names and accepted patterns. `prepare_run` performs
+the canonical parameter expansion and reports confirmed value mismatches with
+code `invalid_parameter`, the benchmark name, and a pointer back to those
+rules. Other expansion failures retain their expansion error. Neither response
+echoes rejected values, since parameter values can contain credentials.
 
 `prepare_run` and `estimate_run` are read-only planning operations. They reuse
 Rickshaw's canonical parameter-expansion rules through the installed planning
