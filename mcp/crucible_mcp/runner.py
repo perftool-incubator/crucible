@@ -743,6 +743,20 @@ class RunManager:
         summary = self._read_json_artifact(Path(job.run_directory) / "run" / "result-summary.json")
         if isinstance(summary, dict):
             value = summary.get("cdm_run_id") or summary.get("cdm-run-id")
+            if not isinstance(value, str) or not value:
+                runs = summary.get("runs")
+                run_ids = set()
+                if isinstance(runs, list):
+                    run_ids = {
+                        run["run-id"]
+                        for run in runs
+                        if isinstance(run, dict)
+                        and isinstance(run.get("run-id"), str)
+                        and run["run-id"]
+                    }
+                # The job status has one CDM ID field. Do not pick an
+                # arbitrary result when a summary contains several runs.
+                value = next(iter(run_ids)) if len(run_ids) == 1 else None
             if isinstance(value, str) and value:
                 updates["cdm_run_id"] = value
         if updates:

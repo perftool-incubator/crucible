@@ -292,7 +292,7 @@ class TestRunManager(unittest.TestCase):
             '{"run-id":"rickshaw-2"}', encoding="utf-8"
         )
         (run_directory / "run" / "result-summary.json").write_text(
-            '{"cdm_run_id":"cdm-2"}', encoding="utf-8"
+            '{"runs":[{"run-id":"cdm-2"}]}', encoding="utf-8"
         )
         self.store.transition(
             job.mcp_job_id,
@@ -303,6 +303,24 @@ class TestRunManager(unittest.TestCase):
         updated = self.store.get(job.mcp_job_id)
         self.assertEqual(updated.rickshaw_run_id, "rickshaw-2")
         self.assertEqual(updated.cdm_run_id, "cdm-2")
+
+    def test_backfill_does_not_choose_between_multiple_cdm_run_ids(self):
+        job, _ = self.store.create_or_get("key-backfill-ambiguous", {"run": 1})
+        run_directory = self.root / "ambiguous-backfill-run"
+        (run_directory / "run").mkdir(parents=True)
+        (run_directory / "run" / "result-summary.json").write_text(
+            '{"runs":[{"run-id":"cdm-1"},{"run-id":"cdm-2"}]}',
+            encoding="utf-8",
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(run_directory),
+        )
+
+        self.manager._backfill_identifiers(job.mcp_job_id)
+
+        self.assertIsNone(self.store.get(job.mcp_job_id).cdm_run_id)
 
     def test_staging_failure_is_persisted_as_infrastructure_failure(self):
         document = {"benchmarks": [{"name": "example"}]}
