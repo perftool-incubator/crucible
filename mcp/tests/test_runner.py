@@ -1,9 +1,10 @@
+import json
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from crucible_mcp.jobs import JobStore
 from crucible_mcp.models import JobState
@@ -63,6 +64,126 @@ class TestRunManager(unittest.TestCase):
         self.assertTrue(logs["complete"])
         self.assertEqual(logs["text"], "")
         self.assertTrue((self.root / "runs" / job.mcp_job_id / "input" / "run-file.json").is_file())
+
+    def test_submission_verifies_plan_digest_before_launch(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "input_digest": "digest",
+            "validation": {"valid": True},
+        }
+        with patch.object(self.manager.operations, "prepare_run", Mock(return_value=plan)) as planner:
+            job, created = self.manager.submit(
+                "key-planned", document=document, plan_digest="digest"
+            )
+
+        self.assertTrue(created)
+        planner.assert_called_once_with(document)
+        self.manager._threads[job.mcp_job_id].join(timeout=5)
+
+    def test_submission_reuses_verified_plan(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "input_digest": "digest",
+            "validation": {"valid": True},
+            "totals": {"global_iteration_count": 1},
+        }
+        with patch.object(self.manager.operations, "prepare_run") as planner:
+            job, created = self.manager.submit(
+                "key-verified-plan",
+                document=document,
+                plan_digest="digest",
+                verified_plan=plan,
+            )
+
+        self.assertTrue(created)
+        planner.assert_not_called()
+        self.assertEqual(self.store.get(job.mcp_job_id).plan_summary["totals"], {
+            "global_iteration_count": 1
+        })
+        self.manager._threads[job.mcp_job_id].join(timeout=5)
+
+    def test_idempotent_retry_skips_planning(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "input_digest": "digest",
+            "validation": {"valid": True},
+        }
+        with patch.object(self.manager.operations, "prepare_run", Mock(return_value=plan)) as planner:
+            job, created = self.manager.submit(
+                "key-retry", document=document, plan_digest="digest"
+            )
+            self.assertTrue(created)
+            planner.assert_called_once_with(document)
+
+            planner.reset_mock()
+            planner.side_effect = AssertionError("retry replanned the run")
+            duplicate, duplicate_created = self.manager.submit(
+                "key-retry", document=document, plan_digest="digest"
+            )
+
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.mcp_job_id, job.mcp_job_id)
+        planner.assert_not_called()
+        self.manager._threads[job.mcp_job_id].join(timeout=5)
+
+    def test_planned_path_submission_uses_path_size_policy(self):
+        input_root = self.root / "mcp" / "inputs"
+        input_root.mkdir(parents=True)
+        path = input_root / "planned.json"
+        document = {"benchmarks": [{"name": "example"}]}
+        path.write_text(json.dumps(document), encoding="utf-8")
+        path.chmod(0o600)
+        self.manager.max_inline_bytes = 1
+        plan = {
+            "input_digest": "digest",
+            "validation": {"valid": True},
+        }
+
+        with patch.object(self.manager.operations, "prepare_run", Mock(return_value=plan)):
+            job, created = self.manager.submit(
+                "key-planned-path", path=path, plan_digest="digest"
+            )
+
+        self.assertTrue(created)
+        self.manager._threads[job.mcp_job_id].join(timeout=5)
+
+    def test_planned_staging_failure_preserves_plan_metadata(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True},
+            "totals": {"global_iteration_count": 1},
+        }
+        broken_root = self.root / "not-a-directory"
+        broken_root.write_text("occupied", encoding="utf-8")
+        self.manager.run_root = broken_root
+
+        with patch.object(self.manager.operations, "prepare_run", Mock(return_value=plan)):
+            job, created = self.manager.submit(
+                "key-planned-staging-failure",
+                document=document,
+                plan_digest="digest",
+            )
+
+        self.assertTrue(created)
+        self.assertEqual(job.state, JobState.FAILED)
+        self.assertEqual(job.plan_digest, "digest")
+        self.assertEqual(job.plan_summary["totals"], {"global_iteration_count": 1})
+
+    def test_submission_rejects_stale_plan_digest(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "input_digest": "current",
+            "validation": {"valid": True},
+        }
+        with patch.object(self.manager.operations, "prepare_run", Mock(return_value=plan)):
+            with self.assertRaises(OperationError) as raised:
+                self.manager.submit(
+                    "key-stale-plan", document=document, plan_digest="old"
+                )
+
+        self.assertEqual(raised.exception.code, "stale_plan")
 
     def test_failed_runner_is_persisted(self):
         manager = RunManager(

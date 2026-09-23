@@ -66,6 +66,30 @@ class TestJobStore(unittest.TestCase):
         self.assertEqual(updated.cdm_run_id, "cdm-1")
         self.assertEqual(updated.result_status, ResultStatus.AVAILABLE)
 
+    def test_plan_summary_persists_across_store_reopen(self):
+        summary = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False},
+        }
+        job, _ = self.store.create_or_get(
+            "request-plan",
+            {"run": 1},
+            plan_digest="digest",
+            plan_summary=summary,
+        )
+        database_path = self.store.database_path
+        self.store.close()
+        self.store = JobStore(database_path)
+
+        restored = self.store.get(job.mcp_job_id)
+
+        self.assertEqual(restored.plan_digest, "digest")
+        self.assertEqual(restored.plan_summary, summary)
+        self.assertEqual(restored.as_dict()["plan"], summary)
+
     def test_invalid_transition_is_rejected(self):
         job, _ = self.store.create_or_get("request-1", {"run": 1})
         with self.assertRaises(Exception):

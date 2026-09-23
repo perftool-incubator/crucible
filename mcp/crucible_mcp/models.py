@@ -53,6 +53,8 @@ class Job:
     state: JobState
     result_status: ResultStatus
     operation: str = "run"
+    plan_digest: Optional[str] = None
+    plan_summary: Optional[dict[str, Any]] = None
     supervision_directory: Optional[str] = None
     logger_session_id: Optional[str] = None
     rickshaw_run_id: Optional[str] = None
@@ -70,4 +72,7 @@ class Job:
         values = asdict(self)
         values["state"] = self.state.value
         values["result_status"] = self.result_status.value
+        plan_summary = values.pop("plan_summary")
+        if plan_summary is not None:
+            values["plan"] = plan_summary
         return values

@@ -321,11 +321,12 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "start_run",
-        "description": "Start an idempotent asynchronous Crucible run.",
+        "description": "Start an idempotent asynchronous Crucible run, optionally verifying a prepared plan digest.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "idempotency_key": {"type": "string", "minLength": 1},
+                "plan_digest": {"type": "string", "minLength": 1, "maxLength": 128},
                 "document": {"type": "object"},
                 "path": {"type": "string", "minLength": 1},
             },
@@ -952,15 +953,18 @@ class MCPHandler(BaseHTTPRequestHandler):
                     return self._error(request_id, -32602, "provide exactly one of document or path")
                 if "path" in arguments and not isinstance(arguments["path"], str):
                     return self._error(request_id, -32602, "path must be a string")
+                plan_digest = arguments.get("plan_digest")
                 if "document" in arguments:
                     job, created = self.server.run_manager.submit(
                         arguments.get("idempotency_key", ""),
                         document=arguments["document"],
+                        plan_digest=plan_digest,
                     )
                 elif "path" in arguments:
                     job, created = self.server.run_manager.submit(
                         arguments.get("idempotency_key", ""),
                         path=Path(arguments["path"]),
+                        plan_digest=plan_digest,
                     )
                 else:
                     return self._error(request_id, -32602, "start_run requires document or path")

@@ -163,6 +163,14 @@ CDM run ID, and local run directory are separate identifiers and may not be
 available immediately. Preserve every identifier returned by status polling;
 do not treat one as an alias for another.
 
+When a run was inspected with `prepare_run`, pass its `input_digest` as
+`plan_digest`. Crucible re-plans the submitted input immediately before
+launching it and rejects the request with `stale_plan` if the document or
+planner contract no longer matches. The response includes the verified digest,
+derived counts, runtime confidence, and planning limits under `plan`. If no
+plan was prepared, omit `plan_digest`; submission retains the normal validation
+and execution behavior without the extra planning gate.
+
 If the request is lost and submitted again with the same key and equivalent
 document, Crucible returns the original job with `created: false`. Reusing the
 key for a different document is a conflict and must be reported to the
