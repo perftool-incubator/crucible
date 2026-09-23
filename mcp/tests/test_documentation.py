@@ -1,7 +1,10 @@
+import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
 
+from jsonschema import Draft201909Validator
 from crucible_mcp.documentation import DocumentationCatalog
 
 
@@ -78,6 +81,70 @@ class TestDocumentationCatalog(unittest.TestCase):
             catalog.search(" ".join(f"term{index}" for index in range(65)))
         with self.assertRaises(ValueError):
             catalog.search("x" * 4097)
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _json_example(path: Path, heading: str) -> dict:
+    document = path.read_text(encoding="utf-8")
+    section = document.split(heading, 1)[1]
+    match = re.search(r"```json\s+(.*?)\s+```", section, re.DOTALL)
+    if match is None:
+        raise AssertionError(f"no JSON example found after {heading!r} in {path}")
+    return json.loads(match.group(1))
+
+
+class TestDocumentedEndpointExamples(unittest.TestCase):
+    def test_examples_match_installed_endpoint_schemas(self):
+        schema_root = (
+            REPOSITORY_ROOT / "subprojects" / "core" / "rickshaw" / "schema"
+        )
+        if not schema_root.is_dir():
+            self.skipTest("active Rickshaw endpoint schemas are not installed")
+
+        examples = (
+            (
+                REPOSITORY_ROOT / "docs" / "how-run-files-work.md",
+                "### Remotehosts endpoint",
+                "remotehosts",
+                False,
+            ),
+            (
+                REPOSITORY_ROOT / "docs" / "how-run-files-work.md",
+                "### Kubernetes endpoint",
+                "kube",
+                False,
+            ),
+            (
+                REPOSITORY_ROOT / "docs" / "how-endpoints-work.md",
+                "### Remotehosts example",
+                "remotehosts",
+                True,
+            ),
+            (
+                REPOSITORY_ROOT / "docs" / "how-endpoints-work.md",
+                "### Kubernetes example",
+                "kube",
+                True,
+            ),
+        )
+        for doc_path, heading, endpoint_type, wrapped in examples:
+            with self.subTest(document=doc_path.name, endpoint=endpoint_type):
+                example = _json_example(doc_path, heading)
+                endpoint = example["endpoints"][0] if wrapped else example
+                schema = json.loads(
+                    (schema_root / f"{endpoint_type}.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                errors = list(Draft201909Validator(schema).iter_errors(endpoint))
+                self.assertEqual(
+                    errors,
+                    [],
+                    f"{heading} is invalid: "
+                    + "; ".join(error.message for error in errors),
+                )
 
 
 if __name__ == "__main__":
