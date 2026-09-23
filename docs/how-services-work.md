@@ -433,6 +433,14 @@ Some services require readiness verification after starting:
 - **OpenSearch**: Two-stage check — first waits for the HTTP
   endpoint to respond, then waits for cluster health to reach
   "yellow" or "green" status
+- **MCP server**: Authenticated `GET /health` must respond within
+  30 seconds. This confirms the MCP HTTP process is serving requests;
+  it does not check CDM readiness, endpoint connectivity, or engine-image
+  availability.
+
+An image-sourcing health check confirms that the builder is ready to accept
+requests, not that a particular benchmark image has already been built. Engine
+images are requested and cached as part of a run.
 
 ### Run protection
 
