@@ -9,7 +9,11 @@ from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
 
-from crucible_mcp.operations import CrucibleOperations, OperationError
+from crucible_mcp.operations import (
+    CrucibleOperations,
+    OperationError,
+    MAX_LOG_RESPONSE_BYTES,
+)
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.audit import AuditLogger
 from crucible_mcp.models import Job, JobState, ResultStatus
@@ -666,6 +670,98 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32009)
+
+    def test_get_run_logs_redacts_credentials_and_preserves_raw_offsets(self):
+        raw_text = (
+            "crucible run --roadblock-password=roadblock-secret "
+            "--token token-secret --bearer=bearer-secret "
+            "--credential credential-secret\n"
+            "Authorization: Bearer authorization-secret\n"
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            "private-key-material\n"
+            "-----END OPENSSH PRIVATE KEY-----\n"
+        )
+        raw_offset = len(raw_text.encode("utf-8"))
+        self.server.run_manager = Mock()
+        self.server.run_manager.get_logs.return_value = {
+            "job_id": "log-job",
+            "offset": 0,
+            "next_offset": raw_offset,
+            "complete": True,
+            "text": raw_text,
+        }
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_logs",
+                "arguments": {"mcp_job_id": "log-job"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        structured = payload["result"]["structuredContent"]
+        serialized = json.dumps(payload)
+        for secret in (
+            "roadblock-secret",
+            "token-secret",
+            "bearer-secret",
+            "credential-secret",
+            "authorization-secret",
+            "private-key-material",
+        ):
+            with self.subTest(secret=secret):
+                self.assertNotIn(secret, structured["text"])
+                self.assertNotIn(secret, payload["result"]["content"][0]["text"])
+                self.assertNotIn(secret, serialized)
+        self.assertEqual(structured["next_offset"], raw_offset)
+
+    def test_get_run_logs_bounds_the_serialized_response_resumably(self):
+        raw_text = "\0" * 300_000
+        self.server.run_manager = Mock()
+
+        def read_logs(job_id, offset, limit):
+            chunk = raw_text[offset : offset + limit]
+            next_offset = offset + len(chunk.encode("utf-8"))
+            return {
+                "job_id": job_id,
+                "offset": offset,
+                "next_offset": next_offset,
+                "complete": next_offset == len(raw_text),
+                "text": chunk,
+            }
+
+        self.server.run_manager.get_logs.side_effect = read_logs
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_logs",
+                "arguments": {
+                    "mcp_job_id": "large-log-job",
+                    "offset": 0,
+                    "limit": 1_048_576,
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertLessEqual(
+            len(json.dumps(payload, separators=(",", ":")).encode("utf-8")),
+            MAX_LOG_RESPONSE_BYTES,
+        )
+        structured = payload["result"]["structuredContent"]
+        self.assertEqual(structured["next_offset"], len(structured["text"].encode("utf-8")))
+        self.assertGreater(structured["next_offset"], 0)
+        self.assertLess(structured["next_offset"], len(raw_text))
+        self.assertFalse(structured["complete"])
+        self.assertGreater(self.server.run_manager.get_logs.call_count, 1)
 
     def test_non_string_paths_return_json_rpc_errors(self):
         for tool_name in ("validate_run", "start_run"):

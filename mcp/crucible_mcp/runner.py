@@ -3,6 +3,7 @@
 import json
 import lzma
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,6 +27,8 @@ _MAINTENANCE_OPERATIONS = frozenset(
         "unarchive_local_run",
     }
 )
+MAX_LOG_REDACTION_CONTEXT_BYTES = 1_048_576
+_PRIVATE_KEY_PAYLOAD_LINE = re.compile(rb"(?m)^[A-Za-z0-9+/]{32,}={0,2}\r?$")
 
 
 def _plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
@@ -437,13 +440,77 @@ class RunManager:
             data = log.read(limit)
             next_offset = log.tell()
             complete = len(data) < limit
+            if data:
+                prefix, prefix_complete = self._log_prefix_context(log, offset)
+                suffix, suffix_complete = self._log_suffix_context(
+                    log, next_offset, log.seek(0, os.SEEK_END)
+                )
+                if not prefix_complete or not suffix_complete:
+                    text = "[redacted]"
+                else:
+                    context_bytes = prefix + data + suffix
+                    context = context_bytes.decode("utf-8", errors="replace")
+                    if (
+                        _PRIVATE_KEY_PAYLOAD_LINE.search(context_bytes)
+                        or self.operations.redact_log_text(context) != context
+                    ):
+                        # A credential can straddle a requested byte range.
+                        # Private-key bodies can also span more than the
+                        # bounded context window, so treat opaque base64 lines
+                        # as sensitive even when their PEM markers are absent.
+                        # Without a source-to-redacted offset map, suppress the
+                        # slice whenever adjacent raw context affects redaction.
+                        text = "[redacted]"
+                    else:
+                        text = data.decode("utf-8", errors="replace")
+            else:
+                text = ""
         return {
             "job_id": job_id,
             "offset": offset,
             "next_offset": next_offset,
             "complete": complete and job.state in {JobState.COMPLETED, JobState.FAILED},
-            "text": data.decode("utf-8", errors="replace"),
+            "text": text,
         }
+
+    @staticmethod
+    def _log_prefix_context(log: Any, offset: int) -> tuple[bytes, bool]:
+        """Read the two raw lines before a slice, bounded against huge log lines."""
+
+        if offset <= 0:
+            return b"", True
+        start = max(0, offset - MAX_LOG_REDACTION_CONTEXT_BYTES)
+        log.seek(start)
+        prefix = log.read(offset - start)
+        if start == 0:
+            return prefix, True
+        last_newline = prefix.rfind(b"\n")
+        if last_newline < 0:
+            return b"", False
+        previous_newline = prefix.rfind(b"\n", 0, last_newline)
+        if previous_newline < 0:
+            return b"", False
+        return prefix[previous_newline + 1 :], True
+
+    @staticmethod
+    def _log_suffix_context(
+        log: Any, offset: int, file_size: int
+    ) -> tuple[bytes, bool]:
+        """Read the two raw lines after a slice, bounded against huge log lines."""
+
+        if offset >= file_size:
+            return b"", True
+        log.seek(offset)
+        suffix = log.read(MAX_LOG_REDACTION_CONTEXT_BYTES + 1)
+        if offset + len(suffix) >= file_size:
+            return suffix, True
+        first_newline = suffix.find(b"\n")
+        if first_newline < 0:
+            return b"", False
+        second_newline = suffix.find(b"\n", first_newline + 1)
+        if second_newline < 0:
+            return b"", False
+        return suffix[: second_newline + 1], True
 
     def get_summary(self, job_id: str, max_bytes: int = 1_048_576) -> dict[str, Any]:
         job = self.refresh_result_status(job_id)

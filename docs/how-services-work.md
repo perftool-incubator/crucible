@@ -220,7 +220,7 @@ through the standard `tools/list` request; the current interface is:
 | `add_local_run_tags` | Add or replace tags in an approved local run result. |
 | `remove_local_run_tags` | Remove named tags from an approved local run result. |
 | `get_run_status` | Poll the lifecycle and result-readiness state of a submitted run. |
-| `get_run_logs` | Read a bounded slice of runner output for a submitted run. |
+| `get_run_logs` | Read a bounded, credential-redacted slice of runner output; pagination offsets refer to raw log bytes. |
 | `get_run_summary` | Retrieve the summary of a completed submitted run. |
 | `list_indexed_results` | Search historical indexed result run IDs through CDM. |
 | `get_indexed_result` | Retrieve structured metadata for one historical indexed run. |

@@ -334,6 +334,11 @@ _METADATA_QUOTED_SENSITIVE_ASSIGNMENT = re.compile(
     r"(?:\\?[\"'])\s*[:=]",
     re.IGNORECASE,
 )
+_METADATA_PRIVATE_KEY_BLOCK = re.compile(
+    r"-----BEGIN (?P<label>[A-Z0-9 ]*PRIVATE KEY)-----.*?"
+    r"(?:-----END (?P=label)-----|$)",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _decode_metadata_unicode_escapes(value: str) -> str:
@@ -1185,6 +1190,21 @@ class CrucibleOperations:
             redacted_parts.append(value[cursor:])
             return "".join(redacted_parts)
         return value
+
+    @classmethod
+    def redact_log_text(cls, value: str) -> str:
+        """Redact credential-like content from runner logs before MCP exposure."""
+
+        if not isinstance(value, str):
+            raise OperationError("framework", "runner log text is invalid", "invalid_log")
+        value = _METADATA_PRIVATE_KEY_BLOCK.sub("[redacted private key]", value)
+        try:
+            redacted = cls._redact_metadata(value)
+        except OperationError:
+            # Logs are untrusted, and an over-complex line must not bypass the
+            # credential policy merely because metadata redaction hit its work cap.
+            return "[redacted]"
+        return redacted if isinstance(redacted, str) else "[redacted]"
 
     @classmethod
     def _metadata_item_has_sensitive_parameter_name(cls, value: Any) -> bool:

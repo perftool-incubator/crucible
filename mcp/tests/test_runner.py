@@ -65,6 +65,52 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(logs["text"], "")
         self.assertTrue((self.root / "runs" / job.mcp_job_id / "input" / "run-file.json").is_file())
 
+    def test_log_redaction_uses_context_across_requested_byte_ranges(self):
+        job, _ = self.store.create_or_get("log-context", {"operation": "run"})
+        log_path = self.manager.run_root / job.mcp_job_id / "runner.log"
+        log_path.parent.mkdir(parents=True)
+        raw_log = b"--token=s3cr3t-value\nsafe output\n"
+        log_path.write_bytes(raw_log)
+
+        credential_length = raw_log.index(b"\n")
+        for split in range(1, credential_length):
+            first = self.manager.get_logs(job.mcp_job_id, offset=0, limit=split)
+            second = self.manager.get_logs(
+                job.mcp_job_id, offset=split, limit=credential_length - split
+            )
+            with self.subTest(split=split):
+                self.assertNotIn("s3cr3t-value", first["text"])
+                self.assertNotIn("s3cr3t-value", second["text"])
+                self.assertEqual(first["next_offset"], split)
+                self.assertEqual(second["next_offset"], credential_length)
+
+        middle_of_secret = raw_log.index(b"s3cr3t-value") + 4
+        page = self.manager.get_logs(
+            job.mcp_job_id, offset=middle_of_secret, limit=5
+        )
+        self.assertNotIn("s3cr3t-value", page["text"])
+        self.assertEqual(page["next_offset"], middle_of_secret + 5)
+
+    def test_log_redaction_fails_closed_deep_inside_multiline_private_key(self):
+        job, _ = self.store.create_or_get("log-private-key", {"operation": "run"})
+        log_path = self.manager.run_root / job.mcp_job_id / "runner.log"
+        log_path.parent.mkdir(parents=True)
+        payload_line = b"A" * 64 + b"\n"
+        payload = payload_line * 50_000
+        begin = b"-----BEGIN PRIVATE KEY-----\n"
+        end = b"-----END PRIVATE KEY-----\n"
+        log_path.write_bytes(
+            b"ordinary prefix\n" + begin + payload + end + b"ordinary suffix\n"
+        )
+
+        # Both PEM markers are beyond the bounded context window from this
+        # page, which is several lines into the private-key payload.
+        offset = len(b"ordinary prefix\n") + len(begin) + len(payload_line) * 25_000 + 20
+        page = self.manager.get_logs(job.mcp_job_id, offset=offset, limit=12)
+
+        self.assertEqual(page["text"], "[redacted]")
+        self.assertEqual(page["next_offset"], offset + 12)
+
     def test_submission_verifies_plan_digest_before_launch(self):
         document = {"benchmarks": [{"name": "example"}]}
         plan = {

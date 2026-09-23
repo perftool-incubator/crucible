@@ -20,7 +20,12 @@ from jsonschema import Draft201909Validator
 
 from .jobs import JobConflictError, JobNotFoundError, JobStore
 from .models import Job, JobState
-from .operations import CrucibleOperations, OperationError, MAX_PLAN_RESPONSE_BYTES
+from .operations import (
+    CrucibleOperations,
+    OperationError,
+    MAX_LOG_RESPONSE_BYTES,
+    MAX_PLAN_RESPONSE_BYTES,
+)
 from .policy import InputPolicy, PolicyError, read_token, token_matches
 from .runner import RunManager
 from .audit import AuditLogger
@@ -978,11 +983,26 @@ class MCPHandler(BaseHTTPRequestHandler):
                     return self._error(request_id, -32602, str(exc))
             elif name == "get_run_logs":
                 try:
-                    value = self.server.run_manager.get_logs(
-                        arguments["mcp_job_id"],
-                        int(arguments.get("offset", 0)),
-                        int(arguments.get("limit", 65_536)),
-                    )
+                    log_offset = int(arguments.get("offset", 0))
+                    read_limit = int(arguments.get("limit", 65_536))
+                    while True:
+                        value = self.server.run_manager.get_logs(
+                            arguments["mcp_job_id"], log_offset, read_limit
+                        )
+                        value["text"] = self.server.operations.redact_log_text(
+                            value.get("text", "")
+                        )
+                        if self.server.operations._mcp_response_size(
+                            value, request_id
+                        ) <= MAX_LOG_RESPONSE_BYTES:
+                            break
+                        if read_limit <= 1:
+                            raise OperationError(
+                                "framework",
+                                "log response exceeds size limit; retry with a smaller limit",
+                                "result_too_large",
+                            )
+                        read_limit = max(1, read_limit // 2)
                 except (KeyError, TypeError, ValueError) as exc:
                     return self._error(request_id, -32602, str(exc))
             elif name == "get_run_summary":
