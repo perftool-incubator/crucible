@@ -11,10 +11,12 @@ import base64
 import json
 import socket
 import ssl
+import subprocess
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from jsonschema import Draft201909Validator
 
@@ -69,6 +71,15 @@ TOOL_NAMES = (
     "remove_local_run_tags",
     "search_documentation",
 )
+
+_INDEXED_RESULT_TOOLS = {
+    "list_indexed_results",
+    "get_indexed_result",
+    "list_indexed_periods",
+    "get_indexed_metric",
+}
+_RESULT_SERVICE_START_LOCK = threading.Lock()
+_RESULT_SERVICE_START_TIMEOUT = 240
 
 _EMPTY_INPUT = {"type": "object", "properties": {}, "additionalProperties": False}
 TOOL_DEFINITIONS = (
@@ -802,6 +813,17 @@ class MCPHandler(BaseHTTPRequestHandler):
         if validation_error is not None:
             return self._error(request_id, -32602, f"invalid arguments: {validation_error.message}")
         try:
+            # Service startup can take minutes; reject an invalid query window first.
+            if (
+                name == "get_indexed_metric"
+                and arguments.get("period") is None
+                and (arguments.get("begin") is None or arguments.get("end") is None)
+            ):
+                raise OperationError(
+                    "user", "provide period or both begin and end", "invalid_metric_range"
+                )
+            if name in _INDEXED_RESULT_TOOLS:
+                self.server.operations.ensure_result_services()
             if name == "crucible_info":
                 value = self.server.operations.crucible_info()
             elif name == "list_tools":
@@ -1068,6 +1090,66 @@ class MCPHandler(BaseHTTPRequestHandler):
         return
 
 
+def _ensure_indexing_services(crucible_home: Path, operations: CrucibleOperations) -> None:
+    """Use the host's service manager to ensure OpenSearch and CDM are ready."""
+
+    home = Path(crucible_home).resolve()
+    with _RESULT_SERVICE_START_LOCK:
+        try:
+            # The controller has a separate Podman store; join the host mount
+            # namespace and root before invoking Crucible's service manager.
+            result = subprocess.run(
+                [
+                    "nsenter",
+                    "--mount=/proc/1/ns/mnt",
+                    "--root=/proc/1/root",
+                    "--wd=/",
+                    "--",
+                    str(home / "bin" / "crucible"),
+                    "start",
+                    "opensearch",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=_RESULT_SERVICE_START_TIMEOUT,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise OperationError(
+                "framework",
+                "Host OpenSearch/CDM could not be started or made ready; run `crucible start opensearch` on the host and inspect service status and logs",
+                "result_services_unavailable",
+            ) from exc
+        if result.returncode != 0:
+            raise OperationError(
+                "framework",
+                "Host OpenSearch/CDM could not be started or made ready; run `crucible start opensearch` on the host and inspect service status and logs",
+                "result_services_unavailable",
+            )
+
+        try:
+            services = json.loads(
+                (home / "config" / "services.json").read_text(encoding="utf-8")
+            )
+            port = services["cdm-server"]["port"]
+            if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError("invalid CDM server port")
+            parsed_url = urlsplit(operations.cdm_base_url)
+            if parsed_url.hostname in {"localhost", "127.0.0.1", "::1"}:
+                host = parsed_url.hostname
+                netloc = f"[{host}]" if ":" in host else host
+                operations.cdm_base_url = urlunsplit(
+                    (parsed_url.scheme, f"{netloc}:{port}", parsed_url.path, "", "")
+                ).rstrip("/")
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise OperationError(
+                "framework",
+                "CDM service configuration could not be read after startup; inspect config/services.json",
+                "result_services_unavailable",
+            ) from exc
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Crucible MCP service")
     parser.add_argument("--bind", required=True)
@@ -1120,6 +1202,9 @@ def main() -> None:
         cdm_base_url=args.cdm_url,
         run_root=args.run_root,
         log_db=args.log_db,
+    )
+    server.operations.set_result_services_ensurer(
+        lambda: _ensure_indexing_services(args.crucible_home, server.operations)
     )
     server.operations.run_policy = InputPolicy(
         [args.run_root, args.database.parent / "runs"]

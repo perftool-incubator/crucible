@@ -341,6 +341,17 @@ use Crucible's configured logger database. `get_log_session` uses offsets for
 bounded polling and does not provide the CLI's live `--follow` mode. Run-file
 submission remains restricted to the configured `input-root` and its policy
 checks.
+Before the direct indexed-result and metric tools call CDM, the MCP server runs
+the host-side `crucible start opensearch` service path. The MCP container enters
+the host mount namespace and root for this fixed service command, so the host's
+Podman store and Crucible configuration are used. OpenSearch and its CDM
+companion are started when needed, with the CLI's existing readiness probes for
+services it launches. If startup fails, the MCP request returns a structured
+`result_services_unavailable` error with a suggested host CLI command and log
+checks.
+CLI-backed tools such as `start_run`, `index_local_run`, and
+`delete_indexed_result` continue to rely on their own existing service startup
+path; MCP does not start the same dependencies separately for those operations.
 Logger tools redact recognized credential-like values from command metadata and
 returned lines, including private-key blocks that span logger rows or response
 pages. Search matching is performed against the original log line, but matching

@@ -2,10 +2,11 @@ import json
 import os
 import socket
 import sqlite3
+import subprocess
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
@@ -19,7 +20,11 @@ from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.audit import AuditLogger
 from crucible_mcp.models import Job, JobState, ResultStatus
 from crucible_mcp.policy import InputPolicy, rotate_token
-from crucible_mcp.server import IPv6ThreadingHTTPServer, MCPHandler
+from crucible_mcp.server import (
+    IPv6ThreadingHTTPServer,
+    MCPHandler,
+    _ensure_indexing_services,
+)
 from http.server import ThreadingHTTPServer
 
 
@@ -205,6 +210,8 @@ class TestServer(unittest.TestCase):
                 )
 
     def test_start_run_passes_plan_digest_and_returns_plan_summary(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
         plan = {
             "contract_version": "1",
             "input_digest": "digest",
@@ -260,6 +267,7 @@ class TestServer(unittest.TestCase):
             document=document,
             plan_digest="digest",
         )
+        ensure_services.assert_not_called()
 
     def test_start_run_rejects_stale_plan_digest(self):
         self.server.run_manager = Mock()
@@ -631,6 +639,150 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32602)
+
+    def test_indexed_query_tools_ensure_result_services(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        cases = (
+            ("list_indexed_results", {}, "list_indexed_results", {"run_ids": [], "count": 0}),
+            ("get_indexed_result", {"run": "run-1"}, "get_indexed_result", {"run_id": "run-1"}),
+            ("list_indexed_periods", {"run": "run-1"}, "list_indexed_periods", {"periods": []}),
+            (
+                "get_indexed_metric",
+                {"run": "run-1", "source": "fio", "type": "IOPS", "period": "measurement"},
+                "get_indexed_metric",
+                {"data": []},
+            ),
+        )
+        for request_id, (tool, arguments, method, result) in enumerate(cases, start=60):
+            ensure_services.reset_mock()
+            operation = Mock(return_value=result)
+            setattr(self.server.operations, method, operation)
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments},
+            })
+
+            status, payload = self.request("POST", "/mcp", body, self.token)
+
+            with self.subTest(tool=tool):
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["result"]["structuredContent"], result)
+                ensure_services.assert_called_once_with()
+                operation.assert_called_once()
+
+    def test_indexed_query_service_start_failure_is_structured(self):
+        self.server.operations.set_result_services_ensurer(
+            Mock(side_effect=OperationError(
+                "framework", "start OpenSearch/CDM", "result_services_unavailable"
+            ))
+        )
+        operation = Mock()
+        self.server.operations.list_indexed_results = operation
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 64,
+            "method": "tools/call",
+            "params": {"name": "list_indexed_results", "arguments": {}},
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("result_services_unavailable", payload["error"]["message"])
+        operation.assert_not_called()
+
+    def test_invalid_metric_window_does_not_start_services(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 66,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_metric",
+                "arguments": {"run": "run-1", "source": "fio", "type": "IOPS"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("invalid_metric_range", payload["error"]["message"])
+        ensure_services.assert_not_called()
+
+    def test_cli_backed_indexing_does_not_prestart_result_services(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.run_manager = Mock()
+        job = Job(
+            mcp_job_id="index-job",
+            idempotency_key="index-key",
+            request_hash="hash",
+            state=JobState.QUEUED,
+            result_status=ResultStatus.NOT_AVAILABLE,
+            operation="index",
+        )
+        self.server.run_manager.submit_processing.return_value = (job, True)
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 65,
+            "method": "tools/call",
+            "params": {
+                "name": "index_local_run",
+                "arguments": {"idempotency_key": "index-key", "run_path": "/var/lib/crucible/run/run-1"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        ensure_services.assert_not_called()
+        self.server.run_manager.submit_processing.assert_called_once()
+
+    def test_indexing_service_bridge_starts_cli_and_refreshes_configured_port(self):
+        home = Path(self.directory.name)
+        config_dir = home / "config"
+        config_dir.mkdir()
+        (config_dir / "services.json").write_text(
+            json.dumps({"cdm-server": {"port": 3001}}), encoding="utf-8"
+        )
+        operations = CrucibleOperations(home, cdm_base_url="http://127.0.0.1:3000")
+
+        with patch("crucible_mcp.server.subprocess.run", return_value=Mock(returncode=0)) as run:
+            _ensure_indexing_services(home, operations)
+
+        run.assert_called_once_with(
+            [
+                "nsenter",
+                "--mount=/proc/1/ns/mnt",
+                "--root=/proc/1/root",
+                "--wd=/",
+                "--",
+                str(home / "bin" / "crucible"),
+                "start",
+                "opensearch",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=240,
+            check=False,
+        )
+        self.assertEqual(operations.cdm_base_url, "http://127.0.0.1:3001")
+
+    def test_indexing_service_bridge_reports_cli_start_failure(self):
+        home = Path(self.directory.name)
+        operations = CrucibleOperations(home)
+        with patch("crucible_mcp.server.subprocess.run", return_value=Mock(returncode=1)):
+            with self.assertRaises(OperationError) as raised:
+                _ensure_indexing_services(home, operations)
+        self.assertEqual(raised.exception.code, "result_services_unavailable")
 
     def test_job_store_errors_return_json_rpc_errors(self):
         self.server.run_manager = Mock()

@@ -14,7 +14,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.error import URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -421,9 +421,11 @@ class CrucibleOperations:
         cdm_base_url: str = "http://127.0.0.1:3000",
         log_db: Path | None = None,
         run_root: Path | None = None,
+        result_services_ensurer: Callable[[], None] | None = None,
     ):
         self.crucible_home = Path(crucible_home).resolve()
         self.cdm_base_url = cdm_base_url.rstrip("/")
+        self._result_services_ensurer = result_services_ensurer
         self.log_db = Path(log_db) if log_db else None
         self.documentation = DocumentationCatalog(self.crucible_home)
         configured_run_root = Path(run_root) if run_root else self.crucible_home / "run"
@@ -437,6 +439,17 @@ class CrucibleOperations:
         self.run_policy = InputPolicy([run_root or self.crucible_home / "run"])
         self._tag_locks: dict[Path, threading.Lock] = {}
         self._tag_locks_guard = threading.Lock()
+
+    def ensure_result_services(self) -> None:
+        """Ensure the MCP server's direct CDM-query dependencies are ready."""
+
+        if self._result_services_ensurer is not None:
+            self._result_services_ensurer()
+
+    def set_result_services_ensurer(self, ensurer: Callable[[], None]) -> None:
+        """Install the service-start bridge used by the running MCP server."""
+
+        self._result_services_ensurer = ensurer
 
     def crucible_info(self) -> dict[str, Any]:
         return {
