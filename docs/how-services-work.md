@@ -226,10 +226,10 @@ through the standard `tools/list` request; the current interface is:
 | `get_indexed_result` | Retrieve structured metadata for one historical indexed run. |
 | `list_indexed_periods` | List every primary period and sample associated with an indexed run. |
 | `get_indexed_metric` | Query indexed metric data for a historical run with bounded range and resolution options. |
-| `list_log_sessions` | List recent logger sessions without returning their full contents. |
+| `list_log_sessions` | List recent logger sessions without returning their full contents; command metadata is credential-redacted. |
 | `get_log_info` | Return aggregate counts from the logger database. |
-| `get_log_session` | Read a bounded, structured slice of one logger session with optional stream and regex filters. |
-| `search_logs` | Search logger lines across sessions with bounded regex, stream, and time filters. |
+| `get_log_session` | Read a bounded, credential-redacted structured slice of one logger session with optional stream and regex filters. |
+| `search_logs` | Search logger lines across sessions with bounded regex, stream, and time filters; returned lines and command metadata are credential-redacted. |
 | `search_documentation` | Search the curated user-facing Crucible documentation catalog. |
 
 `get_run_status` includes `cdm_run_id` when the result summary identifies one
@@ -341,6 +341,12 @@ use Crucible's configured logger database. `get_log_session` uses offsets for
 bounded polling and does not provide the CLI's live `--follow` mode. Run-file
 submission remains restricted to the configured `input-root` and its policy
 checks.
+Logger tools redact recognized credential-like values from command metadata and
+returned lines, including private-key blocks that span logger rows or response
+pages. Search matching is performed against the original log line, but matching
+text is still redacted in the response. If the bounded history needed to
+reconstruct private-key state is unavailable or exceeds its limits, that
+session/stream's returned lines are redacted fail-closed.
 
 For example, after obtaining the token, a client can verify service health
 with:

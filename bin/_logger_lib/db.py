@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 INIT_SQL = """
 CREATE TABLE IF NOT EXISTS streams (
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS db_state (
 MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_lines_session_timestamp ON lines (session, timestamp);
+CREATE INDEX IF NOT EXISTS idx_lines_session_stream_id ON lines (session, stream, id);
 CREATE INDEX IF NOT EXISTS idx_lines_stream ON lines (stream);
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions (timestamp);
 """
@@ -66,7 +67,9 @@ def init_db(db_path):
 
 def _run_migrations(conn):
     try:
-        row = conn.execute("SELECT version FROM schema_version").fetchone()
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version"
+        ).fetchone()
         current = row[0] if row else 0
     except sqlite3.OperationalError:
         current = 0

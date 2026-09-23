@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 from crucible_mcp.operations import (
     MAX_ARTIFACT_READ_BYTES,
     MAX_ARTIFACT_RESPONSE_BYTES,
+    MAX_LOG_PRIVATE_KEY_MARKERS_PER_LINE,
     MAX_METADATA_DECOMPRESSOR_MEMORY,
     MAX_METADATA_JSON_FRAGMENTS,
     MAX_METADATA_REDACTION_WORK,
@@ -2899,6 +2900,135 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertFalse(session["complete"])
         search = operations.search_logs("complete")
         self.assertEqual(search["matches"][0]["session_id"], "session-1")
+
+    def test_logger_results_redact_credentials_and_private_key_pages(self):
+        database = self.root / "sensitive-logs.db"
+        connection = sqlite3.connect(database)
+        connection.executescript(
+            """
+            CREATE TABLE sources (id INTEGER PRIMARY KEY, source TEXT);
+            CREATE TABLE commands (id INTEGER PRIMARY KEY, command TEXT);
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT,
+                source INTEGER, command INTEGER
+            );
+            CREATE TABLE streams (id INTEGER PRIMARY KEY, stream TEXT);
+            CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER, stream INTEGER, timestamp, line TEXT);
+            CREATE INDEX idx_lines_session_stream_id ON lines (session, stream, id);
+            INSERT INTO streams VALUES (1, 'STDOUT');
+            INSERT INTO sources VALUES (1, 'runner');
+            INSERT INTO commands VALUES (1, 'crucible run --roadblock-passwd=command-secret');
+            INSERT INTO sessions VALUES (1, 'sensitive-session', 't0', 1, 1);
+            INSERT INTO lines VALUES (1, 1, 1, 1, 'remotehosts --roadblock-passwd=line-secret');
+            INSERT INTO lines VALUES (2, 1, 1, 2, '-----BEGIN OPENSSH PRIVATE KEY-----');
+            INSERT INTO lines VALUES (3, 1, 1, 3, 'private-key-material');
+            INSERT INTO lines VALUES (4, 1, 1, 4, '-----END OPENSSH PRIVATE KEY-----');
+            INSERT INTO lines VALUES (5, 1, 1, 5, '-----BEGIN OPENSSH PRIVATE KEY-----');
+            INSERT INTO lines VALUES (6, 1, 1, 6, '-----END RSA PRIVATE KEY-----');
+            INSERT INTO lines VALUES (7, 1, 1, 7, 'payload-after-mismatched-end');
+            INSERT INTO lines VALUES (8, 1, 1, 8, '-----END OPENSSH PRIVATE KEY-----');
+            INSERT INTO lines VALUES (9, 1, 1, 9, '-----BEGIN RSA PRIVATE KEY-----');
+            INSERT INTO lines VALUES (10, 1, 1, 10, '-----BEGIN OPENSSH PRIVATE KEY----- -----END OPENSSH PRIVATE KEY-----');
+            INSERT INTO lines VALUES (11, 1, 1, 11, 'rsa-payload-after-nested-markers');
+            INSERT INTO sessions VALUES (2, 'large-history-session', 't1', 1, 1);
+            INSERT INTO lines VALUES (12, 2, 1, 12, 'old line one');
+            INSERT INTO lines VALUES (13, 2, 1, 13, 'old line two');
+            INSERT INTO lines VALUES (14, 2, 1, 14, 'old line three');
+            INSERT INTO lines VALUES (15, 2, 1, 15, 'public data after an intentionally capped context');
+            INSERT INTO sessions VALUES (3, 'clock-step-session', 't2', 1, 1);
+            INSERT INTO lines VALUES (16, 3, 1, 10, 'ordinary line in range');
+            INSERT INTO lines VALUES (17, 3, 1, 9, '-----BEGIN RSA PRIVATE KEY-----');
+            INSERT INTO lines VALUES (18, 3, 1, 11, 'clock-step-key-material');
+            INSERT INTO lines VALUES (19, 3, 1, 12, '-----END RSA PRIVATE KEY-----');
+            INSERT INTO sessions VALUES (4, 'until-clock-step-session', 't3', 1, 1);
+            INSERT INTO lines VALUES (20, 4, 1, 11, '-----BEGIN RSA PRIVATE KEY-----');
+            INSERT INTO lines VALUES (21, 4, 1, 9, 'until-only-key-material');
+            INSERT INTO lines VALUES (22, 4, 1, 8, '-----END RSA PRIVATE KEY-----');
+            """
+        )
+        connection.commit()
+        connection.close()
+
+        operations = CrucibleOperations(self.root, log_db=database)
+        session_list = operations.list_log_sessions()
+        self.assertNotIn("command-secret", json.dumps(session_list))
+        page = operations.get_log_session("sensitive-session", offset=2, limit=1)
+        self.assertEqual(page["lines"][0]["line"], "[redacted private key]")
+        self.assertNotIn("command-secret", json.dumps(page))
+        self.assertNotIn("private-key-material", json.dumps(page))
+        search = operations.search_logs("private-key", session_id="sensitive-session")
+        self.assertEqual(search["matches"][0]["line"], "[redacted private key]")
+        self.assertNotIn("private-key-material", json.dumps(search))
+        self.assertNotIn("command-secret", json.dumps(search))
+
+        with patch.object(
+            operations,
+            "_log_private_key_state_before",
+            wraps=operations._log_private_key_state_before,
+        ) as context_lookup:
+            since_search = operations.search_logs(
+                "private-key", session_id="sensitive-session", since=3
+            )
+        self.assertEqual(context_lookup.call_count, 1)
+        self.assertEqual(since_search["matches"][0]["line"], "[redacted private key]")
+        clock_step_search = operations.search_logs(
+            "clock-step-key-material",
+            session_id="clock-step-session",
+            since=10,
+        )
+        self.assertEqual(
+            clock_step_search["matches"][0]["line"], "[redacted private key]"
+        )
+        until_only_search = operations.search_logs(
+            "until-only-key-material",
+            session_id="until-clock-step-session",
+            until=10,
+        )
+        self.assertEqual(
+            until_only_search["matches"][0]["line"], "[redacted private key]"
+        )
+        mismatched_end_search = operations.search_logs(
+            "payload-after",
+            session_id="sensitive-session",
+            since=7,
+        )
+        self.assertEqual(
+            mismatched_end_search["matches"][0]["line"], "[redacted private key]"
+        )
+        self.assertNotIn("payload-after-mismatched-end", json.dumps(mismatched_end_search))
+        nested_marker_search = operations.search_logs(
+            "rsa-payload", session_id="sensitive-session", since=11
+        )
+        self.assertEqual(nested_marker_search["matches"][0]["line"], "[redacted private key]")
+        self.assertNotIn("rsa-payload-after-nested-markers", json.dumps(nested_marker_search))
+        with patch("crucible_mcp.operations.MAX_LOG_PRIVATE_KEY_CONTEXT_LINES", 2):
+            capped_history_search = operations.search_logs(
+                "public data",
+                session_id="large-history-session",
+                since=15,
+            )
+        self.assertEqual(
+            capped_history_search["matches"][0]["line"], "[redacted private key]"
+        )
+        credential_search = operations.search_logs(
+            "remotehosts", session_id="sensitive-session"
+        )
+        self.assertNotIn("line-secret", json.dumps(credential_search))
+
+    def test_logger_redaction_bounds_private_key_markers_per_line(self):
+        marker = "-----BEGIN RSA PRIVATE KEY-----"
+        with patch(
+            "crucible_mcp.operations.MAX_LOG_PRIVATE_KEY_MARKERS_PER_LINE", 1
+        ):
+            safe_line, state = self.operations._redact_log_line_with_context(
+                f"{marker} {marker}"
+            )
+            self.assertEqual(safe_line, "[redacted]")
+            next_line, next_state = self.operations._redact_log_line_with_context(
+                "private-key-material", state
+            )
+        self.assertEqual(next_line, "[redacted private key]")
+        self.assertIsNotNone(next_state)
 
     def test_log_queries_reject_backtracking_repetition(self):
         with self.assertRaises(OperationError) as search_error:

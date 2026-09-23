@@ -1,6 +1,7 @@
 import json
 import os
 import socket
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -718,6 +719,56 @@ class TestServer(unittest.TestCase):
                 self.assertNotIn(secret, payload["result"]["content"][0]["text"])
                 self.assertNotIn(secret, serialized)
         self.assertEqual(structured["next_offset"], raw_offset)
+
+    def test_logger_tools_redact_credentials_in_mcp_content_and_structure(self):
+        database = self.token_path.parent / "logger.db"
+        with sqlite3.connect(database) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE sources (id INTEGER PRIMARY KEY, source TEXT);
+                CREATE TABLE commands (id INTEGER PRIMARY KEY, command TEXT);
+                CREATE TABLE sessions (
+                    id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT,
+                    source INTEGER, command INTEGER
+                );
+                CREATE TABLE streams (id INTEGER PRIMARY KEY, stream TEXT);
+                CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER, stream INTEGER, timestamp, line TEXT);
+                INSERT INTO streams VALUES (1, 'STDOUT');
+                INSERT INTO sources VALUES (1, 'runner');
+                INSERT INTO commands VALUES (1, 'crucible run --roadblock-passwd=command-secret');
+                INSERT INTO sessions VALUES (1, 'sensitive-session', 't0', 1, 1);
+                INSERT INTO lines VALUES (1, 1, 1, 1, 'remotehosts --roadblock-passwd=line-secret');
+                INSERT INTO lines VALUES (2, 1, 1, 2, '-----BEGIN OPENSSH PRIVATE KEY-----');
+                INSERT INTO lines VALUES (3, 1, 1, 3, 'private-key-material');
+                INSERT INTO lines VALUES (4, 1, 1, 4, '-----END OPENSSH PRIVATE KEY-----');
+                """
+            )
+        self.server.operations.log_db = database
+
+        def call_tool(name, arguments, request_id):
+            return self.request(
+                "POST",
+                "/mcp",
+                json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                    "params": {"name": name, "arguments": arguments},
+                }),
+                self.token,
+            )
+
+        for name, arguments in (
+            ("list_log_sessions", {}),
+            ("get_log_session", {"session_id": "sensitive-session", "offset": 2, "limit": 1}),
+            ("search_logs", {"query": ".*", "session_id": "sensitive-session"}),
+        ):
+            with self.subTest(tool=name):
+                status, payload = call_tool(name, arguments, 70)
+                self.assertEqual(status, 200)
+                serialized = json.dumps(payload)
+                for secret in ("command-secret", "line-secret", "private-key-material"):
+                    self.assertNotIn(secret, serialized)
 
     def test_get_run_logs_bounds_the_serialized_response_resumably(self):
         raw_text = "\0" * 300_000

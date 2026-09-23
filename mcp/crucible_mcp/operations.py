@@ -27,6 +27,10 @@ from .policy import InputPolicy, PolicyError
 _PLANNING_LOCK = threading.RLock()
 
 MAX_LOG_RESPONSE_BYTES = 1_048_576
+MAX_LOG_PRIVATE_KEY_MARKERS_PER_LINE = 256
+MAX_LOG_PRIVATE_KEY_CONTEXT_LINES = 10_000
+MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES = 4_194_304
+_UNRESOLVED_PRIVATE_KEY_STATE = "\x00unresolved-private-key-context"
 MAX_ARTIFACT_LIST_LIMIT = 1000
 MAX_ARTIFACT_OFFSET = 1_073_741_824
 MAX_ARTIFACT_SCAN_FILES = 100_000
@@ -341,6 +345,11 @@ _METADATA_PRIVATE_KEY_BLOCK = re.compile(
     r"-----BEGIN (?P<label>[A-Z0-9 ]*PRIVATE KEY)-----.*?"
     r"(?:-----END (?P=label)-----|$)",
     re.IGNORECASE | re.DOTALL,
+)
+_METADATA_PRIVATE_KEY_MARKER = re.compile(
+    r"-----\s*(?P<kind>BEGIN|END)\s+"
+    r"(?P<label>[A-Z0-9 ]*PRIVATE KEY)\s*-----",
+    re.IGNORECASE,
 )
 
 
@@ -1208,6 +1217,176 @@ class CrucibleOperations:
             # credential policy merely because metadata redaction hit its work cap.
             return "[redacted]"
         return redacted if isinstance(redacted, str) else "[redacted]"
+
+    @classmethod
+    def _redact_log_line_with_context(
+        cls, value: str, private_key_label: str | None = None
+    ) -> tuple[str, str | None]:
+        """Redact one logger line while carrying PEM block state across rows."""
+
+        if private_key_label == _UNRESOLVED_PRIVATE_KEY_STATE:
+            return "[redacted private key]", private_key_label
+
+        marker_count = 0
+        if private_key_label is not None:
+            for marker in _METADATA_PRIVATE_KEY_MARKER.finditer(value):
+                marker_count += 1
+                if marker_count > MAX_LOG_PRIVATE_KEY_MARKERS_PER_LINE:
+                    return "[redacted]", _UNRESOLVED_PRIVATE_KEY_STATE
+                if marker.group("kind").upper() == "BEGIN":
+                    # A nested block is malformed or ambiguous. Do not let an
+                    # inner END marker close the still-open outer key block.
+                    return "[redacted private key]", _UNRESOLVED_PRIVATE_KEY_STATE
+                if marker.group("label").casefold() == private_key_label.casefold():
+                    suffix, suffix_label = cls._redact_log_line_with_context(
+                        value[marker.end():]
+                    )
+                    return "[redacted private key]" + suffix, suffix_label
+            return "[redacted private key]", private_key_label
+
+        next_label = None
+        for marker in _METADATA_PRIVATE_KEY_MARKER.finditer(value):
+            marker_count += 1
+            if marker_count > MAX_LOG_PRIVATE_KEY_MARKERS_PER_LINE:
+                return "[redacted]", _UNRESOLVED_PRIVATE_KEY_STATE
+            if marker.group("kind").upper() == "BEGIN":
+                if next_label is not None:
+                    return "[redacted private key]", _UNRESOLVED_PRIVATE_KEY_STATE
+                next_label = marker.group("label")
+            elif (
+                next_label is not None
+                and marker.group("label").casefold() == next_label.casefold()
+            ):
+                next_label = None
+        return cls.redact_log_text(value), next_label
+
+    @classmethod
+    def _log_private_key_state_before(
+        cls,
+        connection: sqlite3.Connection,
+        session: int,
+        stream: int,
+        before_id: int,
+        budget: dict[str, int] | None = None,
+    ) -> str | None:
+        """Recover PEM state from bounded, indexed rows preceding a search window."""
+
+        return cls._log_private_key_state_in_range(
+            connection,
+            session,
+            stream,
+            after_id=None,
+            before_id=before_id,
+            state=None,
+            budget=budget,
+        )
+
+    @classmethod
+    def _log_private_key_state_between(
+        cls,
+        connection: sqlite3.Connection,
+        session: int,
+        stream: int,
+        after_id: int,
+        before_id: int,
+        state: str | None,
+        budget: dict[str, int],
+    ) -> str | None:
+        """Apply excluded logger rows between results in insertion order."""
+
+        return cls._log_private_key_state_in_range(
+            connection,
+            session,
+            stream,
+            after_id=after_id,
+            before_id=before_id,
+            state=state,
+            budget=budget,
+        )
+
+    @classmethod
+    def _log_private_key_state_in_range(
+        cls,
+        connection: sqlite3.Connection,
+        session: int,
+        stream: int,
+        after_id: int | None,
+        before_id: int,
+        state: str | None,
+        budget: dict[str, int] | None,
+    ) -> str | None:
+        """Process a bounded insertion-order slice for one logger stream."""
+
+        if state == _UNRESOLVED_PRIVATE_KEY_STATE:
+            return state
+        if after_id is not None and before_id <= after_id + 1:
+            return state
+
+        if budget is None:
+            budget = {
+                "lines": MAX_LOG_PRIVATE_KEY_CONTEXT_LINES,
+                "bytes": MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES,
+            }
+
+        index = connection.execute(
+            """SELECT 1 FROM sqlite_master
+               WHERE type = 'index' AND name = 'idx_lines_session_stream_id'"""
+        ).fetchone()
+        if index is None:
+            # Older or externally-created logger databases may not have the
+            # bounded lookup index yet. Never fall back to scanning their history.
+            return _UNRESOLVED_PRIVATE_KEY_STATE
+
+        line_budget = min(
+            MAX_LOG_PRIVATE_KEY_CONTEXT_LINES, budget.get("lines", 0)
+        )
+        byte_budget = min(
+            MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES, budget.get("bytes", 0)
+        )
+        if line_budget <= 0 or byte_budget < 0:
+            return _UNRESOLVED_PRIVATE_KEY_STATE
+
+        where = "session = ? AND stream = ? AND id < ?"
+        params: list[int] = [session, stream, before_id]
+        if after_id is not None:
+            where += " AND id > ?"
+            params.append(after_id)
+        direction = "ASC" if after_id is not None else "DESC"
+        context_rows = connection.execute(
+            f"""SELECT id, length(CAST(line AS BLOB)) FROM lines
+                WHERE {where} ORDER BY id {direction} LIMIT ?""",
+            (*params, line_budget + 1),
+        ).fetchall()
+        if (
+            len(context_rows) > line_budget
+            or sum(row[1] or 0 for row in context_rows) > byte_budget
+        ):
+            # A missing row could contain a BEGIN marker; fail closed instead
+            # of guessing the key state when either shared budget is exceeded.
+            budget["lines"] = 0
+            budget["bytes"] = 0
+            return _UNRESOLVED_PRIVATE_KEY_STATE
+
+        budget["lines"] -= len(context_rows)
+        budget["bytes"] -= sum(row[1] or 0 for row in context_rows)
+        if after_id is None:
+            context_lines = connection.execute(
+                f"""SELECT line FROM lines
+                    WHERE id IN (
+                        SELECT id FROM lines WHERE {where}
+                        ORDER BY id DESC LIMIT ?
+                    )
+                    ORDER BY id""",
+                (*params, line_budget),
+            ).fetchall()
+        else:
+            context_lines = connection.execute(
+                f"""SELECT line FROM lines WHERE {where} ORDER BY id ASC""",
+                params,
+            ).fetchall()
+        for (line,) in context_lines:
+            _, state = cls._redact_log_line_with_context(line or "", state)
+        return state
 
     @classmethod
     def _metadata_item_has_sensitive_parameter_name(cls, value: Any) -> bool:
@@ -2948,7 +3127,7 @@ class CrucibleOperations:
                     "session_id": row[0],
                     "timestamp": row[1],
                     "source": row[2],
-                    "command": row[3],
+                    "command": self.redact_log_text(row[3] or ""),
                     "line_count": row[4],
                 }
                 for row in rows
@@ -3015,8 +3194,15 @@ class CrucibleOperations:
                 matched = 0
                 response_bytes = 0
                 complete = True
+                private_key_states: dict[str, str | None] = {}
                 for timestamp, line_stream, line in rows:
                     line = line or ""
+                    stream_key = str(line_stream).upper()
+                    safe_line, private_key_states[stream_key] = (
+                        self._redact_log_line_with_context(
+                            line, private_key_states.get(stream_key)
+                        )
+                    )
                     if pattern is not None and pattern.search(line) is None:
                         continue
                     if matched < offset:
@@ -3025,7 +3211,11 @@ class CrucibleOperations:
                     if len(lines) >= limit:
                         complete = False
                         break
-                    candidate = {"timestamp": timestamp, "stream": line_stream, "line": line}
+                    candidate = {
+                        "timestamp": timestamp,
+                        "stream": line_stream,
+                        "line": safe_line,
+                    }
                     candidate_bytes = len(json.dumps(candidate, separators=(",", ":")).encode("utf-8"))
                     if response_bytes + candidate_bytes > MAX_LOG_RESPONSE_BYTES:
                         if not lines:
@@ -3048,7 +3238,7 @@ class CrucibleOperations:
                 "session_id": session_id,
                 "timestamp": metadata[0],
                 "source": metadata[1],
-                "command": metadata[2],
+                "command": self.redact_log_text(metadata[2] or ""),
                 "offset": offset,
                 "next_offset": offset + len(selected),
                 "complete": result_complete,
@@ -3085,7 +3275,8 @@ class CrucibleOperations:
         try:
             with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
                 sql = """SELECT sessions.session_id, lines.timestamp, streams.stream,
-                                 lines.line, sources.source, commands.command
+                                 lines.line, sources.source, commands.command,
+                                 sessions.id, streams.id, lines.id
                           FROM sessions JOIN lines ON lines.session = sessions.id
                           JOIN streams ON streams.id = lines.stream
                           JOIN sources ON sources.id = sessions.source
@@ -3110,8 +3301,47 @@ class CrucibleOperations:
                 matched = 0
                 response_bytes = 0
                 complete = True
+                private_key_states: dict[tuple[str, str], str | None] = {}
+                private_key_last_ids: dict[tuple[str, str], int] = {}
+                private_key_context_budget = {
+                    "lines": MAX_LOG_PRIVATE_KEY_CONTEXT_LINES,
+                    "bytes": MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES,
+                }
                 for row in connection.execute(sql, params):
                     line = row[3] or ""
+                    state_key = (row[0], str(row[2]).upper())
+                    if since is not None or until is not None:
+                        if state_key not in private_key_states:
+                            # Seed once per pair from bounded indexed history.
+                            # Either timestamp bound can exclude rows that are
+                            # still earlier in insertion order when clocks move.
+                            private_key_states[state_key] = (
+                                self._log_private_key_state_before(
+                                    connection,
+                                    row[6],
+                                    row[7],
+                                    row[8],
+                                    private_key_context_budget,
+                                )
+                            )
+                        else:
+                            private_key_states[state_key] = (
+                                self._log_private_key_state_between(
+                                    connection,
+                                    row[6],
+                                    row[7],
+                                    private_key_last_ids[state_key],
+                                    row[8],
+                                    private_key_states[state_key],
+                                    private_key_context_budget,
+                                )
+                            )
+                    safe_line, private_key_states[state_key] = (
+                        self._redact_log_line_with_context(
+                            line, private_key_states.get(state_key)
+                        )
+                    )
+                    private_key_last_ids[state_key] = row[8]
                     if pattern.search(line) is None:
                         continue
                     if matched < offset:
@@ -3122,8 +3352,9 @@ class CrucibleOperations:
                         break
                     candidate = {
                         "session_id": row[0], "timestamp": row[1],
-                        "stream": row[2], "line": line,
-                        "source": row[4], "command": row[5],
+                        "stream": row[2], "line": safe_line,
+                        "source": row[4],
+                        "command": self.redact_log_text(row[5] or ""),
                     }
                     candidate_bytes = len(json.dumps(candidate, separators=(",", ":")).encode("utf-8"))
                     if response_bytes + candidate_bytes > MAX_LOG_RESPONSE_BYTES:
