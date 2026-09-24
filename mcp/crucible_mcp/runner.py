@@ -15,7 +15,12 @@ from typing import Any, Sequence
 from .host import host_context_command, host_context_environment
 from .jobs import JobConflictError, JobStore, request_hash
 from .models import Job, JobState, ResultStatus
-from .operations import CrucibleOperations, OperationError
+from .operations import (
+    MAX_LOG_REDACTION_LINES,
+    MAX_METADATA_RESPONSE_BYTES,
+    CrucibleOperations,
+    OperationError,
+)
 from .policy import PolicyError
 
 
@@ -29,7 +34,8 @@ _MAINTENANCE_OPERATIONS = frozenset(
     }
 )
 MAX_LOG_REDACTION_CONTEXT_BYTES = 1_048_576
-_PRIVATE_KEY_PAYLOAD_LINE = re.compile(rb"(?m)^[A-Za-z0-9+/]{32,}={0,2}\r?$")
+_PRIVATE_KEY_PAYLOAD_LINE = re.compile(rb"[A-Za-z0-9+/]{32,}={0,2}")
+_LOG_EMPTY_RECORDS = re.compile(rb"[\r\n]+")
 
 
 def _plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
@@ -437,48 +443,246 @@ class RunManager:
         job = self.store.get(job_id)
         log_path = self.run_root / job_id / "runner.log"
         if not log_path.is_file():
-            return {"job_id": job_id, "offset": offset, "next_offset": offset, "complete": False, "text": ""}
+            return {
+                "job_id": job_id,
+                "offset": offset,
+                "next_offset": offset,
+                "complete": False,
+                "text": "",
+                "redacted": False,
+                "redacted_lines": 0,
+            }
         with log_path.open("rb") as log:
             log.seek(offset)
             data = log.read(limit)
             next_offset = log.tell()
             complete = len(data) < limit
             if data:
-                prefix, prefix_complete = self._log_prefix_context(log, offset)
+                prefix, prefix_state_known = self._log_prefix_context(log, offset)
+                file_size = log.seek(0, os.SEEK_END)
                 suffix, suffix_complete = self._log_suffix_context(
-                    log, next_offset, log.seek(0, os.SEEK_END)
+                    log, next_offset, file_size
                 )
-                if not prefix_complete or not suffix_complete:
-                    text = "[redacted]"
-                else:
-                    context_bytes = prefix + data + suffix
-                    context = context_bytes.decode("utf-8", errors="replace")
-                    if (
-                        _PRIVATE_KEY_PAYLOAD_LINE.search(context_bytes)
-                        or self.operations.redact_log_text(context) != context
-                    ):
-                        # A credential can straddle a requested byte range.
-                        # Private-key bodies can also span more than the
-                        # bounded context window, so treat opaque base64 lines
-                        # as sensitive even when their PEM markers are absent.
-                        # Without a source-to-redacted offset map, suppress the
-                        # slice whenever adjacent raw context affects redaction.
-                        text = "[redacted]"
-                    else:
-                        text = data.decode("utf-8", errors="replace")
+                context_bytes = prefix + data + suffix
+                text, redacted_lines = self._redact_log_slice(
+                    context_bytes,
+                    len(prefix),
+                    len(prefix) + len(data),
+                    prefix_state_known,
+                    suffix_complete,
+                )
             else:
                 text = ""
+                redacted_lines = 0
         return {
             "job_id": job_id,
             "offset": offset,
             "next_offset": next_offset,
             "complete": complete and job.state in {JobState.COMPLETED, JobState.FAILED},
             "text": text,
+            "redacted": redacted_lines > 0,
+            "redacted_lines": redacted_lines,
         }
 
+    def _redact_log_slice(
+        self,
+        context: bytes,
+        page_start: int,
+        page_end: int,
+        prefix_state_known: bool,
+        suffix_complete: bool,
+    ) -> tuple[str, int]:
+        """Redact affected line fragments while retaining adjacent safe lines.
+
+        Offsets still refer to the raw log. A line that intersects a secret is
+        represented by a marker only for the portion in this page, so the
+        caller can continue paging without receiving unrelated lines as a
+        collateral consequence of redaction.
+        """
+
+        if not prefix_state_known:
+            # No text from this slice is safe to classify without the lost
+            # prefix state; mask just the requested bytes instead of replaying
+            # the retained megabyte line by line.
+            return self._redact_unknown_log_slice(context[page_start:page_end])
+
+        output: list[str] = []
+        redacted_lines = 0
+        private_key_label: str | None = None
+        pending_sensitive_indent: int | None = None
+        pending_sensitive_yaml_indent: int | None = None
+        sensitive_structure_depth = 0
+        shell_continuation = not prefix_state_known
+        shell_quote: str | None = None
+        pending_sensitive_heredocs: tuple[tuple[str, bool], ...] | None = ()
+        pending_sensitive_json_key: tuple[int, bool] | None = None
+        pending_sensitive_log_value = False
+        sensitive_shell_continuation_lines = (
+            self.operations._log_sensitive_shell_continuation_lines(
+                context.decode("utf-8", errors="replace")
+            )
+        )
+        line_start = 0
+        processed_lines = 0
+        while line_start < len(context):
+            if processed_lines >= MAX_LOG_REDACTION_LINES:
+                remainder_start = max(line_start, page_start)
+                if remainder_start < page_end:
+                    remainder = context[remainder_start:page_end]
+                    output.append("[redacted]")
+                    line_breaks = (
+                        remainder.count(b"\n")
+                        + remainder.count(b"\r")
+                        - remainder.count(b"\r\n")
+                    )
+                    redacted_lines += line_breaks + bool(
+                        remainder and not remainder.endswith((b"\n", b"\r"))
+                    )
+                break
+            lf = context.find(b"\n", line_start)
+            cr = context.find(b"\r", line_start)
+            endings = [index for index in (lf, cr) if index >= 0]
+            if not endings:
+                line_end = len(context)
+            else:
+                ending_start = min(endings)
+                line_end = ending_start + 1
+                if (
+                    context[ending_start] == 0x0D
+                    and context[line_end : line_end + 1] == b"\n"
+                ):
+                    line_end += 1
+            line = context[line_start:line_end]
+            if line.endswith(b"\r\n"):
+                content = line[:-2]
+            elif line.endswith((b"\n", b"\r")):
+                content = line[:-1]
+            else:
+                content = line
+            decoded = content.decode("utf-8", errors="replace")
+            (
+                _,
+                next_private_key_label,
+                next_pending_sensitive_indent,
+                next_pending_sensitive_yaml_indent,
+                next_sensitive_structure_depth,
+                next_shell_continuation,
+                next_shell_quote,
+                next_sensitive_heredocs,
+                line_redacted,
+                next_pending_sensitive_json_key,
+                next_pending_sensitive_log_value,
+            ) = self.operations._redact_log_line_with_stats(
+                decoded,
+                private_key_label,
+                pending_sensitive_indent,
+                sensitive_structure_depth,
+                pending_sensitive_yaml_indent,
+                shell_continuation,
+                line.endswith((b"\n", b"\r")),
+                shell_quote,
+                pending_sensitive_heredocs,
+                pending_sensitive_json_key,
+                pending_sensitive_log_value,
+            )
+            if _PRIVATE_KEY_PAYLOAD_LINE.fullmatch(content):
+                # Preserve the legacy fail-closed heuristic for private-key
+                # payloads emitted without PEM delimiters, masking only this
+                # record so adjacent diagnostics stay useful.
+                line_redacted = True
+            if processed_lines in sensitive_shell_continuation_lines:
+                line_redacted = True
+
+            fragment_start = max(line_start, page_start)
+            fragment_end = min(line_end, page_end)
+            if fragment_start < fragment_end:
+                # If the bounded history window is incomplete, the page may
+                # start inside a multiline secret structure. Without its
+                # opener, keep the entire page slice hidden rather than
+                # exposing later members after masking only the first line.
+                uncertain_prefix = not prefix_state_known
+                uncertain_suffix = (
+                    not suffix_complete
+                    and line_start < page_end < line_end
+                )
+                fragment = context[fragment_start:fragment_end]
+                if line_redacted or uncertain_prefix or uncertain_suffix:
+                    ending = (
+                        b"\r\n"
+                        if fragment.endswith(b"\r\n")
+                        else b"\n"
+                        if fragment.endswith(b"\n")
+                        else b"\r"
+                        if fragment.endswith(b"\r")
+                        else b""
+                    )
+                    output.append("[redacted]" + ending.decode("ascii"))
+                    redacted_lines += 1
+                else:
+                    output.append(fragment.decode("utf-8", errors="replace"))
+
+            private_key_label = next_private_key_label
+            pending_sensitive_indent = next_pending_sensitive_indent
+            pending_sensitive_yaml_indent = next_pending_sensitive_yaml_indent
+            sensitive_structure_depth = next_sensitive_structure_depth
+            shell_continuation = next_shell_continuation
+            shell_quote = next_shell_quote
+            pending_sensitive_heredocs = next_sensitive_heredocs
+            pending_sensitive_json_key = next_pending_sensitive_json_key
+            pending_sensitive_log_value = next_pending_sensitive_log_value
+            line_start = line_end
+            processed_lines += 1
+
+        return "".join(output), redacted_lines
+
     @staticmethod
-    def _log_prefix_context(log: Any, offset: int) -> tuple[bytes, bool]:
-        """Read the two raw lines before a slice, bounded against huge log lines."""
+    def _redact_unknown_log_slice(page: bytes) -> tuple[str, int]:
+        """Mask a page whose preceding redaction state could not be recovered."""
+
+        output: list[str] = []
+        redacted_lines = 0
+        position = 0
+        while position < len(page):
+            if redacted_lines >= MAX_LOG_REDACTION_LINES:
+                remaining = page[position:]
+                output.append("[redacted]")
+                line_breaks = (
+                    remaining.count(b"\n")
+                    + remaining.count(b"\r")
+                    - remaining.count(b"\r\n")
+                )
+                redacted_lines += line_breaks + bool(
+                    remaining and not remaining.endswith((b"\n", b"\r"))
+                )
+                break
+            lf = page.find(b"\n", position)
+            cr = page.find(b"\r", position)
+            endings = [index for index in (lf, cr) if index >= 0]
+            if not endings:
+                end = len(page)
+            else:
+                ending_start = min(endings)
+                end = ending_start + 1
+                if page[ending_start] == 0x0D and page[end : end + 1] == b"\n":
+                    end += 1
+            fragment = page[position:end]
+            ending = (
+                b"\r\n"
+                if fragment.endswith(b"\r\n")
+                else b"\n"
+                if fragment.endswith(b"\n")
+                else b"\r"
+                if fragment.endswith(b"\r")
+                else b""
+            )
+            output.append("[redacted]" + ending.decode("ascii"))
+            redacted_lines += 1
+            position = end
+        return "".join(output), redacted_lines
+
+    @classmethod
+    def _log_prefix_context(cls, log: Any, offset: int) -> tuple[bytes, bool]:
+        """Read bounded history and flag structure state lost at its cutoff."""
 
         if offset <= 0:
             return b"", True
@@ -487,35 +691,154 @@ class RunManager:
         prefix = log.read(offset - start)
         if start == 0:
             return prefix, True
-        last_newline = prefix.rfind(b"\n")
-        if last_newline < 0:
+        delimiters = [
+            index
+            for index in (prefix.find(b"\n"), prefix.find(b"\r"))
+            if index >= 0
+        ]
+        if not delimiters:
             return b"", False
-        previous_newline = prefix.rfind(b"\n", 0, last_newline)
-        if previous_newline < 0:
-            return b"", False
-        return prefix[previous_newline + 1 :], True
+        # The first bytes may begin mid-line when the history cap is reached.
+        # Discard the partial record at the start of the bounded window.
+        first_delimiter = min(delimiters)
+        next_record = first_delimiter + 1
+        if (
+            prefix[first_delimiter] == 0x0D
+            and prefix[next_record : next_record + 1] == b"\n"
+        ):
+            next_record += 1
+        context = prefix[next_record:]
+        if not context:
+            return context, False
+        context_offset = start + next_record
+        state_ambiguous = cls._log_prefix_redaction_state_is_ambiguous(
+            log, context_offset
+        )
+        return context, not state_ambiguous
+
+    @staticmethod
+    def _log_prefix_redaction_state_is_ambiguous(log: Any, boundary: int) -> bool:
+        """Replay bounded history to detect secret state at the context boundary."""
+
+        if boundary > MAX_LOG_REDACTION_CONTEXT_BYTES:
+            return True
+        log.seek(0)
+        prefix = log.read(boundary)
+        if len(prefix) != boundary:
+            return True
+
+        private_key_label: str | None = None
+        pending_sensitive_indent: int | None = None
+        pending_sensitive_yaml_indent: int | None = None
+        sensitive_structure_depth = 0
+        shell_continuation = False
+        shell_quote: str | None = None
+        pending_sensitive_heredocs: tuple[tuple[str, bool], ...] | None = ()
+        pending_sensitive_json_key: tuple[int, bool] | None = None
+        pending_sensitive_log_value = False
+        position = 0
+        scanned_lines = 0
+        while position < len(prefix):
+            if scanned_lines >= MAX_LOG_REDACTION_LINES:
+                return True
+            empty_records = _LOG_EMPTY_RECORDS.match(prefix, position)
+            if empty_records is not None:
+                separators = prefix[position : empty_records.end()]
+                record_count = (
+                    separators.count(b"\n")
+                    + separators.count(b"\r")
+                    - separators.count(b"\r\n")
+                )
+                if scanned_lines + record_count > MAX_LOG_REDACTION_LINES:
+                    return True
+                # Blank records preserve all redaction states, so count them
+                # in bulk instead of invoking the relatively expensive
+                # credential scanner once for every empty line.
+                scanned_lines += record_count
+                position = empty_records.end()
+                continue
+            lf = prefix.find(b"\n", position)
+            cr = prefix.find(b"\r", position)
+            endings = [index for index in (lf, cr) if index >= 0]
+            if not endings:
+                end = len(prefix)
+            else:
+                ending_start = min(endings)
+                end = ending_start + 1
+                if prefix[ending_start] == 0x0D and prefix[end : end + 1] == b"\n":
+                    end += 1
+            line = prefix[position:end]
+            if line.endswith(b"\r\n"):
+                content, ending = line[:-2], b"\r\n"
+            elif line.endswith((b"\n", b"\r")):
+                content, ending = line[:-1], line[-1:]
+            else:
+                content, ending = line, b""
+            (
+                _,
+                private_key_label,
+                pending_sensitive_indent,
+                pending_sensitive_yaml_indent,
+                sensitive_structure_depth,
+                shell_continuation,
+                shell_quote,
+                pending_sensitive_heredocs,
+                _,
+                pending_sensitive_json_key,
+                pending_sensitive_log_value,
+            ) = CrucibleOperations._redact_log_line_with_stats(
+                content.decode("utf-8", errors="replace"),
+                private_key_label,
+                pending_sensitive_indent,
+                sensitive_structure_depth,
+                pending_sensitive_yaml_indent,
+                shell_continuation,
+                bool(ending),
+                shell_quote,
+                pending_sensitive_heredocs,
+                pending_sensitive_json_key,
+                pending_sensitive_log_value,
+            )
+            position = end
+            scanned_lines += 1
+
+        return (
+            private_key_label is not None
+            or pending_sensitive_indent is not None
+            or pending_sensitive_yaml_indent is not None
+            or sensitive_structure_depth != 0
+            or shell_continuation
+            or shell_quote is not None
+            or pending_sensitive_heredocs is None
+            or bool(pending_sensitive_heredocs)
+            or pending_sensitive_json_key is not None
+            or pending_sensitive_log_value
+        )
 
     @staticmethod
     def _log_suffix_context(
         log: Any, offset: int, file_size: int
     ) -> tuple[bytes, bool]:
-        """Read the two raw lines after a slice, bounded against huge log lines."""
+        """Read bounded following lines for multiline credential detection."""
 
         if offset >= file_size:
             return b"", True
         log.seek(offset)
-        suffix = log.read(MAX_LOG_REDACTION_CONTEXT_BYTES + 1)
-        if offset + len(suffix) >= file_size:
-            return suffix, True
-        first_newline = suffix.find(b"\n")
-        if first_newline < 0:
-            return b"", False
-        second_newline = suffix.find(b"\n", first_newline + 1)
-        if second_newline < 0:
-            return b"", False
-        return suffix[: second_newline + 1], True
+        suffix = log.read(MAX_LOG_REDACTION_CONTEXT_BYTES)
+        complete = (
+            offset + len(suffix) >= file_size
+            or b"\n" in suffix
+            or b"\r" in suffix
+        )
+        return suffix, complete
 
-    def get_summary(self, job_id: str, max_bytes: int = 1_048_576) -> dict[str, Any]:
+    def get_summary(
+        self,
+        job_id: str,
+        max_bytes: int = MAX_METADATA_RESPONSE_BYTES,
+        *,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
         job = self.refresh_result_status(job_id)
         if job.state not in {JobState.COMPLETED, JobState.FAILED}:
             raise OperationError("user", "run has not completed", "result_not_ready")
@@ -534,15 +857,33 @@ class RunManager:
             raise OperationError("framework", "result summary exceeds size limit", "result_too_large")
         try:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise OperationError("framework", "result summary is not valid JSON", "invalid_result") from exc
+        try:
+            summary = self.operations._redact_summary(summary)
+        except RecursionError as exc:
+            raise OperationError(
+                "framework", "result summary exceeds nesting limit", "result_too_large"
+            ) from exc
         if job.result_status != ResultStatus.AVAILABLE:
             self.store.transition(
                 job_id,
                 job.state,
                 result_status=ResultStatus.AVAILABLE.value,
             )
-        return {"job_id": job_id, "result_status": ResultStatus.AVAILABLE.value, "summary": summary}
+        result = {
+            "job_id": job_id,
+            "result_status": ResultStatus.AVAILABLE.value,
+            "summary": summary,
+        }
+        if (
+            self.operations._mcp_response_size(result, request_id)
+            > MAX_METADATA_RESPONSE_BYTES
+        ):
+            raise OperationError(
+                "framework", "run summary response exceeds size limit", "result_too_large"
+            )
+        return result
 
     def refresh_result_status(self, job_id: str) -> Job:
         """Refresh local result readiness after the runner has completed."""

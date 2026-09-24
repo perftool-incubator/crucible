@@ -2,6 +2,7 @@
 
 import copy
 from contextlib import contextmanager
+from dataclasses import dataclass
 import errno
 import json
 import lzma
@@ -28,8 +29,8 @@ _PLANNING_LOCK = threading.RLock()
 
 MAX_LOG_RESPONSE_BYTES = 1_048_576
 MAX_LOG_PRIVATE_KEY_MARKERS_PER_LINE = 256
-MAX_LOG_PRIVATE_KEY_CONTEXT_LINES = 10_000
-MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES = 4_194_304
+MAX_LOG_REDACTION_CONTEXT_LINES = 10_000
+MAX_LOG_REDACTION_CONTEXT_BYTES = 4_194_304
 _UNRESOLVED_PRIVATE_KEY_STATE = "\x00unresolved-private-key-context"
 MAX_ARTIFACT_LIST_LIMIT = 1000
 MAX_ARTIFACT_OFFSET = 1_073_741_824
@@ -37,6 +38,7 @@ MAX_ARTIFACT_SCAN_FILES = 100_000
 MAX_ARTIFACT_DIRECTORY_DEPTH = 64
 MAX_ARTIFACT_METADATA_BYTES = 262_144
 MAX_ARTIFACT_READ_BYTES = 131_072
+MAX_ARTIFACT_REDACTION_BYTES = 8_388_608
 MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
 MAX_METADATA_RESPONSE_BYTES = 1_048_576
 MAX_PLAN_RESPONSE_BYTES = 1_048_576
@@ -74,6 +76,22 @@ _ARTIFACT_ROOTS = (
     "run/sysinfo",
     "run/opensearch",
 )
+
+
+@dataclass(frozen=True)
+class _LogRedactionState:
+    private_key_label: str | None = None
+    pending_sensitive_indent: int | None = None
+    sensitive_structure_depth: int = 0
+    pending_sensitive_yaml_indent: int | None = None
+    shell_continuation: bool = False
+    shell_quote: str | None = None
+    pending_sensitive_heredocs: tuple[tuple[str, bool], ...] | None = ()
+    pending_sensitive_json_key: tuple[int, bool] | None = None
+    pending_sensitive_log_value: bool = False
+    unknown: bool = False
+
+
 _TEXT_ARTIFACT_SUFFIXES = {
     ".csv": "text/csv",
     ".err": "text/plain",
@@ -146,6 +164,8 @@ _SENSITIVE_METADATA_KEY_PARTS = {
     "private",
     "secret",
     "session",
+    "signature",
+    "hmac",
     "token",
     "jwt",
     "bearer",
@@ -169,6 +189,20 @@ _METADATA_QUOTED_SHELL_ASSIGNMENT = re.compile(
 _METADATA_URL_CREDENTIALS = re.compile(
     r"(?P<prefix>\b[A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@"
     r"(?=[^/\s]+(?:[/\s]|$))"
+)
+_METADATA_STANDALONE_CREDENTIAL = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:"
+    r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+    r"|github_pat_[A-Za-z0-9_]{20,}"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|glpat-[A-Za-z0-9_-]{20,}"
+    r"|xox[baprs]-[A-Za-z0-9-]{20,}"
+    r"|xapp-[A-Za-z0-9-]{20,}"
+    r"|(?:AKIA|ASIA)[0-9A-Z]{16}"
+    r"|AIza[0-9A-Za-z_-]{30,}"
+    r"|sk-(?:proj-)?[A-Za-z0-9_-]{20,}"
+    r"|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}"
+    r")(?![A-Za-z0-9_-])"
 )
 _METADATA_USER_CREDENTIAL_ASSIGNMENT = re.compile(
     r"(?<![A-Za-z0-9_-])(?P<prefix>--?)?"
@@ -327,16 +361,16 @@ _METADATA_UNKNOWN_VALUE_FIELD_VARIANTS = frozenset(
 )
 _METADATA_JSON_SENSITIVE_KEY = re.compile(
     r"\"(?:auth|authorization|credential|credentials|passphrase|pass|pwd|"
-    r"password|private|secret|token|jwt|bearer)[^\"]*\"\s*:"
+    r"password|private|secret|signature|hmac|token|jwt|bearer)[^\"]*\"\s*:"
 )
 _METADATA_SENSITIVE_TEXT = re.compile(
     r"(?:auth|authorization|credential|credentials|passphrase|pass|pwd|"
-    r"password|private|secret|token|jwt|bearer|api[_-]?key|access[_-]?key|secret[_-]?key)",
+    r"password|private|secret|signature|hmac|token|jwt|bearer|api[_-]?key|access[_-]?key|secret[_-]?key)",
     re.IGNORECASE,
 )
 _METADATA_QUOTED_SENSITIVE_ASSIGNMENT = re.compile(
     r"(?:\\?[\"'])(?:auth|authorization|credential|credentials|passphrase|"
-    r"pass|pwd|password|private|secret|token|jwt|bearer|api[_-]?key|access[_-]?key|"
+    r"pass|pwd|password|private|secret|signature|hmac|token|jwt|bearer|api[_-]?key|access[_-]?key|"
     r"secret[_-]?key)[^\"']*"
     r"(?:\\?[\"'])\s*[:=]",
     re.IGNORECASE,
@@ -351,6 +385,31 @@ _METADATA_PRIVATE_KEY_MARKER = re.compile(
     r"(?P<label>[A-Z0-9 ]*PRIVATE KEY)\s*-----",
     re.IGNORECASE,
 )
+_METADATA_LOG_FIELD = re.compile(
+    r"^\s*(?:[\"'](?P<quoted>[^\"']+)[\"']|(?P<plain>[-A-Za-z0-9_.]+))"
+    r"\s*(?P<separator>[:=])\s*(?P<value>.*?)\s*,?\s*$"
+)
+_METADATA_JSON_KEY_ONLY = re.compile(r'^\s*(?P<key>"(?:\\.|[^"\\])*")\s*$')
+_METADATA_JSON_MEMBER = re.compile(
+    r'(?:^|[,{])\s*(?P<key>"(?:\\.|[^"\\])*")\s*:'
+    r'\s*(?P<value>.*?)\s*,?\s*$'
+)
+_YAML_BLOCK_SCALAR = re.compile(
+    r"^[|>](?:[+-]?[1-9]?|[1-9]?[+-]?)(?:[ \t]+#.*)?$"
+)
+_LOG_SHELL_OPTION_QUOTE = re.compile(r"(?<!\S)--?[A-Za-z0-9_-]*[\"']")
+_LOG_QUOTED_PARTIAL_SENSITIVE_OPTION = re.compile(
+    r"(?<!\S)(?P<quote>[\"'])(?P<key>--?[A-Za-z0-9_-]+)$"
+)
+_LOG_TRAILING_SENSITIVE_KEY = re.compile(
+    r"(?<!\S)(?P<key>--?[A-Za-z_][A-Za-z0-9_-]*)$"
+)
+_LOG_HEREDOC_OPERATOR = re.compile(
+    r"(?<!<)<<(?!<)(?P<strip_tabs>-)?[ \t]*"
+    r"(?:'(?P<single>[^'\r\n]*)'|\"(?P<double>[^\"\r\n]*)\"|"
+    r"(?P<plain>[A-Za-z0-9_.-]+))"
+)
+MAX_LOG_REDACTION_LINES = 65_536
 
 
 def _decode_metadata_unicode_escapes(value: str) -> str:
@@ -522,11 +581,19 @@ class CrucibleOperations:
             resources = self.documentation.search(query, limit)
         except ValueError as exc:
             raise OperationError("user", str(exc), "invalid_query") from exc
-        return {"query": query, "resources": resources, "count": len(resources)}
+        return {
+            "query": self._redact_metadata(query),
+            "resources": resources,
+            "count": len(resources),
+        }
 
     def list_local_run_tags(self, run_directory: Path) -> dict[str, Any]:
         _, document = self._load_run_metadata(run_directory)
-        return {"run_path": str(run_directory), "tags": self._validated_tags(document)}
+        tags = self._validated_tags(document)
+        return {
+            "run_path": str(run_directory),
+            "tags": self._redact_metadata(tags),
+        }
 
     def add_local_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
         canonical = self._canonical_run_directory(run_directory)
@@ -542,8 +609,12 @@ class CrucibleOperations:
                     current.append({"name": match.group(1), "val": match.group(2)})
                 else:
                     existing["val"] = match.group(2)
+            response_tags = self._redact_metadata(current)
             self._write_run_metadata(path, document)
-            return {"run_path": str(run_directory), "tags": current}
+            return {
+                "run_path": str(run_directory),
+                "tags": response_tags,
+            }
 
     def remove_local_run_tags(self, run_directory: Path, names: list[str]) -> dict[str, Any]:
         canonical = self._canonical_run_directory(run_directory)
@@ -555,8 +626,12 @@ class CrucibleOperations:
             document["tags"] = [tag for tag in existing if tag.get("name") not in names]
             if len(document["tags"]) == len(existing):
                 raise OperationError("user", "no matching tags were found", "tag_not_found")
+            response_tags = self._redact_metadata(document["tags"])
             self._write_run_metadata(path, document)
-            return {"run_path": str(run_directory), "tags": document["tags"]}
+            return {
+                "run_path": str(run_directory),
+                "tags": response_tags,
+            }
 
     def _tag_lock(self, run_directory: Path) -> threading.Lock:
         with self._tag_locks_guard:
@@ -660,6 +735,13 @@ class CrucibleOperations:
             if canonical in seen:
                 continue
             seen.add(canonical)
+            if (
+                self._redact_metadata(directory.name) != directory.name
+                or self._redact_metadata(str(canonical)) != str(canonical)
+            ):
+                # Discovery must not disclose credentials embedded in a run
+                # name or path; still advance the directory-based cursor.
+                continue
             entry: dict[str, Any] = {
                 "name": directory.name,
                 "path": str(canonical),
@@ -674,8 +756,15 @@ class CrucibleOperations:
             else:
                 entry["status"] = "complete" if metadata_path.parent == canonical / "run" else "incomplete"
                 entry["run_id"] = metadata.get("run-id") or metadata.get("id")
+                if (
+                    isinstance(entry["run_id"], str)
+                    and self._redact_metadata(entry["run_id"]) != entry["run_id"]
+                ):
+                    continue
                 try:
-                    entry["tags"] = self._validated_tags(metadata)
+                    entry["tags"] = self._redact_metadata(
+                        self._validated_tags(metadata)
+                    )
                 except OperationError:
                     entry["status"] = "incomplete"
                     entry["tags"] = []
@@ -761,6 +850,12 @@ class CrucibleOperations:
             ) from exc
         if not isinstance(summary, dict):
             raise OperationError("user", "local run summary must be a JSON object", "invalid_result")
+        try:
+            summary = self._redact_summary(summary)
+        except RecursionError as exc:
+            raise OperationError(
+                "framework", "result summary exceeds nesting limit", "result_too_large"
+            ) from exc
         result = {
             "run_path": str(canonical),
             "result_status": "available",
@@ -967,6 +1062,15 @@ class CrucibleOperations:
                 for key, item in value.items()
             )
             for key, item in value.items():
+                output_key = key
+                if isinstance(key, str):
+                    output_key = cls._redact_metadata(key, depth + 1, budget)
+                    if output_key in redacted:
+                        base_key = output_key
+                        suffix = 2
+                        while output_key in redacted:
+                            output_key = f"{base_key} ({suffix})"
+                            suffix += 1
                 field_variant = (
                     cls._metadata_field_variant(key) if isinstance(key, str) else ""
                 )
@@ -975,16 +1079,16 @@ class CrucibleOperations:
                     and field_variant in {"user", "username"}
                     and cls._is_user_credential_value(item)
                 ):
-                    redacted[key] = cls._redact_user_credential_value(item)
+                    redacted[output_key] = cls._redact_user_credential_value(item)
                 elif (
                     has_user_name_descriptor
                     and isinstance(item, str)
                     and field_variant in _METADATA_VALUE_FIELD_VARIANTS
                     and cls._is_user_credential_value(item)
                 ):
-                    redacted[key] = cls._redact_user_credential_value(item)
+                    redacted[output_key] = cls._redact_user_credential_value(item)
                 elif isinstance(key, str) and cls._metadata_key_is_sensitive(key):
-                    redacted[key] = "[redacted]"
+                    redacted[output_key] = "[redacted]"
                 elif (
                     sensitive_parameter
                     and isinstance(key, str)
@@ -1003,9 +1107,9 @@ class CrucibleOperations:
                         in _METADATA_ROOT_FIELD_VARIANTS
                     )
                 ):
-                    redacted[key] = "[redacted]"
+                    redacted[output_key] = "[redacted]"
                 else:
-                    redacted[key] = cls._redact_metadata(item, depth + 1, budget)
+                    redacted[output_key] = cls._redact_metadata(item, depth + 1, budget)
             return redacted
         if isinstance(value, list):
             redacted_list: list[Any] = []
@@ -1166,6 +1270,7 @@ class CrucibleOperations:
             )
             if url_redacted != value:
                 value = url_redacted
+            value = _METADATA_STANDALONE_CREDENTIAL.sub("[redacted]", value)
             for matcher in (
                 _METADATA_SHELL_ASSIGNMENT,
                 _METADATA_QUOTED_SHELL_ASSIGNMENT,
@@ -1215,6 +1320,59 @@ class CrucibleOperations:
             redacted_parts.append(value[cursor:])
             return "".join(redacted_parts)
         return value
+
+    @classmethod
+    def _redact_summary(cls, value: Any) -> Any:
+        """Redact summary fields independently while retaining safe siblings."""
+
+        if isinstance(value, dict):
+            has_sensitive_descriptor = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_NAME_FIELD_VARIANTS
+                and cls._metadata_direct_value_contains_sensitive_name(
+                    item, cls._metadata_field_variant(key)
+                )
+                for key, item in value.items()
+            )
+            has_value_field = any(
+                isinstance(key, str)
+                and cls._metadata_field_variant(key) in _METADATA_VALUE_FIELD_VARIANTS
+                for key in value
+            )
+            contextual_values: dict[str, Any] = {}
+            if has_sensitive_descriptor and has_value_field:
+                # Redact descriptor/value fields together, then merge only the
+                # affected values so unrelated summary siblings remain useful.
+                contextual_fields = {
+                    key: item
+                    for key, item in value.items()
+                    if isinstance(key, str)
+                    and cls._metadata_field_variant(key)
+                    in (_METADATA_NAME_FIELD_VARIANTS | _METADATA_VALUE_FIELD_VARIANTS)
+                }
+                contextual_result = cls._redact_metadata(contextual_fields)
+                contextual_values = dict(
+                    zip(contextual_fields, contextual_result.values())
+                )
+            redacted: dict[Any, Any] = {}
+            for key, item in value.items():
+                field = cls._redact_metadata({key: item})
+                output_key, output_value = next(iter(field.items()))
+                if (
+                    isinstance(key, str)
+                    and cls._metadata_field_variant(key) in _METADATA_VALUE_FIELD_VARIANTS
+                    and key in contextual_values
+                ):
+                    output_value = contextual_values[key]
+                if output_key in redacted:
+                    base_key = output_key
+                    suffix = 2
+                    while output_key in redacted:
+                        output_key = f"{base_key} ({suffix})"
+                        suffix += 1
+                redacted[output_key] = output_value
+            return redacted
+        return cls._redact_metadata(value)
 
     @classmethod
     def redact_log_text(cls, value: str) -> str:
@@ -1274,40 +1432,824 @@ class CrucibleOperations:
         return cls.redact_log_text(value), next_label
 
     @classmethod
-    def _log_private_key_state_before(
+    def _redact_log_line_with_stats(
+        cls,
+        value: str,
+        private_key_label: str | None = None,
+        pending_sensitive_indent: int | None = None,
+        sensitive_structure_depth: int = 0,
+        pending_sensitive_yaml_indent: int | None = None,
+        shell_continuation: bool = False,
+        has_line_ending: bool = True,
+        shell_quote: str | None = None,
+        pending_sensitive_heredocs: tuple[tuple[str, bool], ...] | None = (),
+        pending_sensitive_json_key: tuple[int, bool] | None = None,
+        pending_sensitive_log_value: bool = False,
+    ) -> tuple[
+        str,
+        str | None,
+        int | None,
+        int | None,
+        int,
+        bool,
+        str | None,
+        tuple[tuple[str, bool], ...] | None,
+        bool,
+        tuple[int, bool] | None,
+        bool,
+    ]:
+        """Redact a line and carry state across shell/YAML continuations."""
+
+        result = cls._redact_log_line_state(
+            value,
+            private_key_label,
+            pending_sensitive_indent,
+            sensitive_structure_depth,
+            pending_sensitive_yaml_indent,
+        )
+        (
+            redacted,
+            next_private_key_label,
+            next_pending_sensitive_indent,
+            next_pending_sensitive_yaml_indent,
+            next_sensitive_structure_depth,
+            changed,
+        ) = result
+        next_pending_sensitive_json_key = None
+        if pending_sensitive_json_key is not None:
+            if not value.strip():
+                next_pending_sensitive_json_key = pending_sensitive_json_key
+            elif not pending_sensitive_json_key[1]:
+                separator = re.fullmatch(r"\s*:\s*(?P<value>.*?)\s*,?\s*", value)
+                if separator is not None:
+                    redacted = "[redacted]"
+                    changed = True
+                    field_value = separator.group("value").strip()
+                    if not field_value:
+                        next_pending_sensitive_json_key = (
+                            pending_sensitive_json_key[0],
+                            True,
+                        )
+                    elif field_value[0] in "[{":
+                        depth = cls._log_json_nesting_delta(field_value)
+                        if depth > 0:
+                            next_sensitive_structure_depth = depth
+            else:
+                redacted = "[redacted]"
+                changed = True
+                field_value = value.strip()
+                if field_value[0] in "[{":
+                    depth = cls._log_json_nesting_delta(field_value)
+                    if depth > 0:
+                        next_sensitive_structure_depth = depth
+
+        if next_pending_sensitive_json_key is None and (
+            pending_sensitive_json_key is None
+            or (value.strip() and not redacted == "[redacted]")
+        ):
+            member_match = _METADATA_JSON_MEMBER.search(value)
+            if member_match is not None:
+                try:
+                    key = json.loads(member_match.group("key"))
+                except (json.JSONDecodeError, TypeError):
+                    key = None
+                if isinstance(key, str) and cls._metadata_key_is_sensitive(key):
+                    redacted = "[redacted]"
+                    changed = True
+                    field_value = member_match.group("value").strip()
+                    if field_value.startswith(("[", "{")):
+                        depth = cls._log_json_open_container_depth(field_value)
+                        if depth > 0:
+                            next_sensitive_structure_depth = depth
+                    elif not field_value:
+                        next_pending_sensitive_json_key = (
+                            len(value) - len(value.lstrip()),
+                            True,
+                        )
+            if next_pending_sensitive_json_key is None:
+                key_match = _METADATA_JSON_KEY_ONLY.fullmatch(value)
+                if key_match is not None:
+                    try:
+                        key = json.loads(key_match.group("key"))
+                    except (json.JSONDecodeError, TypeError):
+                        key = None
+                    if isinstance(key, str) and cls._metadata_key_is_sensitive(key):
+                        redacted = "[redacted]"
+                        changed = True
+                        next_pending_sensitive_json_key = (
+                            len(value) - len(value.lstrip()),
+                            False,
+                        )
+        next_pending_sensitive_log_value = False
+        if pending_sensitive_log_value:
+            if not value.strip():
+                next_pending_sensitive_log_value = True
+            else:
+                redacted = "[redacted]"
+                changed = True
+                field_value = value.strip()
+                if field_value.startswith(("[", "{")):
+                    depth = cls._log_json_nesting_delta(field_value)
+                    if depth > 0:
+                        next_sensitive_structure_depth = depth
+        if has_line_ending and cls._log_line_has_trailing_sensitive_key(value):
+            next_pending_sensitive_log_value = True
+        shell_line_continues = (
+            has_line_ending and cls._log_line_has_shell_continuation(value)
+        )
+        next_shell_quote = cls._log_shell_quote_state(value, shell_quote)
+        has_sensitive_shell_assignment = (
+            cls._log_line_has_sensitive_shell_assignment(value)
+        )
+        continues_shell = shell_line_continues and (
+            shell_continuation
+            or has_sensitive_shell_assignment
+            or cls._log_line_has_partial_sensitive_shell_key(value)
+            or shell_quote is not None
+            or next_shell_quote is not None
+        )
+        next_sensitive_heredocs = pending_sensitive_heredocs
+        redacted_heredoc_line = False
+        if pending_sensitive_heredocs is None:
+            redacted_heredoc_line = True
+        elif pending_sensitive_heredocs:
+            delimiter, strip_tabs = pending_sensitive_heredocs[0]
+            candidate = value.lstrip("\t") if strip_tabs else value
+            redacted_heredoc_line = True
+            if has_line_ending and candidate == delimiter:
+                next_sensitive_heredocs = pending_sensitive_heredocs[1:]
+        elif has_line_ending and (
+            has_sensitive_shell_assignment
+            or shell_continuation
+            or shell_quote is not None
+        ):
+            next_sensitive_heredocs = cls._log_sensitive_heredoc_starts(value)
+            redacted_heredoc_line = next_sensitive_heredocs != ()
+        if (
+            shell_continuation
+            or continues_shell
+            or shell_quote is not None
+            or next_shell_quote is not None
+            or redacted_heredoc_line
+        ):
+            # Continued words, multiline quotes, and heredoc bodies can
+            # assemble sensitive values across physical lines. Hide the span.
+            redacted = "[redacted]"
+            changed = True
+        return (
+            redacted,
+            next_private_key_label,
+            next_pending_sensitive_indent,
+            next_pending_sensitive_yaml_indent,
+            next_sensitive_structure_depth,
+            continues_shell,
+            next_shell_quote,
+            next_sensitive_heredocs,
+            changed,
+            next_pending_sensitive_json_key,
+            next_pending_sensitive_log_value,
+        )
+
+    @classmethod
+    def _redact_log_physical_line_with_state(
+        cls,
+        value: str,
+        state: _LogRedactionState,
+        has_line_ending: bool = True,
+    ) -> tuple[str, _LogRedactionState, bool]:
+        """Redact one logger record and preserve every multiline context."""
+
+        if state.unknown:
+            return "[redacted]", state, True
+        result = cls._redact_log_line_with_stats(
+            value,
+            private_key_label=state.private_key_label,
+            pending_sensitive_indent=state.pending_sensitive_indent,
+            sensitive_structure_depth=state.sensitive_structure_depth,
+            pending_sensitive_yaml_indent=state.pending_sensitive_yaml_indent,
+            shell_continuation=state.shell_continuation,
+            has_line_ending=has_line_ending,
+            shell_quote=state.shell_quote,
+            pending_sensitive_heredocs=state.pending_sensitive_heredocs,
+            pending_sensitive_json_key=state.pending_sensitive_json_key,
+            pending_sensitive_log_value=state.pending_sensitive_log_value,
+        )
+        return (
+            result[0],
+            _LogRedactionState(
+                private_key_label=result[1],
+                pending_sensitive_indent=result[2],
+                pending_sensitive_yaml_indent=result[3],
+                sensitive_structure_depth=result[4],
+                shell_continuation=result[5],
+                shell_quote=result[6],
+                pending_sensitive_heredocs=result[7],
+                pending_sensitive_json_key=result[9],
+                pending_sensitive_log_value=result[10],
+            ),
+            result[8],
+        )
+
+    @classmethod
+    def _redact_log_record_with_state(
+        cls,
+        value: str,
+        state: _LogRedactionState | None = None,
+    ) -> tuple[str, _LogRedactionState, bool]:
+        """Redact a logger row while carrying state across embedded records."""
+
+        state = state or _LogRedactionState()
+        if state.unknown:
+            return "[redacted]", state, True
+
+        output: list[str] = []
+        changed = False
+        position = 0
+        processed_lines = 0
+        for separator in re.finditer(r"\r\n|\r|\n", value):
+            if processed_lines >= MAX_LOG_REDACTION_LINES:
+                return "[redacted]", _LogRedactionState(unknown=True), True
+            safe_line, state, line_changed = cls._redact_log_physical_line_with_state(
+                value[position : separator.start()], state
+            )
+            output.append(safe_line)
+            output.append(separator.group())
+            changed = changed or line_changed
+            position = separator.end()
+            processed_lines += 1
+
+        if position < len(value) or processed_lines == 0:
+            if processed_lines >= MAX_LOG_REDACTION_LINES:
+                return "[redacted]", _LogRedactionState(unknown=True), True
+            safe_line, state, line_changed = cls._redact_log_physical_line_with_state(
+                value[position:], state
+            )
+            output.append(safe_line)
+            changed = changed or line_changed
+        return "".join(output), state, changed
+
+    @staticmethod
+    def _log_line_has_shell_continuation(value: str) -> bool:
+        """Whether a line ends with an unescaped shell continuation slash."""
+
+        slash_count = len(value) - len(value.rstrip("\\"))
+        return slash_count % 2 == 1
+
+    @classmethod
+    def _log_record_opens_redaction_state(cls, value: str) -> bool:
+        """Whether discarding this record could lose multiline secret state."""
+
+        result = cls._redact_log_line_with_stats(value, has_line_ending=True)
+        return (
+            result[1] is not None
+            or result[2] is not None
+            or result[3] is not None
+            or result[4] != 0
+            or result[5]
+            or result[6] is not None
+            or result[7] is None
+            or bool(result[7])
+            or result[9] is not None
+            or result[10]
+            or cls._log_line_has_shell_continuation(value)
+        )
+
+    @classmethod
+    def _log_line_has_sensitive_shell_assignment(cls, value: str) -> bool:
+        return any(
+            cls._metadata_key_is_sensitive(match.group("key"))
+            for match in _METADATA_SECRET_ASSIGNMENT.finditer(value)
+        )
+
+    @classmethod
+    def _log_line_has_trailing_sensitive_key(cls, value: str) -> bool:
+        """Whether a line ends in a key whose whitespace-delimited value follows."""
+
+        stripped = value.strip()
+        match = _LOG_TRAILING_SENSITIVE_KEY.search(stripped)
+        if match is None:
+            return False
+        key = match.group("key")
+        if not key.startswith("-") and stripped != key:
+            return False
+        return cls._metadata_key_is_sensitive(key)
+
+    @classmethod
+    def _log_line_has_partial_sensitive_shell_key(cls, value: str) -> bool:
+        """Recognize a sensitive option name split at a shell continuation."""
+
+        if not cls._log_line_has_shell_continuation(value):
+            return False
+        prefix = value.rstrip()[:-1].rstrip()
+        match = re.search(r"(?<!\S)(?P<key>--?[A-Za-z0-9_-]+)$", prefix)
+        if match is not None and cls._is_sensitive_shell_option_prefix(
+            match.group("key")
+        ):
+            return True
+        # A URL user-info password may begin on the next physical line after
+        # the colon; the first half cannot be classified by assignment-key
+        # matching alone, so carry the continuation as sensitive.
+        return re.search(
+            r"(?i)(?:https?|ftp)://[^\s/:@]+:$", prefix
+        ) is not None
+
+    @staticmethod
+    def _is_sensitive_shell_option_prefix(value: str) -> bool:
+        key = value.lstrip("-").lower().replace("_", "")
+        if key in {"p", "u"}:
+            return True
+        if len(key) < 2:
+            return False
+        sensitive_names = _SENSITIVE_METADATA_KEY_PARTS | {
+            "accesskey",
+            "apikey",
+            "authtoken",
+            "clientsecret",
+            "clienttoken",
+            "secretkey",
+        }
+        return any(
+            name.replace("_", "").startswith(key)
+            for name in sensitive_names
+        )
+
+    @classmethod
+    def _log_sensitive_shell_continuation_lines(cls, value: str) -> set[int]:
+        """Find continued shell records that become sensitive when rejoined."""
+
+        sensitive_lines: set[int] = set()
+        position = 0
+        scanned_lines = 0
+        while position < len(value) and scanned_lines < MAX_LOG_REDACTION_LINES:
+            line_starts: list[int] = []
+            logical_parts: list[str] = []
+            has_continuation = False
+            continuation_open = False
+            while position < len(value) and scanned_lines < MAX_LOG_REDACTION_LINES:
+                line_start = position
+                lf = value.find("\n", position)
+                cr = value.find("\r", position)
+                endings = [index for index in (lf, cr) if index >= 0]
+                if not endings:
+                    end = len(value)
+                else:
+                    ending_start = min(endings)
+                    end = ending_start + 1
+                    if value[ending_start] == "\r" and value[end : end + 1] == "\n":
+                        end += 1
+                raw_line = value[position:end]
+                if raw_line.endswith("\r\n"):
+                    content = raw_line[:-2]
+                    has_line_ending = True
+                elif raw_line.endswith(("\n", "\r")):
+                    content = raw_line[:-1]
+                    has_line_ending = True
+                else:
+                    content = raw_line
+                    has_line_ending = False
+                continues = (
+                    has_line_ending and cls._log_line_has_shell_continuation(content)
+                )
+                line_starts.append(scanned_lines)
+                if continues:
+                    has_continuation = True
+                    continuation_open = True
+                    logical_parts.append(content[:-1])
+                else:
+                    continuation_open = False
+                    logical_parts.append(content)
+                position = end
+                scanned_lines += 1
+                if not continues:
+                    break
+            if not has_continuation:
+                continue
+            if continuation_open:
+                # If the bounded scan ended mid-command, its sensitivity is
+                # unknowable; keep the observed portion hidden.
+                sensitive_lines.update(line_starts)
+                continue
+            logical_command = "".join(logical_parts)
+            if cls.redact_log_text(logical_command) != logical_command:
+                sensitive_lines.update(line_starts)
+        return sensitive_lines
+
+    @classmethod
+    def _log_sensitive_heredoc_starts(
+        cls,
+        value: str,
+    ) -> tuple[tuple[str, bool], ...] | None:
+        """Return delimiters, or None when a sensitive heredoc is ambiguous."""
+
+        starts = cls._log_heredoc_operator_positions(value)
+        if not starts:
+            return ()
+        delimiters: list[tuple[str, bool]] = []
+        for start in starts:
+            operator = _LOG_HEREDOC_OPERATOR.match(value, start)
+            if operator is None:
+                return None
+            delimiter = (
+                operator.group("single")
+                if operator.group("single") is not None
+                else operator.group("double")
+                if operator.group("double") is not None
+                else operator.group("plain")
+            )
+            if not delimiter:
+                return None
+            delimiters.append((delimiter, operator.group("strip_tabs") is not None))
+        return tuple(delimiters)
+
+    @staticmethod
+    def _log_heredoc_operator_positions(value: str) -> list[int]:
+        """Find heredoc operators outside shell quotes and escaped words."""
+
+        positions: list[int] = []
+        quote: str | None = None
+        escaped = False
+        index = 0
+        while index < len(value):
+            character = value[index]
+            if quote == "'":
+                if character == "'":
+                    quote = None
+                index += 1
+                continue
+            if escaped:
+                escaped = False
+                index += 1
+                continue
+            if character == "\\":
+                escaped = True
+                index += 1
+                continue
+            if quote == '"':
+                if character == '"':
+                    quote = None
+                index += 1
+                continue
+            if character in {"'", '"'}:
+                quote = character
+                index += 1
+                continue
+            if value.startswith("<<<", index):
+                index += 3
+                continue
+            if value.startswith("<<", index):
+                positions.append(index)
+                index += 2
+                continue
+            index += 1
+        return positions
+
+    @classmethod
+    def _log_shell_quote_state(
+        cls, value: str, quote_state: str | None = None
+    ) -> str | None:
+        """Track quoted sensitive assignments so multiline values fail closed."""
+
+        if quote_state is None:
+            has_sensitive_assignment = any(
+                cls._metadata_key_is_sensitive(match.group("key"))
+                and (
+                    match.group("prefix") is not None
+                    or ":" in match.group("separator")
+                    or "=" in match.group("separator")
+                    or (
+                        match.group("separator").isspace()
+                        and value[match.end() :].lstrip().startswith(
+                            ("'", '"', "$'")
+                        )
+                    )
+                )
+                for match in _METADATA_SECRET_ASSIGNMENT.finditer(value)
+            )
+            field = _METADATA_LOG_FIELD.fullmatch(value)
+            has_sensitive_field = (
+                field is not None
+                and cls._metadata_key_is_sensitive(
+                    field.group("quoted") or field.group("plain") or ""
+                )
+            )
+            quoted_partial_option = _LOG_QUOTED_PARTIAL_SENSITIVE_OPTION.search(value)
+            has_partial_shell_option = (
+                _LOG_SHELL_OPTION_QUOTE.search(value) is not None
+                or (
+                    quoted_partial_option is not None
+                    and cls._is_sensitive_shell_option_prefix(
+                        quoted_partial_option.group("key")
+                    )
+                )
+            )
+            if not (
+                has_sensitive_assignment
+                or has_sensitive_field
+                or has_partial_shell_option
+            ):
+                return None
+
+        escaped = False
+        for character in value:
+            if quote_state == "'":
+                if character == "'":
+                    quote_state = None
+                continue
+            if escaped:
+                escaped = False
+                continue
+            if character == "\\":
+                escaped = True
+            elif quote_state == '"':
+                if character == '"':
+                    quote_state = None
+            elif character in {"'", '"'}:
+                quote_state = character
+        return quote_state
+
+    @classmethod
+    def _redact_log_line_state(
+        cls,
+        value: str,
+        private_key_label: str | None = None,
+        pending_sensitive_indent: int | None = None,
+        sensitive_structure_depth: int = 0,
+        pending_sensitive_yaml_indent: int | None = None,
+    ) -> tuple[str, str | None, int | None, int | None, int, bool]:
+        """Redact one complete log line and report whether it changed."""
+
+        redacted, next_label = cls._redact_log_line_with_context(
+            value, private_key_label
+        )
+        stripped = value.strip()
+        indent = len(value) - len(value.lstrip())
+
+        if sensitive_structure_depth:
+            next_depth = max(
+                0,
+                sensitive_structure_depth + cls._log_json_nesting_delta(value),
+            )
+            return "[redacted]", next_label, None, None, next_depth, True
+
+        if pending_sensitive_yaml_indent is not None:
+            if not stripped:
+                return (
+                    redacted,
+                    next_label,
+                    None,
+                    pending_sensitive_yaml_indent,
+                    0,
+                    redacted != value,
+                )
+            if indent > pending_sensitive_yaml_indent:
+                return "[redacted]", next_label, None, pending_sensitive_yaml_indent, 0, True
+            # A dedented line is outside the scalar. Process it normally so a
+            # safe sibling field is not hidden with the secret block.
+            pending_sensitive_yaml_indent = None
+
+        if pending_sensitive_indent is not None:
+            if not stripped:
+                return (
+                    redacted,
+                    next_label,
+                    pending_sensitive_indent,
+                    pending_sensitive_yaml_indent,
+                    0,
+                    redacted != value,
+                )
+            value_depth = cls._log_json_nesting_delta(value)
+            if stripped[0] in "[{" and value_depth > 0:
+                return "[redacted]", next_label, None, None, value_depth, True
+            same_indent_field = (
+                indent == pending_sensitive_indent
+                and _METADATA_LOG_FIELD.fullmatch(value) is not None
+            )
+            same_indent_sequence_item = (
+                indent == pending_sensitive_indent
+                and stripped.startswith("-")
+                and (len(stripped) == 1 or stripped[1] in " \t")
+            )
+            if indent > pending_sensitive_indent or same_indent_sequence_item:
+                # Deeper YAML content and indentless sequence items belong to
+                # the sensitive field until a sibling mapping is reached.
+                return (
+                    "[redacted]",
+                    next_label,
+                    pending_sensitive_indent,
+                    None,
+                    0,
+                    True,
+                )
+            if indent == pending_sensitive_indent and not same_indent_field:
+                # At equal indentation, consume one scalar line, as with the
+                # common pretty-printed JSON form. A mapping field is instead
+                # a sibling and must be reprocessed under normal redaction.
+                return "[redacted]", next_label, None, None, 0, True
+            # A dedented line or same-indent mapping is outside the sensitive
+            # value. Clear state and process it normally below.
+            pending_sensitive_indent = None
+
+        has_marker = _METADATA_PRIVATE_KEY_MARKER.search(value) is not None
+        if has_marker and redacted == value:
+            # A BEGIN marker changes the carried state but is not itself a
+            # secret; hide it together with the key body for consistent output.
+            redacted = "[redacted private key]"
+        field = _METADATA_LOG_FIELD.fullmatch(value)
+        if field is not None:
+            key = field.group("quoted") or field.group("plain") or ""
+            field_value = field.group("value").strip()
+            if cls._metadata_key_is_sensitive(key):
+                if not field_value:
+                    return "[redacted]", next_label, indent, None, 0, True
+                if field_value[0] in "[{":
+                    depth = cls._log_json_nesting_delta(field_value)
+                    if depth > 0:
+                        return "[redacted]", next_label, None, None, depth, True
+                if _YAML_BLOCK_SCALAR.fullmatch(field_value):
+                    return "[redacted]", next_label, None, indent, 0, True
+                if (
+                    field.group("separator") == ":"
+                    and field_value[0] not in "\"'[{"
+                ):
+                    # Plain YAML scalars may continue on more-indented lines;
+                    # retain the sensitive context through that continuation.
+                    return "[redacted]", next_label, None, indent, 0, True
+        return redacted, next_label, None, None, 0, redacted != value
+
+    @staticmethod
+    def _log_json_nesting_delta(value: str) -> int:
+        """Count JSON-like container nesting without counting quoted braces."""
+
+        depth = 0
+        quote: str | None = None
+        escaped = False
+        for character in value:
+            if escaped:
+                escaped = False
+            elif quote is not None:
+                if character == "\\":
+                    escaped = True
+                elif character == quote:
+                    quote = None
+            elif character in {"\"", "'"}:
+                quote = character
+            elif character in "[{":
+                depth += 1
+            elif character in "]}":
+                depth -= 1
+        return depth
+
+    @staticmethod
+    def _log_json_open_container_depth(value: str) -> int:
+        """Return the remaining depth of a JSON container starting this value."""
+
+        value = value.lstrip()
+        if not value.startswith(("[", "{")):
+            return 0
+
+        depth = 0
+        quote: str | None = None
+        escaped = False
+        for character in value:
+            if escaped:
+                escaped = False
+            elif quote is not None:
+                if character == "\\":
+                    escaped = True
+                elif character == quote:
+                    quote = None
+            elif character in {"\"", "'"}:
+                quote = character
+            elif character in "[{":
+                depth += 1
+            elif character in "]}":
+                depth -= 1
+                if depth <= 0:
+                    return 0
+        return max(depth, 0)
+
+    @classmethod
+    def redact_log_text_with_stats(cls, value: str) -> tuple[str, int]:
+        """Return credential-redacted text and the number of affected lines."""
+
+        if not isinstance(value, str):
+            raise OperationError("framework", "runner log text is invalid", "invalid_log")
+        sensitive_shell_continuation_lines = (
+            cls._log_sensitive_shell_continuation_lines(value)
+        )
+        redacted_parts: list[str] = []
+        redacted_lines = 0
+        processed_lines = 0
+        private_key_label: str | None = None
+        pending_sensitive_indent: int | None = None
+        pending_sensitive_yaml_indent: int | None = None
+        pending_sensitive_json_key: tuple[int, bool] | None = None
+        pending_sensitive_log_value = False
+        sensitive_structure_depth = 0
+        shell_continuation = False
+        shell_quote: str | None = None
+        pending_sensitive_heredocs: tuple[tuple[str, bool], ...] | None = ()
+        position = 0
+        while position < len(value):
+            if processed_lines >= MAX_LOG_REDACTION_LINES:
+                remaining = value[position:]
+                redacted_parts.append("[redacted]")
+                line_breaks = (
+                    remaining.count("\n")
+                    + remaining.count("\r")
+                    - remaining.count("\r\n")
+                )
+                redacted_lines += line_breaks + bool(
+                    remaining and not remaining.endswith(("\n", "\r"))
+                )
+                break
+            lf = value.find("\n", position)
+            cr = value.find("\r", position)
+            endings = [index for index in (lf, cr) if index >= 0]
+            if not endings:
+                end = len(value)
+            else:
+                ending_start = min(endings)
+                end = ending_start + 1
+                if value[ending_start] == "\r" and value[end : end + 1] == "\n":
+                    end += 1
+            raw_line = value[position:end]
+            if raw_line.endswith("\r\n"):
+                content, ending = raw_line[:-2], "\r\n"
+            elif raw_line.endswith(("\n", "\r")):
+                content, ending = raw_line[:-1], raw_line[-1:]
+            else:
+                content, ending = raw_line, ""
+            (
+                redacted,
+                private_key_label,
+                pending_sensitive_indent,
+                pending_sensitive_yaml_indent,
+                sensitive_structure_depth,
+                shell_continuation,
+                shell_quote,
+                pending_sensitive_heredocs,
+                changed,
+                pending_sensitive_json_key,
+                pending_sensitive_log_value,
+            ) = cls._redact_log_line_with_stats(
+                content,
+                private_key_label,
+                pending_sensitive_indent,
+                sensitive_structure_depth,
+                pending_sensitive_yaml_indent,
+                shell_continuation,
+                bool(ending),
+                shell_quote,
+                pending_sensitive_heredocs,
+                pending_sensitive_json_key,
+                pending_sensitive_log_value,
+            )
+            if processed_lines in sensitive_shell_continuation_lines:
+                redacted = "[redacted]"
+                changed = True
+            redacted_parts.append(redacted + ending)
+            if changed:
+                redacted_lines += 1
+            position = end
+            processed_lines += 1
+        return "".join(redacted_parts), redacted_lines
+
+    @classmethod
+    def _log_redaction_state_before(
         cls,
         connection: sqlite3.Connection,
         session: int,
         stream: int,
         before_id: int,
         budget: dict[str, int] | None = None,
-    ) -> str | None:
-        """Recover PEM state from bounded, indexed rows preceding a search window."""
+    ) -> _LogRedactionState:
+        """Recover redaction state from bounded rows preceding a search window."""
 
-        return cls._log_private_key_state_in_range(
+        return cls._log_redaction_state_in_range(
             connection,
             session,
             stream,
             after_id=None,
             before_id=before_id,
-            state=None,
+            state=_LogRedactionState(),
             budget=budget,
         )
 
     @classmethod
-    def _log_private_key_state_between(
+    def _log_redaction_state_between(
         cls,
         connection: sqlite3.Connection,
         session: int,
         stream: int,
         after_id: int,
         before_id: int,
-        state: str | None,
+        state: _LogRedactionState,
         budget: dict[str, int],
-    ) -> str | None:
+    ) -> _LogRedactionState:
         """Apply excluded logger rows between results in insertion order."""
 
-        return cls._log_private_key_state_in_range(
+        return cls._log_redaction_state_in_range(
             connection,
             session,
             stream,
@@ -1318,27 +2260,27 @@ class CrucibleOperations:
         )
 
     @classmethod
-    def _log_private_key_state_in_range(
+    def _log_redaction_state_in_range(
         cls,
         connection: sqlite3.Connection,
         session: int,
         stream: int,
         after_id: int | None,
         before_id: int,
-        state: str | None,
+        state: _LogRedactionState,
         budget: dict[str, int] | None,
-    ) -> str | None:
+    ) -> _LogRedactionState:
         """Process a bounded insertion-order slice for one logger stream."""
 
-        if state == _UNRESOLVED_PRIVATE_KEY_STATE:
+        if state.unknown:
             return state
         if after_id is not None and before_id <= after_id + 1:
             return state
 
         if budget is None:
             budget = {
-                "lines": MAX_LOG_PRIVATE_KEY_CONTEXT_LINES,
-                "bytes": MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES,
+                "lines": MAX_LOG_REDACTION_CONTEXT_LINES,
+                "bytes": MAX_LOG_REDACTION_CONTEXT_BYTES,
             }
 
         index = connection.execute(
@@ -1348,16 +2290,16 @@ class CrucibleOperations:
         if index is None:
             # Older or externally-created logger databases may not have the
             # bounded lookup index yet. Never fall back to scanning their history.
-            return _UNRESOLVED_PRIVATE_KEY_STATE
+            return _LogRedactionState(unknown=True)
 
         line_budget = min(
-            MAX_LOG_PRIVATE_KEY_CONTEXT_LINES, budget.get("lines", 0)
+            MAX_LOG_REDACTION_CONTEXT_LINES, budget.get("lines", 0)
         )
         byte_budget = min(
-            MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES, budget.get("bytes", 0)
+            MAX_LOG_REDACTION_CONTEXT_BYTES, budget.get("bytes", 0)
         )
         if line_budget <= 0 or byte_budget < 0:
-            return _UNRESOLVED_PRIVATE_KEY_STATE
+            return _LogRedactionState(unknown=True)
 
         where = "session = ? AND stream = ? AND id < ?"
         params: list[int] = [session, stream, before_id]
@@ -1374,11 +2316,11 @@ class CrucibleOperations:
             len(context_rows) > line_budget
             or sum(row[1] or 0 for row in context_rows) > byte_budget
         ):
-            # A missing row could contain a BEGIN marker; fail closed instead
-            # of guessing the key state when either shared budget is exceeded.
+            # An omitted row could open any supported sensitive structure;
+            # fail closed instead of guessing the state at the search window.
             budget["lines"] = 0
             budget["bytes"] = 0
-            return _UNRESOLVED_PRIVATE_KEY_STATE
+            return _LogRedactionState(unknown=True)
 
         budget["lines"] -= len(context_rows)
         budget["bytes"] -= sum(row[1] or 0 for row in context_rows)
@@ -1398,7 +2340,7 @@ class CrucibleOperations:
                 params,
             ).fetchall()
         for (line,) in context_lines:
-            _, state = cls._redact_log_line_with_context(line or "", state)
+            _, state, _ = cls._redact_log_record_with_state(line or "", state)
         return state
 
     @classmethod
@@ -1818,7 +2760,7 @@ class CrucibleOperations:
     def _long_metadata_string_has_sensitive_candidate(value: str) -> bool:
         sensitive_name = (
             r"(?:auth|authorization|credential|credentials|passphrase|pass|pwd|"
-            r"password|private|secret|token|jwt|bearer|api[_-]?key|"
+            r"password|private|secret|signature|hmac|token|jwt|bearer|api[_-]?key|"
             r"access[_-]?key|secret[_-]?key)"
         )
         if _METADATA_JSON_SENSITIVE_KEY.search(value):
@@ -1990,6 +2932,8 @@ class CrucibleOperations:
         ):
             return True
         compact = normalized.replace("_", "")
+        if compact == "sig":
+            return True
         if any(
             marker in compact
             for marker in (
@@ -2006,6 +2950,8 @@ class CrucibleOperations:
                 "passwd",
                 "private",
                 "secret",
+                "signature",
+                "hmac",
                 "session",
                 "token",
                 "jwt",
@@ -2173,6 +3119,11 @@ class CrucibleOperations:
                 if not self._is_approved_artifact(relative):
                     next_offset = file_offset
                     continue
+                if self._redact_metadata(relative) != relative:
+                    # Artifact names are returned as client-visible paths too;
+                    # do not disclose a recognized token embedded in one.
+                    next_offset = file_offset
+                    continue
                 if len(artifacts) >= limit:
                     complete = False
                     next_offset = file_offset - 1
@@ -2192,7 +3143,10 @@ class CrucibleOperations:
                     "media_type": self._artifact_media_type(Path(entry.name)),
                     "size": metadata.st_size,
                     "modified_at": int(metadata.st_mtime * 1000),
-                    "retrievable": self._is_retrievable_artifact(relative),
+                    "retrievable": (
+                        self._is_retrievable_artifact(relative)
+                        and metadata.st_size <= MAX_ARTIFACT_REDACTION_BYTES
+                    ),
                 }
                 artifact_bytes = len(
                     json.dumps(artifact, separators=(",", ":")).encode("utf-8")
@@ -2297,12 +3251,25 @@ class CrucibleOperations:
             ) from exc
         try:
             size = os.fstat(stream.fileno()).st_size
+            if size > MAX_ARTIFACT_REDACTION_BYTES:
+                raise OperationError(
+                    "framework",
+                    "artifact exceeds the bounded redaction scan size",
+                    "result_too_large",
+                )
+            stream.seek(0)
+            encoded = stream.read(MAX_ARTIFACT_REDACTION_BYTES + 1)
+            if len(encoded) > MAX_ARTIFACT_REDACTION_BYTES:
+                raise OperationError(
+                    "framework",
+                    "artifact exceeds the bounded redaction scan size",
+                    "result_too_large",
+                )
+            size = len(encoded)
             if offset > size:
                 raise OperationError(
                     "user", "offset is beyond the artifact size", "invalid_offset"
                 )
-            stream.seek(offset)
-            encoded = stream.read(limit)
         except OperationError:
             raise
         except OSError as exc:
@@ -2312,12 +3279,12 @@ class CrucibleOperations:
         finally:
             stream.close()
 
-        text, consumed = self._decode_artifact_slice(
-            encoded, offset, offset + len(encoded) >= size
+        redacted_ranges = self._artifact_redacted_ranges(encoded)
+        text, consumed = self._render_artifact_slice(
+            encoded, redacted_ranges, offset, limit
         )
 
-        def build_result(selected_text: str) -> dict[str, Any]:
-            selected_consumed = len(selected_text.encode("utf-8"))
+        def build_result(selected_text: str, selected_consumed: int) -> dict[str, Any]:
             selected_offset = offset + selected_consumed
             return {
                 "run_path": str(canonical),
@@ -2330,22 +3297,30 @@ class CrucibleOperations:
                 "text": selected_text,
             }
 
-        result = build_result(text)
+        result = build_result(text, consumed)
         if self._mcp_response_size(result, request_id) <= MAX_ARTIFACT_RESPONSE_BYTES:
             return result
-        low, high = 0, len(text)
-        while low < high:
-            middle = (low + high + 1) // 2
-            candidate = build_result(text[:middle])
+        low, high = 0, min(limit, size - offset)
+        best: dict[str, Any] | None = None
+        while low <= high:
+            middle = (low + high) // 2
+            candidate_text, candidate_consumed = self._render_artifact_slice(
+                encoded, redacted_ranges, offset, middle
+            )
+            if candidate_consumed == 0:
+                low = middle + 1
+                continue
+            candidate = build_result(candidate_text, candidate_consumed)
             if self._mcp_response_size(candidate, request_id) <= MAX_ARTIFACT_RESPONSE_BYTES:
-                low = middle
+                best = candidate
+                low = middle + 1
             else:
                 high = middle - 1
-        if low == 0:
+        if best is None:
             raise OperationError(
                 "framework", "artifact response exceeds size limit", "result_too_large"
             )
-        return build_result(text[:low])
+        return best
 
     @staticmethod
     def _is_approved_artifact(relative: str) -> bool:
@@ -2367,10 +3342,12 @@ class CrucibleOperations:
             return False
         return Path(relative).suffix.lower() in _TEXT_ARTIFACT_SUFFIXES
 
-    @staticmethod
-    def _is_sensitive_artifact(relative: str) -> bool:
+    @classmethod
+    def _is_sensitive_artifact(cls, relative: str) -> bool:
         for component in Path(relative).parts:
             name = component.lower()
+            if cls._redact_metadata(component) != component:
+                return True
             if name in _SENSITIVE_ARTIFACT_NAMES:
                 return True
             if Path(name).suffix.lower() in _SENSITIVE_ARTIFACT_SUFFIXES:
@@ -2391,6 +3368,96 @@ class CrucibleOperations:
         return _ARTIFACT_SUFFIX_MEDIA_TYPES.get(
             path.suffix.lower(), "application/octet-stream"
         )
+
+    @classmethod
+    def _artifact_redacted_ranges(cls, encoded: bytes) -> list[tuple[int, int]]:
+        """Find raw-byte ranges to redact before exposing a text artifact."""
+
+        try:
+            text = encoded.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise OperationError(
+                "user", "artifact is not valid UTF-8", "invalid_artifact"
+            ) from exc
+        if not text:
+            return []
+
+        line_count = text.count("\n") + text.count("\r") - text.count("\r\n")
+        if not text.endswith(("\n", "\r")):
+            line_count += 1
+        if line_count > MAX_LOG_REDACTION_LINES:
+            # A very fragmented document exceeds the same bounded scanner
+            # budget as logs; hide it rather than return uninspected lines.
+            return [(0, len(encoded))]
+
+        sensitive_continuation_lines = cls._log_sensitive_shell_continuation_lines(text)
+        ranges: list[tuple[int, int]] = []
+        state = _LogRedactionState()
+        byte_position = 0
+        text_position = 0
+        line_number = 0
+        for separator in re.finditer(r"\r\n|\r|\n", text):
+            content = text[text_position : separator.start()]
+            ending = separator.group()
+            content_bytes = len(content.encode("utf-8"))
+            content_end = byte_position + content_bytes
+            _, state, changed = cls._redact_log_physical_line_with_state(
+                content, state, has_line_ending=True
+            )
+            if changed or line_number in sensitive_continuation_lines:
+                if content_end > byte_position:
+                    ranges.append((byte_position, content_end))
+            byte_position = content_end + len(ending.encode("ascii"))
+            text_position = separator.end()
+            line_number += 1
+
+        if text_position < len(text) or line_number == 0:
+            content = text[text_position:]
+            content_bytes = len(content.encode("utf-8"))
+            content_end = byte_position + content_bytes
+            _, _, changed = cls._redact_log_physical_line_with_state(
+                content, state, has_line_ending=False
+            )
+            if changed or line_number in sensitive_continuation_lines:
+                if content_end > byte_position:
+                    ranges.append((byte_position, content_end))
+        return ranges
+
+    @classmethod
+    def _render_artifact_slice(
+        cls,
+        encoded: bytes,
+        redacted_ranges: list[tuple[int, int]],
+        offset: int,
+        limit: int,
+    ) -> tuple[str, int]:
+        """Render a UTF-8 page while keeping its cursor in original bytes."""
+
+        raw_page = encoded[offset : offset + limit]
+        at_eof = offset + len(raw_page) >= len(encoded)
+        _, consumed = cls._decode_artifact_slice(raw_page, offset, at_eof)
+        if consumed == 0:
+            return "", 0
+
+        page_end = offset + consumed
+        parts: list[str] = []
+        cursor = offset
+        for start, end in redacted_ranges:
+            if end <= cursor:
+                continue
+            if start >= page_end:
+                break
+            overlap_start = max(start, offset)
+            overlap_end = min(end, page_end)
+            if overlap_start >= overlap_end:
+                continue
+            if cursor < overlap_start:
+                parts.append(encoded[cursor:overlap_start].decode("utf-8"))
+            parts.append("[redacted]")
+            cursor = overlap_end
+        if cursor < page_end:
+            parts.append(encoded[cursor:page_end].decode("utf-8"))
+        return "".join(parts), consumed
 
     @staticmethod
     def _decode_artifact_slice(
@@ -2506,7 +3573,13 @@ class CrucibleOperations:
             if path.is_symlink() or not path.is_file():
                 continue
             try:
-                archives.append({"name": path.name, "path": str(path.resolve()), "size": path.stat().st_size})
+                canonical = path.resolve()
+                if (
+                    self._redact_metadata(path.name) != path.name
+                    or self._redact_metadata(str(canonical)) != str(canonical)
+                ):
+                    continue
+                archives.append({"name": path.name, "path": str(canonical), "size": path.stat().st_size})
             except OSError:
                 continue
             if len(archives) >= limit:
@@ -2716,7 +3789,7 @@ class CrucibleOperations:
                 continue
             metadata = self._benchmark_metadata(safe_directory)
             if metadata is not None:
-                entries.append(metadata)
+                entries.append(self._redact_summary(metadata))
         return entries
 
     def list_tools(self, name: str | None = None) -> list[dict[str, Any]]:
@@ -2758,11 +3831,13 @@ class CrucibleOperations:
                 except (OSError, json.JSONDecodeError):
                     pass
             entries.append(
-                {
-                    "name": tool_name,
-                    "description": metadata.get("description"),
-                    "metadata": metadata,
-                }
+                self._redact_summary(
+                    {
+                        "name": tool_name,
+                        "description": metadata.get("description"),
+                        "metadata": metadata,
+                    }
+                )
             )
         return entries
 
@@ -2793,6 +3868,11 @@ class CrucibleOperations:
                 for candidate in candidates:
                     try:
                         if candidate.is_symlink() or not candidate.is_dir(follow_symlinks=False):
+                            continue
+                        if self._redact_metadata(candidate.name) != candidate.name:
+                            # Endpoint names are returned identifiers and may
+                            # otherwise disclose credentials embedded in them.
+                            complete = False
                             continue
                         directory = Path(candidate.path)
                         module_path = directory / f"{candidate.name}.py"
@@ -2870,6 +3950,10 @@ class CrucibleOperations:
                                     "description": description,
                                     "properties": property_names,
                                 }
+                                redacted_schema_info = self._redact_summary(schema_info)
+                                if redacted_schema_info != schema_info:
+                                    complete = False
+                                schema_info = redacted_schema_info
                         except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
                             complete = False
 
@@ -2993,7 +4077,9 @@ class CrucibleOperations:
             raise OperationError(
                 "framework", "CDM result search returned an invalid response", "invalid_result_response"
             )
-        return {"run_ids": run_ids[:limit], "count": min(len(run_ids), limit)}
+        return self._redact_summary(
+            {"run_ids": run_ids[:limit], "count": min(len(run_ids), limit)}
+        )
 
     def get_indexed_result(self, run: str) -> dict[str, Any]:
         """Return structured metadata for one historical CDM run."""
@@ -3004,15 +4090,18 @@ class CrucibleOperations:
         if not matches:
             raise OperationError("user", f"unknown result run: {run}", "not_found")
         prefix = f"/api/v1/run/{encoded_run}"
-        return {
+        periods = self.list_indexed_periods(run)["periods"]
+        tags = self._cdm_request(f"{prefix}/tags").get("tags", [])
+        result = self._redact_summary({
             "run_id": run,
-            "tags": self._cdm_request(f"{prefix}/tags").get("tags", []),
+            "tags": tags,
             "benchmark": self._cdm_request(f"{prefix}/benchmark").get("benchmark"),
             "partial_status": self._cdm_request(f"{prefix}/partial-status"),
             "iterations": self._cdm_request(f"{prefix}/iterations").get("iterations", []),
             "metric_sources": self._cdm_request(f"{prefix}/metric-sources").get("sources", []),
-            "periods": self.list_indexed_periods(run)["periods"],
-        }
+        })
+        result["periods"] = periods
+        return result
 
     def list_indexed_periods(self, run: str) -> dict[str, Any]:
         """List every primary period and sample associated with a run."""
@@ -3024,7 +4113,7 @@ class CrucibleOperations:
         if not isinstance(iterations, list) or not all(isinstance(item, str) for item in iterations):
             raise OperationError("framework", "CDM returned invalid iteration data", "invalid_result_response")
         if not iterations:
-            return {"run_id": run, "periods": []}
+            return self._redact_summary({"run_id": run, "periods": []})
 
         def post(path: str, body: dict[str, Any]) -> dict[str, Any]:
             return self._cdm_request(path, method="POST", body=body)
@@ -3064,7 +4153,7 @@ class CrucibleOperations:
                         "end": period_range.get("end") if isinstance(period_range, dict) else None,
                     }
                 )
-        return {"run_id": run, "periods": periods}
+        return self._redact_summary({"run_id": run, "periods": periods})
 
     def get_indexed_metric(
         self,
@@ -3107,7 +4196,9 @@ class CrucibleOperations:
             "distribution-stats": distribution_stats,
         }
         body.update({key: value for key, value in optional_fields.items() if value is not None})
-        return self._cdm_request("/api/v1/metric-data", method="POST", body=body)
+        return self._redact_metadata(
+            self._cdm_request("/api/v1/metric-data", method="POST", body=body)
+        )
 
     def list_log_sessions(self, limit: int = 100) -> dict[str, Any]:
         """List recent Crucible logger sessions without reading log contents."""
@@ -3207,13 +4298,13 @@ class CrucibleOperations:
                 matched = 0
                 response_bytes = 0
                 complete = True
-                private_key_states: dict[str, str | None] = {}
+                redaction_states: dict[str, _LogRedactionState] = {}
                 for timestamp, line_stream, line in rows:
                     line = line or ""
                     stream_key = str(line_stream).upper()
-                    safe_line, private_key_states[stream_key] = (
-                        self._redact_log_line_with_context(
-                            line, private_key_states.get(stream_key)
+                    safe_line, redaction_states[stream_key], _ = (
+                        self._redact_log_record_with_state(
+                            line, redaction_states.get(stream_key)
                         )
                     )
                     if pattern is not None and pattern.search(line) is None:
@@ -3314,47 +4405,51 @@ class CrucibleOperations:
                 matched = 0
                 response_bytes = 0
                 complete = True
-                private_key_states: dict[tuple[str, str], str | None] = {}
-                private_key_last_ids: dict[tuple[str, str], int] = {}
-                private_key_context_budget = {
-                    "lines": MAX_LOG_PRIVATE_KEY_CONTEXT_LINES,
-                    "bytes": MAX_LOG_PRIVATE_KEY_CONTEXT_BYTES,
+                redaction_states: dict[tuple[str, str], _LogRedactionState] = {}
+                redaction_last_ids: dict[tuple[str, str], int] = {}
+                redaction_context_budget = {
+                    "lines": MAX_LOG_REDACTION_CONTEXT_LINES,
+                    "bytes": MAX_LOG_REDACTION_CONTEXT_BYTES,
                 }
                 for row in connection.execute(sql, params):
                     line = row[3] or ""
                     state_key = (row[0], str(row[2]).upper())
                     if since is not None or until is not None:
-                        if state_key not in private_key_states:
+                        if state_key not in redaction_states:
                             # Seed once per pair from bounded indexed history.
                             # Either timestamp bound can exclude rows that are
                             # still earlier in insertion order when clocks move.
-                            private_key_states[state_key] = (
-                                self._log_private_key_state_before(
+                            redaction_states[state_key] = (
+                                self._log_redaction_state_before(
                                     connection,
                                     row[6],
                                     row[7],
                                     row[8],
-                                    private_key_context_budget,
+                                    redaction_context_budget,
                                 )
                             )
                         else:
-                            private_key_states[state_key] = (
-                                self._log_private_key_state_between(
+                            redaction_states[state_key] = (
+                                self._log_redaction_state_between(
                                     connection,
                                     row[6],
                                     row[7],
-                                    private_key_last_ids[state_key],
+                                    redaction_last_ids[state_key],
                                     row[8],
-                                    private_key_states[state_key],
-                                    private_key_context_budget,
+                                    redaction_states[state_key],
+                                    redaction_context_budget,
                                 )
                             )
-                    safe_line, private_key_states[state_key] = (
-                        self._redact_log_line_with_context(
-                            line, private_key_states.get(state_key)
+                    else:
+                        redaction_states.setdefault(
+                            state_key, _LogRedactionState()
+                        )
+                    safe_line, redaction_states[state_key], _ = (
+                        self._redact_log_record_with_state(
+                            line, redaction_states[state_key]
                         )
                     )
-                    private_key_last_ids[state_key] = row[8]
+                    redaction_last_ids[state_key] = row[8]
                     if pattern.search(line) is None:
                         continue
                     if matched < offset:
@@ -3388,7 +4483,7 @@ class CrucibleOperations:
             raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
         def build_search_result(selected: list[dict[str, Any]], result_complete: bool) -> dict[str, Any]:
             return {
-                "query": query,
+                "query": self._redact_metadata(query),
                 "offset": offset,
                 "next_offset": offset + len(selected),
                 "complete": result_complete,
@@ -3508,8 +4603,16 @@ class CrucibleOperations:
         metadata = self._benchmark_metadata(directory)
         if metadata is None:
             raise OperationError("framework", f"benchmark metadata is unavailable: {name}")
-        metadata["parameter_validation"] = self._benchmark_parameter_validation(directory)
-        return metadata
+        parameter_validation = self._benchmark_parameter_validation(directory)
+        metadata["parameter_validation"] = parameter_validation
+        redacted = self._redact_summary(metadata)
+        redacted_validation = redacted.get("parameter_validation")
+        if (
+            isinstance(redacted_validation, dict)
+            and redacted_validation != parameter_validation
+        ):
+            redacted_validation["complete"] = False
+        return redacted
 
     def validate_run(self, document: Any) -> dict[str, Any]:
         if not isinstance(document, dict):
@@ -3528,7 +4631,8 @@ class CrucibleOperations:
             for benchmark in benchmarks:
                 name = benchmark.get("name") if isinstance(benchmark, dict) else None
                 if not isinstance(name, str) or self._benchmark_directory(name) is None:
-                    benchmark_errors.append(f"benchmark is not installed: {name!r}")
+                    safe_name = self._redact_metadata(name) if isinstance(name, str) else name
+                    benchmark_errors.append(f"benchmark is not installed: {safe_name!r}")
 
         messages = [self._format_validation_error(error) for error in errors]
         messages.extend(benchmark_errors)
@@ -3575,9 +4679,10 @@ class CrucibleOperations:
         # documents before applying expansion limits.  Otherwise a malformed
         # document can be reported as a resource-limit failure merely because
         # it contains a large invalid benchmark list.
+        input_validation = None
         if isinstance(document, dict):
-            validation = self.validate_run(document)
-            if validation.get("valid"):
+            input_validation = self.validate_run(document)
+            if input_validation.get("valid"):
                 self._validate_plan_work(document, max_parameter_sets, max_engine_ids)
 
         rickshaw_dir = self.crucible_home / "subprojects" / "core" / "rickshaw"
@@ -3656,7 +4761,31 @@ class CrucibleOperations:
                     plan["validation"].setdefault("errors", []).extend(
                         integration_errors
                     )
-            return plan
+            if input_validation is not None and not input_validation.get("valid"):
+                plan_validation = plan.get("validation")
+                if isinstance(plan_validation, dict):
+                    plan_validation["valid"] = False
+                    plan_validation["errors"] = [
+                        {"code": "invalid_input", "message": message}
+                        for message in input_validation["errors"]
+                    ]
+            plan_validation = plan.get("validation")
+            errors = (
+                plan_validation.get("errors")
+                if isinstance(plan_validation, dict)
+                else None
+            )
+            if isinstance(errors, list):
+                for error in errors:
+                    if (
+                        isinstance(error, dict)
+                        and error.get("code") == "expansion_failed"
+                    ):
+                        # Multiplex exception text can contain rejected input
+                        # values without a sensitive field name. Keep the
+                        # actionable error category, but not the raw detail.
+                        error["message"] = "parameter expansion failed"
+            return self._redact_summary(plan)
         except OperationError:
             raise
         except ImportError as exc:
@@ -3664,7 +4793,9 @@ class CrucibleOperations:
                 "framework", "Multiplex expansion library is unavailable", "planner_unavailable"
             ) from exc
         except ValueError as exc:
-            raise OperationError("user", str(exc), "invalid_plan") from exc
+            raise OperationError(
+                "user", "run planning failed validation", "invalid_plan"
+            ) from exc
         except OSError as exc:
             raise OperationError(
                 "framework", "run planner is unavailable", "planner_unavailable"
@@ -3862,12 +4993,9 @@ class CrucibleOperations:
                 "message": f"{invalid_name_count} tool-params entries have no valid tool name",
             })
         if unknown_tools:
-            names = sorted(unknown_tools)
-            preview = ", ".join(names[:8])
-            suffix = " and more" if len(names) > 8 else ""
             errors.append({
                 "code": "not_found",
-                "message": f"tools are not installed: {preview}{suffix}",
+                "message": f"{len(unknown_tools)} requested tool(s) are not installed",
             })
 
         seen_tool_ids: set[str] = set()
@@ -3906,14 +5034,14 @@ class CrucibleOperations:
                     invalid_entry_indexes.add(index)
                     errors.append({
                         "code": "invalid_tool_params",
-                        "message": f"tool id {tool_id!r} must start with {tool_name}-",
+                        "message": "tool id must start with its tool name and a hyphen",
                     })
                     continue
                 if tool_id in seen_tool_ids:
                     invalid_entry_indexes.add(index)
                     errors.append({
                         "code": "invalid_tool_params",
-                        "message": f"duplicate tool id: {tool_id}",
+                        "message": "tool ids must be unique",
                     })
                     continue
                 seen_tool_ids.add(tool_id)
@@ -3961,10 +5089,10 @@ class CrucibleOperations:
                     if expanded is None:
                         raise ValueError("tool parameters produced no effective set")
                     params = expanded
-                except (Exception, SystemExit) as exc:
+                except (Exception, SystemExit):
                     errors.append({
                         "code": "invalid_tool_params",
-                        "message": f"tool {tool_name} parameter expansion failed: {exc}",
+                        "message": f"tool {tool_name} parameter expansion failed",
                     })
                     continue
             if "params" in entry or has_multiplex:
@@ -4075,7 +5203,7 @@ class CrucibleOperations:
             if not isinstance(endpoint_type, str) or endpoint_type not in installed:
                 errors.append({
                     "code": "not_found",
-                    "message": f"endpoint type is not installed: {endpoint_type!r}",
+                    "message": "endpoint type is not installed",
                 })
                 continue
 
@@ -4163,7 +5291,10 @@ class CrucibleOperations:
                 "message": "tool-params schema is unavailable",
             }]
         return [
-            {"code": "invalid_tool_params", "message": error.message}
+            {
+                "code": "invalid_tool_params",
+                "message": self._format_validation_error(error),
+            }
             for error in errors[:32]
         ]
 
@@ -4733,7 +5864,24 @@ class CrucibleOperations:
                 result["metadata"] = metadata
         return result
 
-    @staticmethod
-    def _format_validation_error(error: Any) -> str:
-        path = ".".join(str(item) for item in error.path)
-        return f"{path}: {error.message}" if path else error.message
+    @classmethod
+    def _format_validation_error(cls, error: Any) -> str:
+        path_parts = []
+        for item in error.path:
+            if isinstance(item, str):
+                item = cls._redact_metadata(item)
+                if len(item) > 128:
+                    item = item[:128] + "…"
+            path_parts.append(str(item))
+        path = ".".join(path_parts)
+        # jsonschema's human-readable message interpolates the rejected instance
+        # value. Run files can contain credentials, so expose only the schema
+        # keyword and location rather than echoing that value.
+        validator = (
+            error.validator
+            if isinstance(error.validator, str)
+            and re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", error.validator)
+            else "schema"
+        )
+        detail = f"does not satisfy the {validator} constraint"
+        return f"{path}: {detail}" if path else detail

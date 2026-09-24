@@ -100,6 +100,22 @@ class TestServer(unittest.TestCase):
         self.assertEqual(payload, b"")
         self.assertEqual(headers["Allow"], "POST")
 
+    def test_invalid_content_length_does_not_echo_header_value(self):
+        secret = "ghp_" + "A" * 36
+
+        status, payload, _ = self.request_raw(
+            "POST",
+            "/mcp",
+            token=self.token,
+            extra_headers={"Content-Length": secret},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertNotIn(secret, payload.decode("utf-8"))
+        self.assertEqual(
+            json.loads(payload)["error"]["message"], "invalid request body"
+        )
+
     def test_mcp_origin_validation_allows_local_and_rejects_remote_origins(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
         for origin in (
@@ -212,6 +228,113 @@ class TestServer(unittest.TestCase):
                     max_response_bytes=1048576,
                     request_id=request_id,
                 )
+
+    def test_tool_schema_errors_do_not_echo_rejected_values(self):
+        secret = "tool-argument-secret"
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_metric",
+                "arguments": {
+                    "run": "run-1",
+                    "source": "fio",
+                    "type": "IOPS",
+                    "resolution": f"password={secret}",
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+        self.assertNotIn(secret, json.dumps(payload))
+        self.assertIn("resolution", payload["error"]["message"])
+        self.assertIn("type constraint", payload["error"]["message"])
+
+    def test_operation_errors_redact_echoed_credential_values(self):
+        secret = "operation-error-secret"
+        self.server.operations.add_local_run_tags = Mock(
+            side_effect=OperationError("user", f"invalid tag: password={secret}", "invalid_tag")
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {
+                "name": "add_local_run_tags",
+                "arguments": {"run_path": "/approved/run", "tags": ["ignored"]},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertNotIn(secret, payload["error"]["message"])
+
+    def test_operation_error_redaction_limit_returns_safe_fallback(self):
+        secret = "oversized-error-secret"
+        message = "x" * 20000 + f" password={secret}"
+        self.server.operations.add_local_run_tags = Mock(
+            side_effect=OperationError("user", message, "invalid_tag")
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {
+                "name": "add_local_run_tags",
+                "arguments": {"run_path": "/approved/run", "tags": ["ignored"]},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertNotIn(secret, payload["error"]["message"])
+        self.assertIn("omitted for safety", payload["error"]["message"])
+
+    def test_job_status_redacts_credential_like_error_message(self):
+        secret = "job-error-secret"
+        job = Job(
+            mcp_job_id="failed-job",
+            idempotency_key="password=job-key-secret",
+            request_hash="hash",
+            state=JobState.FAILED,
+            result_status=ResultStatus.UNAVAILABLE,
+            error_category="infrastructure",
+            error_message=f"could not stage input: password={secret}",
+            run_directory="/var/lib/crucible/run/ghp_" + "A" * 36,
+        )
+        self.server.run_manager = Mock()
+        self.server.run_manager.refresh_result_status.return_value = job
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_status",
+                "arguments": {"mcp_job_id": "failed-job"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        job_status = payload["result"]["structuredContent"]
+        self.assertNotIn(secret, json.dumps(job_status))
+        self.assertNotIn("job-key-secret", json.dumps(job_status))
+        self.assertNotIn("ghp_" + "A" * 36, json.dumps(job_status))
+        self.assertEqual(
+            job_status["idempotency_key"], "password=[redacted]"
+        )
+        self.assertEqual(
+            job_status["error_message"], "could not stage input: password=[redacted]"
+        )
 
     def test_start_run_passes_plan_digest_and_returns_plan_summary(self):
         ensure_services = Mock()
@@ -853,13 +976,22 @@ class TestServer(unittest.TestCase):
 
     def test_get_run_logs_redacts_credentials_and_preserves_raw_offsets(self):
         raw_text = (
+            "worker initialized before the run\n"
             "crucible run --roadblock-password=roadblock-secret "
             "--token token-secret --bearer=bearer-secret "
             "--credential credential-secret\n"
             "Authorization: Bearer authorization-secret\n"
+            'crucible run --token="\n'
+            "quoted-shell-secret\n"
+            'closing quote"\n'
+            "TOKEN=$(cat <<EOF\n"
+            "server-heredoc-secret\n"
+            "EOF\n"
+            "{\n  \"password\":\n  \"json-secret\"\n}\n"
             "-----BEGIN OPENSSH PRIVATE KEY-----\n"
             "private-key-material\n"
             "-----END OPENSSH PRIVATE KEY-----\n"
+            "worker completed teardown successfully\n"
         )
         raw_offset = len(raw_text.encode("utf-8"))
         self.server.run_manager = Mock()
@@ -891,6 +1023,9 @@ class TestServer(unittest.TestCase):
             "bearer-secret",
             "credential-secret",
             "authorization-secret",
+            "quoted-shell-secret",
+            "server-heredoc-secret",
+            "json-secret",
             "private-key-material",
         ):
             with self.subTest(secret=secret):
@@ -898,6 +1033,10 @@ class TestServer(unittest.TestCase):
                 self.assertNotIn(secret, payload["result"]["content"][0]["text"])
                 self.assertNotIn(secret, serialized)
         self.assertEqual(structured["next_offset"], raw_offset)
+        self.assertTrue(structured["redacted"])
+        self.assertGreaterEqual(structured["redacted_lines"], 5)
+        self.assertIn("worker initialized before the run", structured["text"])
+        self.assertIn("worker completed teardown successfully", structured["text"])
 
     def test_logger_tools_redact_credentials_in_mcp_content_and_structure(self):
         database = self.token_path.parent / "logger.db"
@@ -1019,6 +1158,35 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32602)
 
+    def test_get_run_summary_passes_request_id_to_response_bound(self):
+        self.server.run_manager = Mock()
+        expected = {
+            "job_id": "job-1",
+            "result_status": "available",
+            "summary": {"run": "complete"},
+        }
+        self.server.run_manager.get_summary.return_value = expected
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": "summary-request",
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_summary",
+                "arguments": {"mcp_job_id": "job-1"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload["result"]["structuredContent"],
+            expected,
+        )
+        self.server.run_manager.get_summary.assert_called_once_with(
+            "job-1", request_id="summary-request"
+        )
+
     def test_tool_audit_records_tool_name_and_generated_job_id(self):
         audit_path = Path(self.directory.name) / "audit.jsonl"
         self.server.audit = AuditLogger(audit_path)
@@ -1069,6 +1237,32 @@ class TestOriginValidation(unittest.TestCase):
         handler.send_header = Mock()
         handler.end_headers = Mock()
         return handler
+
+    def test_audit_write_redacts_client_controlled_operation_and_job_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit_path = root / "audit.jsonl"
+            handler = self.handler()
+            handler.client_address = ("127.0.0.1", 12345)
+            handler.server.audit = AuditLogger(audit_path)
+            handler.server.operations = CrucibleOperations(
+                root, InputPolicy([root / "inputs"])
+            )
+            operation_secret = "notification-operation-secret"
+            job_secret = "ghp_" + "A" * 36
+
+            MCPHandler._audit(
+                handler,
+                f"password={operation_secret}",
+                "denied",
+                job_id=job_secret,
+            )
+
+            record = json.loads(audit_path.read_text(encoding="utf-8"))
+            self.assertNotIn(operation_secret, json.dumps(record))
+            self.assertNotIn(job_secret, json.dumps(record))
+            self.assertEqual(record["operation"], "password=[redacted]")
+            self.assertEqual(record["job_id"], "[redacted]")
 
     def test_wildcard_bind_accepts_allowlisted_origin_on_another_port(self):
         handler = self.handler()

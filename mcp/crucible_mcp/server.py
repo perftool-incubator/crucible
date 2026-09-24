@@ -88,7 +88,7 @@ TOOL_DEFINITIONS = (
     {"name": "crucible_info", "description": "Describe Crucible MCP capabilities.", "inputSchema": _EMPTY_INPUT},
     {
         "name": "list_tools",
-        "description": "List installed Crucible tools and their metadata.",
+        "description": "List installed Crucible tools and their credential-redacted metadata.",
         "inputSchema": {
             "type": "object",
             "properties": {"name": {"type": "string", "minLength": 1}},
@@ -99,6 +99,7 @@ TOOL_DEFINITIONS = (
         "name": "list_endpoints",
         "description": (
             "List installed endpoint types, schemas, and coarse capabilities. "
+            "Credential-like text in schema descriptions is redacted. "
             "This does not discover configured or reachable deployment targets; "
             "the caller must supply target-specific endpoint configuration."
         ),
@@ -106,7 +107,10 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "list_active_runs",
-        "description": "List active MCP jobs, including runs and maintenance operations.",
+        "description": (
+            "List active MCP jobs, including runs and maintenance operations; "
+            "credential-like text in job metadata and errors is redacted."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -116,7 +120,7 @@ TOOL_DEFINITIONS = (
             "additionalProperties": False,
         },
     },
-    {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
+    {"name": "list_benchmarks", "description": "List installed Crucible benchmarks and credential-redacted metadata.", "inputSchema": _EMPTY_INPUT},
     {
         "name": "list_local_runs",
         "description": "List local run artifacts from approved run roots.",
@@ -131,7 +135,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_local_run_summary",
-        "description": "Read a completed result summary from an approved local run artifact.",
+        "description": "Read a completed result summary with credential-like fields redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {"run_path": {"type": "string", "minLength": 1}},
@@ -141,7 +145,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_local_run_metadata",
-        "description": "Read rickshaw run metadata from an approved local run artifact.",
+        "description": "Read rickshaw run metadata from an approved local run artifact with credential-like fields redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {"run_path": {"type": "string", "minLength": 1}},
@@ -171,7 +175,10 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_artifact",
-        "description": "Read a bounded UTF-8 slice of an approved local run artifact.",
+        "description": (
+            "Read a bounded, credential-redacted UTF-8 slice of an approved local run artifact. "
+            "Offsets refer to raw file bytes; artifacts over 8 MiB are rejected."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -229,7 +236,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_indexed_result",
-        "description": "Get structured metadata for a historical CDM run.",
+        "description": "Get structured metadata for a historical CDM run; credential-like tag values are redacted.",
         "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
     },
     {
@@ -239,7 +246,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_indexed_metric",
-        "description": "Query metric data for a historical CDM run.",
+        "description": "Query metric data for a historical CDM run; credential-like text fields are redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -273,7 +280,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "search_logs",
-        "description": "Search Crucible logger lines across sessions.",
+        "description": "Search Crucible logger lines across sessions; returned matches, commands, and query text are credential-redacted.",
         "inputSchema": {"type": "object", "properties": {
             "query": {"type": "string", "minLength": 1, "maxLength": 256},
             "session_id": {"type": "string", "minLength": 1},
@@ -286,7 +293,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "describe_benchmark",
-        "description": "Describe an installed benchmark, including accepted parameter validation rules when available.",
+        "description": "Describe an installed benchmark with credential-like metadata redacted, including accepted parameter validation rules when available.",
         "inputSchema": {
             "type": "object",
             "properties": {"name": {"type": "string", "minLength": 1}},
@@ -296,7 +303,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "validate_run",
-        "description": "Validate an inline run document or approved run-file path.",
+        "description": "Validate an inline run document or approved run-file path without echoing rejected values.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -359,7 +366,10 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_status",
-        "description": "Get lifecycle and result readiness for an MCP run.",
+        "description": (
+            "Get lifecycle and result readiness for an MCP run; "
+            "credential-like text in job metadata and errors is redacted."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {"mcp_job_id": {"type": "string", "minLength": 1}},
@@ -369,7 +379,11 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_logs",
-        "description": "Retrieve bounded runner logs.",
+        "description": (
+            "Retrieve bounded runner logs with raw-byte pagination. Sensitive log lines "
+            "are redacted while unrelated lines are preserved; redacted and redacted_lines "
+            "indicate page-level redaction."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -383,7 +397,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_summary",
-        "description": "Retrieve a completed run summary when results are ready.",
+        "description": "Retrieve a completed run summary with credential-like fields redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {"mcp_job_id": {"type": "string", "minLength": 1}},
@@ -421,7 +435,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "list_local_run_tags",
-        "description": "List tags from an approved local run result.",
+        "description": "List tags from an approved local run result with credential-like values redacted.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1}},
@@ -430,7 +444,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "add_local_run_tags",
-        "description": "Add or replace tags on an approved local run result.",
+        "description": "Add or replace tags on an approved local run result; returned credential-like values are redacted.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1},
@@ -440,7 +454,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "remove_local_run_tags",
-        "description": "Remove named tags from an approved local run result.",
+        "description": "Remove named tags from an approved local run result; returned credential-like values are redacted.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1},
@@ -450,7 +464,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "search_documentation",
-        "description": "Search curated user-facing Crucible documentation.",
+        "description": "Search curated user-facing Crucible documentation; credential-like values in the returned query are redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -505,8 +519,11 @@ class TLSIPv6ThreadingHTTPServer(TLSHTTPServerMixin, IPv6ThreadingHTTPServer):
     """IPv6 threaded HTTPS server with worker-bound TLS handshakes."""
 
 
-def _job_status(job: Job) -> dict[str, Any]:
-    return job.as_dict()
+def _job_status(job: Job, operations: CrucibleOperations | None = None) -> dict[str, Any]:
+    value = job.as_dict()
+    if operations is not None:
+        value = operations._redact_summary(value)
+    return value
 
 
 def _encode_active_cursor(job: Job) -> str:
@@ -645,8 +662,12 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._empty(202)
                 return
             response = self._dispatch(request)
-        except (ValueError, json.JSONDecodeError) as exc:
-            response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": str(exc)}}
+        except (ValueError, json.JSONDecodeError):
+            response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "invalid request body"},
+            }
         operation, job_id = self._audit_context(request, response)
         self._audit(
             operation,
@@ -713,6 +734,26 @@ class MCPHandler(BaseHTTPRequestHandler):
     def _audit(self, operation: str, outcome: str, job_id: str | None = None) -> None:
         audit = getattr(self.server, "audit", None)
         if audit is not None:
+            operations = getattr(self.server, "operations", None)
+            redactor = getattr(operations, "redact_log_text", None)
+            if not isinstance(operation, str):
+                operation = "invalid"
+            if callable(redactor):
+                operation = redactor(operation)
+                job_id = redactor(job_id) if isinstance(job_id, str) else None
+            else:
+                known_operations = {
+                    "health",
+                    "mcp",
+                    "initialize",
+                    "ping",
+                    "tools/list",
+                    "tools/call",
+                    "resources/list",
+                    "resources/read",
+                } | set(_TOOL_SCHEMAS)
+                operation = operation if operation in known_operations else "unknown"
+                job_id = None
             audit.record(
                 operation=operation,
                 outcome=outcome,
@@ -817,7 +858,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             return self._error(request_id, -32602, "unknown tool")
         validation_error = next(iter(Draft201909Validator(schema).iter_errors(arguments)), None)
         if validation_error is not None:
-            return self._error(request_id, -32602, f"invalid arguments: {validation_error.message}")
+            detail = self.server.operations._format_validation_error(validation_error)
+            return self._error(request_id, -32602, f"invalid arguments: {detail}")
         try:
             # Service startup can take minutes; reject an invalid query window first.
             if (
@@ -849,7 +891,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                     jobs = jobs[:limit]
                 next_cursor = _encode_active_cursor(jobs[-1]) if not complete else None
                 value = {
-                    "jobs": [_job_status(job) for job in jobs],
+                    "jobs": [_job_status(job, self.server.operations) for job in jobs],
                     "cursor": cursor,
                     "next_cursor": next_cursor,
                     "complete": complete,
@@ -902,7 +944,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                 job, created = self.server.run_manager.submit_archive_operation(
                     arguments["idempotency_key"], name, path
                 )
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name == "list_indexed_results":
                 value = self.server.operations.list_indexed_results(
                     **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}
@@ -1001,11 +1043,11 @@ class MCPHandler(BaseHTTPRequestHandler):
                     )
                 else:
                     return self._error(request_id, -32602, "start_run requires document or path")
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name == "get_run_status":
                 try:
                     job = self.server.run_manager.refresh_result_status(arguments["mcp_job_id"])
-                    value = _job_status(job)
+                    value = _job_status(job, self.server.operations)
                     value["results_ready"] = value["result_status"] == "available"
                 except KeyError as exc:
                     return self._error(request_id, -32602, str(exc))
@@ -1017,8 +1059,16 @@ class MCPHandler(BaseHTTPRequestHandler):
                         value = self.server.run_manager.get_logs(
                             arguments["mcp_job_id"], log_offset, read_limit
                         )
-                        value["text"] = self.server.operations.redact_log_text(
-                            value.get("text", "")
+                        value["text"], additional_redacted_lines = (
+                            self.server.operations.redact_log_text_with_stats(
+                                value.get("text", "")
+                            )
+                        )
+                        value["redacted_lines"] = max(
+                            0, int(value.get("redacted_lines", 0))
+                        ) + additional_redacted_lines
+                        value["redacted"] = bool(value.get("redacted")) or bool(
+                            additional_redacted_lines
                         )
                         if self.server.operations._mcp_response_size(
                             value, request_id
@@ -1036,7 +1086,9 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "get_run_summary":
                 if "mcp_job_id" not in arguments:
                     return self._error(request_id, -32602, "mcp_job_id is required")
-                value = self.server.run_manager.get_summary(arguments["mcp_job_id"])
+                value = self.server.run_manager.get_summary(
+                    arguments["mcp_job_id"], request_id=request_id
+                )
             elif name in {"postprocess_local_run", "index_local_run"}:
                 if "run_path" in arguments:
                     processing_path = Path(arguments["run_path"])
@@ -1052,12 +1104,12 @@ class MCPHandler(BaseHTTPRequestHandler):
                     "postprocess" if name == "postprocess_local_run" else "index",
                     processing_path,
                 )
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name == "delete_indexed_result":
                 job, created = self.server.run_manager.submit_indexed_deletion(
                     arguments["idempotency_key"], arguments["run"]
                 )
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name in {"list_local_run_tags", "add_local_run_tags", "remove_local_run_tags"}:
                 if "run_path" in arguments:
                     tag_path = Path(arguments["run_path"])
@@ -1081,11 +1133,19 @@ class MCPHandler(BaseHTTPRequestHandler):
             else:
                 return self._error(request_id, -32602, "unknown tool")
         except JobConflictError as exc:
-            return self._error(request_id, -32009, str(exc))
+            return self._error(request_id, -32009, self.server.operations.redact_log_text(str(exc)))
         except JobNotFoundError as exc:
-            return self._error(request_id, -32004, str(exc))
+            return self._error(request_id, -32004, self.server.operations.redact_log_text(str(exc)))
         except OperationError as exc:
-            return self._error(request_id, -32000, json.dumps(exc.as_dict()))
+            try:
+                error = self.server.operations._redact_summary(exc.as_dict())
+            except OperationError:
+                error = {
+                    "category": exc.category,
+                    "code": exc.code,
+                    "message": "operation failed; error details omitted for safety",
+                }
+            return self._error(request_id, -32000, json.dumps(error))
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": json.dumps(value)}], "structuredContent": value}}
 
     @staticmethod

@@ -91,6 +91,121 @@ class TestCrucibleOperations(unittest.TestCase):
             }],
         })
 
+    def test_benchmark_discovery_redacts_credential_metadata(self):
+        benchmark = self.root / "subprojects" / "benchmarks" / "example"
+        secret = "benchmark-metadata-secret"
+        (benchmark / "benchmark-metadata.json").write_text(
+            json.dumps({
+                "description": f"password={secret}",
+                "metadata": {"credentials": {"token": secret}},
+            }),
+            encoding="utf-8",
+        )
+        pattern_secret = "pattern-value-secret"
+        (benchmark / "multiplex.json").write_text(
+            json.dumps({
+                "validations": {
+                    "literal_password": {
+                        "args": ["password"],
+                        "vals": f"^password={pattern_secret}$",
+                    }
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        listed = self.operations.list_benchmarks()
+        described = self.operations.describe_benchmark("example")
+
+        for result in (listed, described):
+            self.assertNotIn(secret, json.dumps(result))
+            self.assertIn("[redacted]", json.dumps(result))
+        self.assertNotIn(pattern_secret, json.dumps(described))
+        self.assertFalse(described["parameter_validation"]["complete"])
+
+    def test_documentation_search_does_not_echo_credential_query_values(self):
+        secret = "documentation-query-secret"
+
+        result = self.operations.search_documentation(f"password={secret}")
+
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertEqual(result["query"], "password=[redacted]")
+
+    def test_plan_schema_errors_do_not_echo_rejected_values(self):
+        schema_path = (
+            self.root
+            / "subprojects"
+            / "core"
+            / "rickshaw"
+            / "schema"
+            / "run-file.json"
+        )
+        schema_path.write_text(
+            json.dumps({
+                "type": "object",
+                "properties": {
+                    "benchmarks": {"type": "array"},
+                    "run-params": {"type": "object"},
+                },
+                "required": ["benchmarks"],
+            }),
+            encoding="utf-8",
+        )
+        secret = "unmarked-rejected-secret"
+        planner_error = {
+            "validation": {
+                "valid": False,
+                "errors": [{
+                    "code": "invalid_input",
+                    "message": f"{secret!r} is not of type 'object'",
+                }],
+                "warnings": [],
+            },
+            "benchmarks": [],
+            "tools": {"entries": []},
+        }
+
+        class FakeLimits:
+            def __init__(self, **_kwargs):
+                pass
+
+        class FakePlanner:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def plan(self, *_args):
+                return planner_error
+
+        rickshaw_dir = self.root / "subprojects" / "core" / "rickshaw"
+        multiplex_dir = self.root / "subprojects" / "core" / "multiplex"
+        modules = {
+            "rickshaw_lib.run_planner": SimpleNamespace(
+                __file__=str(rickshaw_dir / "rickshaw_lib" / "run_planner.py"),
+                PlannerLimits=FakeLimits,
+                RunPlanner=FakePlanner,
+            ),
+            "multiplex": SimpleNamespace(
+                __file__=str(multiplex_dir / "multiplex.py"),
+                expand_parameters=lambda *_args, **_kwargs: [],
+                apply_flat_params=lambda *_args, **_kwargs: [],
+            ),
+        }
+
+        with patch("importlib.import_module", side_effect=modules.__getitem__):
+            plan = self.operations._build_run_plan({
+                "benchmarks": [],
+                "run-params": secret,
+            })
+
+        self.assertNotIn(secret, json.dumps(plan))
+        self.assertEqual(
+            plan["validation"]["errors"],
+            [{
+                "code": "invalid_input",
+                "message": "run-params: does not satisfy the type constraint",
+            }],
+        )
+
     def test_parameter_value_failure_has_safe_structured_guidance(self):
         plan = {
             "validation": {
@@ -415,6 +530,23 @@ class TestCrucibleOperations(unittest.TestCase):
         )
         self.assertEqual(self.operations.list_tools("missing"), [])
 
+    def test_tool_discovery_redacts_credential_metadata(self):
+        tool_repository = self.root / "repos" / "tool-credential-test"
+        tool_repository.mkdir(parents=True)
+        (tool_repository / "rickshaw.json").write_text('{"tool":"credential-test"}', encoding="utf-8")
+        secret = "tool-metadata-secret"
+        (tool_repository / "tool-metadata.json").write_text(
+            json.dumps({"description": f"token: {secret}"}), encoding="utf-8"
+        )
+        tool = self.root / "subprojects" / "tools" / "credential-test"
+        tool.parent.mkdir(parents=True)
+        tool.symlink_to(tool_repository, target_is_directory=True)
+
+        result = self.operations.list_tools()
+
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertIn("[redacted]", json.dumps(result))
+
     def test_plan_input_resolution_filters_disabled_and_unknown_tools(self):
         tool = self.root / "subprojects" / "tools" / "sysstat"
         tool.mkdir(parents=True)
@@ -452,10 +584,43 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(plan["tools"]["entries"], [{"tool": "sysstat"}])
         self.assertTrue(any(error["code"] == "not_found" for error in errors))
         self.assertFalse(any("disabled-unknown" in error["message"] for error in errors))
+        self.assertFalse(any("missing" in error["message"] for error in errors))
+
+    def test_tool_parameter_expansion_errors_do_not_echo_rejected_values(self):
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.mkdir(parents=True)
+        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        (tool / "multiplex.json").write_text("{}", encoding="utf-8")
+        secret = "unmarked-multiplex-rejection-secret"
+        document = {
+            "endpoints": [],
+            "tool-params": [{"tool": "sysstat", "params": [{"val": secret}]}],
+        }
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+        multiplex = SimpleNamespace(
+            __name__="test_multiplex",
+            apply_flat_params=Mock(side_effect=ValueError(secret)),
+        )
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, multiplex, 100
+        )
+
+        self.assertNotIn(secret, json.dumps(errors))
+        self.assertEqual(errors, [{
+            "code": "invalid_tool_params",
+            "message": "tool sysstat parameter expansion failed",
+        }])
 
     def test_plan_input_resolution_marks_unknown_endpoint_types(self):
+        secret = "unmarked-endpoint-secret"
         document = {
-            "endpoints": [{"type": "bogus"}],
+            "endpoints": [{"type": secret}],
             "tool-params": [],
         }
         plan = {
@@ -469,8 +634,35 @@ class TestCrucibleOperations(unittest.TestCase):
             document, plan, Mock(), 100
         )
 
-        self.assertTrue(any("bogus" in error["message"] for error in errors))
+        self.assertNotIn(secret, json.dumps(errors))
+        self.assertTrue(any("endpoint type is not installed" == error["message"] for error in errors))
         self.assertEqual(plan["topology"]["confidence"], "unknown")
+
+    def test_duplicate_tool_ids_do_not_echo_user_values(self):
+        tool = self.root / "subprojects" / "tools" / "sysstat"
+        tool.mkdir(parents=True)
+        (tool / "rickshaw.json").write_text('{"tool":"sysstat"}', encoding="utf-8")
+        secret = "unmarked-tool-id-secret"
+        document = {
+            "endpoints": [],
+            "tool-params": [
+                {"tool": "sysstat", "id": f"sysstat-{secret}"},
+                {"tool": "sysstat", "id": f"sysstat-{secret}"},
+            ],
+        }
+        plan = {
+            "validation": {"valid": True, "errors": []},
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "topology": {"confidence": "derived", "warnings": []},
+            "limits": {"truncated": False},
+        }
+
+        errors = self.operations._validate_and_resolve_plan_inputs(
+            document, plan, Mock(), 100
+        )
+
+        self.assertNotIn(secret, json.dumps(errors))
+        self.assertTrue(any(error["message"] == "tool ids must be unique" for error in errors))
 
     def test_plan_input_resolution_validates_endpoint_schema(self):
         endpoints = self.root / "subprojects" / "core" / "rickshaw" / "endpoints"
@@ -548,6 +740,17 @@ class TestCrucibleOperations(unittest.TestCase):
                 "message": "tool-params schema is unavailable",
             }],
         )
+
+    def test_tool_params_schema_errors_do_not_echo_rejected_values(self):
+        secret = "unmarked-tool-parameter-secret"
+
+        errors = self.operations._validate_tool_params_schema([secret])
+
+        self.assertEqual(errors, [{
+            "code": "invalid_tool_params",
+            "message": "0: does not satisfy the type constraint",
+        }])
+        self.assertNotIn(secret, json.dumps(errors))
 
     def test_plan_input_resolution_preserves_default_tool_truncation(self):
         tool = self.root / "subprojects" / "tools" / "sysstat"
@@ -687,7 +890,8 @@ class TestCrucibleOperations(unittest.TestCase):
             document, plan, Mock(), 1
         )
 
-        self.assertTrue(any("missing" in error["message"] for error in errors))
+        self.assertTrue(any("1 requested tool(s) are not installed" == error["message"] for error in errors))
+        self.assertNotIn("missing", json.dumps(errors))
         self.assertEqual(plan["tools"]["entries"], [{"tool": "sysstat"}])
         self.assertTrue(plan["tools"]["truncated"])
 
@@ -703,7 +907,7 @@ class TestCrucibleOperations(unittest.TestCase):
         (schemas / "remotehosts.json").write_text(
             json.dumps({
                 "title": "Remotehosts Endpoint",
-                "description": "Deploy engines over SSH.",
+                "description": "Deploy engines over SSH using password=endpoint-secret.",
                 "properties": {"hosts": {}, "user": {}},
             }),
             encoding="utf-8",
@@ -727,11 +931,19 @@ class TestCrucibleOperations(unittest.TestCase):
         (missing_schema / "missing-schema.py").write_text(
             "def validate():\n    pass\n", encoding="utf-8"
         )
+        secret_name = "ghp_" + "A" * 36
+        secret_endpoint = endpoints / secret_name
+        secret_endpoint.mkdir()
+        (secret_endpoint / f"{secret_name}.py").write_text(
+            "def validate():\n    pass\n", encoding="utf-8"
+        )
+        (schemas / f"{secret_name}.json").write_text("{}", encoding="utf-8")
 
         result = self.operations.list_endpoints()
 
         self.assertEqual(result["count"], 4)
         self.assertFalse(result["complete"])
+        self.assertNotIn(secret_name, json.dumps(result))
         remotehosts = next(item for item in result["endpoints"] if item["name"] == "remotehosts")
         self.assertEqual(
             remotehosts["implementation"],
@@ -742,10 +954,11 @@ class TestCrucibleOperations(unittest.TestCase):
             {
                 "path": "subprojects/core/rickshaw/schema/remotehosts.json",
                 "title": "Remotehosts Endpoint",
-                "description": "Deploy engines over SSH.",
+                "description": "Deploy engines over SSH using password=[redacted]",
                 "properties": ["hosts", "user"],
             },
         )
+        self.assertNotIn("endpoint-secret", json.dumps(remotehosts["schema"]))
         self.assertEqual(
             remotehosts["capabilities"],
             ["validate", "engine_deployment", "test_lifecycle", "cleanup"],
@@ -781,6 +994,24 @@ class TestCrucibleOperations(unittest.TestCase):
             {"endpoints": [], "count": 0, "complete": True},
         )
 
+    def test_list_endpoints_marks_credential_shaped_name_omission_incomplete(self):
+        endpoint_root = (
+            self.root / "subprojects" / "core" / "rickshaw" / "endpoints"
+        )
+        schema_root = self.root / "subprojects" / "core" / "rickshaw" / "schema"
+        token = "ghp_" + "A" * 36
+        endpoint = endpoint_root / token
+        endpoint.mkdir(parents=True)
+        (endpoint / f"{token}.py").write_text(
+            "def validate():\n    pass\n", encoding="utf-8"
+        )
+        (schema_root / f"{token}.json").write_text("{}", encoding="utf-8")
+
+        result = self.operations.list_endpoints()
+
+        self.assertEqual(result, {"endpoints": [], "count": 0, "complete": False})
+        self.assertNotIn(token, json.dumps(result))
+
     def test_list_indexed_results_queries_cdm_with_bounded_filters(self):
         response = Mock()
         response.__enter__ = lambda value: response
@@ -792,24 +1023,52 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result, {"run_ids": ["run-1"], "count": 1})
         self.assertIn("benchmark=fio", request.call_args.args[0].full_url)
 
+    def test_list_indexed_results_redacts_credential_shaped_ids(self):
+        token = "ghp_" + "A" * 36
+        with patch.object(
+            self.operations,
+            "_cdm_request",
+            return_value={"runIds": [token, "ordinary-run"]},
+        ):
+            result = self.operations.list_indexed_results()
+
+        self.assertNotIn(token, json.dumps(result))
+        self.assertEqual(result["run_ids"], ["[redacted]", "ordinary-run"])
+
     def test_get_indexed_result_assembles_cdm_metadata(self):
+        token = "ghp_" + "A" * 36
         payloads = {
-            "/api/v1/run/run-1/tags": {"tags": ["nightly"]},
-            "/api/v1/run/run-1/benchmark": {"benchmark": "fio"},
+            "/api/v1/run/run-1/tags": {
+                "tags": ["nightly", "password:cdm-tag-secret", token]
+            },
+            "/api/v1/run/run-1/benchmark": {"benchmark": token},
             "/api/v1/run/run-1/partial-status": {"status": "complete"},
-            "/api/v1/run/run-1/iterations": {"iterations": [1, 2]},
-            "/api/v1/run/run-1/metric-sources": {"sources": ["latency"]},
+            "/api/v1/run/run-1/iterations": {"iterations": [token]},
+            "/api/v1/run/run-1/metric-sources": {"sources": [token]},
         }
         with patch.object(self.operations, "list_indexed_results", return_value={"run_ids": ["run-1"]}), \
                 patch.object(self.operations, "list_indexed_periods", return_value={"periods": []}), \
                 patch.object(self.operations, "_cdm_request", side_effect=payloads.get) as request:
             result = self.operations.get_indexed_result("run-1")
 
-        self.assertEqual(result["tags"], ["nightly"])
-        self.assertEqual(result["benchmark"], "fio")
+        self.assertEqual(
+            result["tags"],
+            ["nightly", "password:[redacted]", "[redacted]"],
+        )
+        self.assertNotIn(token, json.dumps(result))
+        self.assertNotIn("cdm-tag-secret", json.dumps(result))
+        self.assertEqual(result["benchmark"], "[redacted]")
         self.assertEqual(result["partial_status"], {"status": "complete"})
         self.assertEqual(result["periods"], [])
         self.assertEqual(request.call_count, 5)
+
+    def test_empty_indexed_periods_redacts_credential_shaped_run_id(self):
+        token = "ghp_" + "A" * 36
+        with patch.object(self.operations, "_cdm_request", return_value={"iterations": []}):
+            result = self.operations.list_indexed_periods(token)
+
+        self.assertNotIn(token, json.dumps(result))
+        self.assertEqual(result, {"run_id": "[redacted]", "periods": []})
 
     def test_run_tag_operations_update_local_metadata(self):
         run_directory = self.root / "run" / "result"
@@ -824,6 +1083,25 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(list(metadata_directory.glob("*.mcp-backup-*")), [])
         removed = self.operations.remove_local_run_tags(run_directory, ["old"])
         self.assertEqual(removed["tags"], [{"name": "new", "val": "value"}])
+
+    def test_tag_reads_redact_credential_named_tag_values(self):
+        run_directory = self.root / "run" / "credential-tag"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text(
+            json.dumps({"tags": [{"name": "password", "val": "tag-secret"}]}),
+            encoding="utf-8",
+        )
+
+        listed = self.operations.list_local_run_tags(run_directory)
+        initial_run_listing = self.operations.list_local_runs()
+        added = self.operations.add_local_run_tags(run_directory, ["password:new-secret"])
+        updated_run_listing = self.operations.list_local_runs()
+        removed = self.operations.remove_local_run_tags(run_directory, ["password"])
+
+        for result in (listed, initial_run_listing, added, updated_run_listing, removed):
+            self.assertNotIn("tag-secret", json.dumps(result))
+            self.assertNotIn("new-secret", json.dumps(result))
 
     def test_run_tag_operations_prefer_live_plain_metadata(self):
         run_directory = self.root / "run" / "dual-metadata"
@@ -905,6 +1183,25 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["runs"][0]["run_id"], "run-1")
         self.assertEqual(result["runs"][0]["status"], "complete")
         self.assertEqual(result["runs"][1]["status"], "incomplete")
+
+    def test_local_run_discovery_omits_credential_shaped_names_and_ids(self):
+        run_root = self.root / "run"
+        token = "ghp_" + "A" * 36
+        run_root.mkdir()
+        (run_root / token).mkdir()
+        safe_metadata = run_root / "safe-run" / "run" / "rickshaw-run.json"
+        safe_metadata.parent.mkdir(parents=True)
+        safe_metadata.write_text(
+            json.dumps({"run-id": token, "tags": []}), encoding="utf-8"
+        )
+        ordinary = run_root / "z-ordinary"
+        ordinary.mkdir()
+
+        result = self.operations.list_local_runs()
+
+        serialized = json.dumps(result)
+        self.assertNotIn(token, serialized)
+        self.assertEqual([entry["name"] for entry in result["runs"]], ["z-ordinary"])
 
     def test_list_local_runs_limit_includes_incomplete_artifacts(self):
         run_root = self.root / "run"
@@ -1071,6 +1368,27 @@ class TestCrucibleOperations(unittest.TestCase):
 
         self.assertEqual(result["run_path"], str(run_directory.resolve()))
         self.assertEqual(result["summary"], {"benchmark": "fio", "samples": 1})
+
+    def test_get_local_run_summary_redacts_credential_fields(self):
+        run_directory = self.root / "run" / "summary-with-credentials"
+        summary_path = run_directory / "run" / "result-summary.json"
+        summary_path.parent.mkdir(parents=True)
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "benchmark": "fio",
+                    "configuration": {"password": "summary-secret"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.operations.get_local_run_summary(run_directory)
+
+        self.assertEqual(
+            result["summary"]["configuration"]["password"], "[redacted]"
+        )
+        self.assertNotIn("summary-secret", json.dumps(result))
 
     def test_get_local_run_summary_bounds_serialized_response(self):
         run_directory = self.root / "run" / "large-summary"
@@ -1718,8 +2036,28 @@ class TestCrucibleOperations(unittest.TestCase):
             {"creds": "[redacted]", "registry-creds": "[redacted]"},
         )
         self.assertEqual(
+            self.operations._redact_metadata(
+                {
+                    "signature": "do-not-return",
+                    "hmac": "do-not-return",
+                    "sig": "do-not-return",
+                }
+            ),
+            {
+                "signature": "[redacted]",
+                "hmac": "[redacted]",
+                "sig": "[redacted]",
+            },
+        )
+        self.assertEqual(
             self.operations._redact_metadata("--creds user:do-not-return"),
             "--creds [redacted]",
+        )
+        self.assertEqual(
+            self.operations.redact_log_text(
+                "https://storage.example/blob?sv=2026&sig=do-not-return"
+            ),
+            "https://storage.example/blob?sv=2026&sig=[redacted]",
         )
 
     def test_get_local_run_metadata_redacts_cookie_credentials(self):
@@ -1894,6 +2232,36 @@ class TestCrucibleOperations(unittest.TestCase):
             self.operations._redact_metadata("--password --SECRET"),
             "--password [redacted]",
         )
+
+    def test_redacts_unlabelled_common_credential_tokens(self):
+        jwt = (
+            "eyJhbGciOiJIUzI1NiJ9."
+            "eyJzdWIiOiJhbGljZSJ9."
+            "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        standalone_tokens = (
+            jwt,
+            "github_pat_" + "A" * 30,
+            *(prefix + "A" * 36 for prefix in ("ghp_", "gho_", "ghu_", "ghs_", "ghr_")),
+            "glpat-" + "A" * 30,
+            "xoxb-" + "A" * 30,
+            "xapp-" + "A" * 30,
+            "AKIA" + "A" * 16,
+            "ASIA" + "A" * 16,
+            "AIza" + "A" * 30,
+            "sk-" + "A" * 30,
+            "sk-proj-" + "A" * 30,
+            "sk_live_" + "A" * 30,
+            "rk_test_" + "A" * 30,
+        )
+        for token in standalone_tokens:
+            with self.subTest(token_prefix=token[:8]):
+                self.assertNotIn(token, self.operations._redact_metadata(token))
+                self.assertNotIn(token, self.operations.redact_log_text(token))
+        keyed_token = "ghp_" + "B" * 36
+        keyed_result = self.operations._redact_metadata({keyed_token: "safe value"})
+        self.assertNotIn(keyed_token, json.dumps(keyed_result))
+        self.assertEqual(list(keyed_result.values()), ["safe value"])
         self.assertEqual(
             self.operations._redact_metadata("--password --token"),
             "--password [redacted]",
@@ -2511,6 +2879,52 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(second["text"], "γ\n")
         self.assertTrue(second["complete"])
 
+    def test_get_run_artifact_redacts_credentials_across_lines_and_pages(self):
+        run_directory = self.root / "run" / "artifact-credential-redaction"
+        artifact = run_directory / "run" / "iterations" / "output.txt"
+        artifact.parent.mkdir(parents=True)
+        content = (
+            "safe preface\n"
+            "password: |\n"
+            "  artifact-yaml-secret\n"
+            "  artifact-yaml-continuation\n"
+            "username: visible-user\n"
+            "{\"token\": {\n"
+            "  \"value\": \"artifact-json-secret\"\n"
+            "}}\n"
+            "AWS_SECRET_ACCESS_KEY=artifact-env-secret\n"
+            "safe ending\n"
+        )
+        encoded = content.encode("utf-8")
+        artifact.write_bytes(encoded)
+
+        result = self.operations.get_run_artifact(
+            run_directory, "run/iterations/output.txt"
+        )
+
+        self.assertEqual(result["next_offset"], len(encoded))
+        self.assertTrue(result["complete"])
+        for secret in (
+            "artifact-yaml-secret",
+            "artifact-yaml-continuation",
+            "artifact-json-secret",
+            "artifact-env-secret",
+        ):
+            self.assertNotIn(secret, result["text"])
+        self.assertIn("safe preface", result["text"])
+        self.assertIn("visible-user", result["text"])
+        self.assertIn("safe ending", result["text"])
+
+        secret_offset = encoded.index(b"artifact-json-secret") + 8
+        page = self.operations.get_run_artifact(
+            run_directory,
+            "run/iterations/output.txt",
+            offset=secret_offset,
+            limit=12,
+        )
+        self.assertNotIn("artifact-json-secret", page["text"])
+        self.assertEqual(page["next_offset"], secret_offset + 12)
+
     def test_get_run_artifact_rejects_unapproved_and_binary_paths(self):
         run_directory = self.root / "run" / "artifact-policy"
         secret = run_directory / "config" / "secret.json"
@@ -2566,6 +2980,61 @@ class TestCrucibleOperations(unittest.TestCase):
             listed_by_path["run/tool-data/credentials/private.txt"]["retrievable"]
         )
 
+    def test_artifact_names_do_not_expose_credential_material(self):
+        run_directory = self.root / "run" / "artifact-token-name"
+        token = "ghp_" + "A" * 36
+        sensitive_paths = (
+            f"run/tool-data/{token}.txt",
+            "run/tool-data/api-key=unmarkedvalue.txt",
+        )
+        for relative in sensitive_paths:
+            artifact_path = run_directory / relative
+            artifact_path.parent.mkdir(parents=True, exist_ok=True)
+            artifact_path.write_text("ordinary content", encoding="utf-8")
+
+        listed = self.operations.list_run_artifacts(run_directory)
+
+        self.assertNotIn(token, json.dumps(listed))
+        self.assertEqual(listed["artifacts"], [])
+        for relative in sensitive_paths:
+            with self.subTest(relative=relative):
+                with self.assertRaises(OperationError) as rejected:
+                    self.operations.get_run_artifact(run_directory, relative)
+                self.assertEqual(rejected.exception.code, "artifact_not_retrievable")
+
+    def test_summary_redacts_credential_shaped_top_level_keys(self):
+        token = "ghp_" + "A" * 36
+
+        result = self.operations._redact_summary({
+            token: "unclassified value",
+            "password=top-level-secret": "also-secret",
+            "safe": "ordinary diagnostic",
+        })
+
+        serialized = json.dumps(result)
+        self.assertNotIn(token, serialized)
+        self.assertNotIn("top-level-secret", serialized)
+        self.assertNotIn("also-secret", serialized)
+        self.assertEqual(result["safe"], "ordinary diagnostic")
+
+        paired = self.operations._redact_summary({
+            "arg": "password",
+            "val": "top-level-paired-secret",
+            "safe": "safe sibling",
+        })
+        self.assertNotIn("top-level-paired-secret", json.dumps(paired))
+        self.assertEqual(paired["val"], "[redacted]")
+        self.assertEqual(paired["safe"], "safe sibling")
+
+        colliding = self.operations._redact_summary({
+            token: "first value",
+            "[redacted]": "second value",
+        })
+        self.assertEqual(colliding, {
+            "[redacted]": "first value",
+            "[redacted] (2)": "second value",
+        })
+
     def test_get_run_artifact_reports_missing_paths(self):
         run_directory = self.root / "run" / "missing-artifact"
         iterations = run_directory / "run" / "iterations"
@@ -2583,6 +3052,25 @@ class TestCrucibleOperations(unittest.TestCase):
                 run_directory, "run/iterations/directory.txt"
             )
         self.assertEqual(directory.exception.code, "artifact_not_found")
+
+    def test_get_run_artifact_rejects_files_larger_than_redaction_budget(self):
+        run_directory = self.root / "run" / "artifact-redaction-budget"
+        artifact = run_directory / "run" / "iterations" / "large.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("safe text", encoding="utf-8")
+
+        with patch(
+            "crucible_mcp.operations.MAX_ARTIFACT_REDACTION_BYTES", 4
+        ):
+            with self.assertRaises(OperationError) as raised:
+                self.operations.get_run_artifact(
+                    run_directory, "run/iterations/large.txt"
+                )
+            listing = self.operations.list_run_artifacts(run_directory)
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+        listed = next(item for item in listing["artifacts"] if item["name"] == "large.txt")
+        self.assertFalse(listed["retrievable"])
 
     def test_get_run_artifact_rejects_nul_paths(self):
         run_directory = self.root / "run" / "nul-artifact-path"
@@ -2779,6 +3267,20 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["archives"][0]["name"], "run-1.tar.xz")
 
+    def test_local_archive_discovery_omits_credential_shaped_names(self):
+        archive_root = self.root / "archive"
+        archive_root.mkdir()
+        token = "ghp_" + "A" * 36
+        (archive_root / f"{token}.tar.xz").write_bytes(b"archive")
+        (archive_root / "ordinary.tar.xz").write_bytes(b"archive")
+
+        result = self.operations.list_local_archives()
+
+        self.assertNotIn(token, json.dumps(result))
+        self.assertEqual([archive["name"] for archive in result["archives"]], [
+            "ordinary.tar.xz"
+        ])
+
     def test_symlinked_run_root_uses_configured_archive_sibling(self):
         physical_run_root = self.root / "mounted-runs"
         physical_run_root.mkdir()
@@ -2847,13 +3349,22 @@ class TestCrucibleOperations(unittest.TestCase):
         response = Mock()
         response.__enter__ = lambda value: response
         response.__exit__ = lambda *args: None
-        response.read.return_value = b'{"values":[]}'
+        secret = "metric-response-secret"
+        response.read.return_value = json.dumps({
+            "values": {
+                "": [{"begin": 1, "value": f"password={secret}", "duration": 42.5}]
+            },
+            "usedBreakouts": [],
+            "remainingBreakouts": [],
+        }).encode("utf-8")
         with patch("crucible_mcp.operations.urlopen", return_value=response) as request:
             result = self.operations.get_indexed_metric(
                 run="run-1", source="fio", metric_type="IOPS", period="measurement"
             )
 
-        self.assertEqual(result, {"values": []})
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertEqual(result["values"][""][0]["value"], "password=[redacted]")
+        self.assertEqual(result["values"][""][0]["duration"], 42.5)
         sent = json.loads(request.call_args.args[0].data)
         self.assertEqual(sent["run"], "run-1")
         self.assertEqual(sent["source"], "fio")
@@ -2900,6 +3411,10 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertFalse(session["complete"])
         search = operations.search_logs("complete")
         self.assertEqual(search["matches"][0]["session_id"], "session-1")
+        secret = "log-query-secret"
+        sensitive_query = operations.search_logs(f"password={secret}")
+        self.assertNotIn(secret, json.dumps(sensitive_query))
+        self.assertEqual(sensitive_query["query"], "password=[redacted]")
 
     def test_logger_results_redact_credentials_and_private_key_pages(self):
         database = self.root / "sensitive-logs.db"
@@ -2963,8 +3478,8 @@ class TestCrucibleOperations(unittest.TestCase):
 
         with patch.object(
             operations,
-            "_log_private_key_state_before",
-            wraps=operations._log_private_key_state_before,
+            "_log_redaction_state_before",
+            wraps=operations._log_redaction_state_before,
         ) as context_lookup:
             since_search = operations.search_logs(
                 "private-key", session_id="sensitive-session", since=3
@@ -3001,19 +3516,97 @@ class TestCrucibleOperations(unittest.TestCase):
         )
         self.assertEqual(nested_marker_search["matches"][0]["line"], "[redacted private key]")
         self.assertNotIn("rsa-payload-after-nested-markers", json.dumps(nested_marker_search))
-        with patch("crucible_mcp.operations.MAX_LOG_PRIVATE_KEY_CONTEXT_LINES", 2):
+        with patch("crucible_mcp.operations.MAX_LOG_REDACTION_CONTEXT_LINES", 2):
             capped_history_search = operations.search_logs(
                 "public data",
                 session_id="large-history-session",
                 since=15,
             )
-        self.assertEqual(
-            capped_history_search["matches"][0]["line"], "[redacted private key]"
-        )
+        self.assertEqual(capped_history_search["matches"][0]["line"], "[redacted]")
         credential_search = operations.search_logs(
             "remotehosts", session_id="sensitive-session"
         )
         self.assertNotIn("line-secret", json.dumps(credential_search))
+
+    def test_logger_queries_carry_sensitive_option_state_across_rows(self):
+        database = self.root / "multiline-sensitive-logs.db"
+        connection = sqlite3.connect(database)
+        connection.executescript(
+            """
+            CREATE TABLE sources (id INTEGER PRIMARY KEY, source TEXT);
+            CREATE TABLE commands (id INTEGER PRIMARY KEY, command TEXT);
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT,
+                source INTEGER, command INTEGER
+            );
+            CREATE TABLE streams (id INTEGER PRIMARY KEY, stream TEXT);
+            CREATE TABLE lines (
+                id INTEGER PRIMARY KEY, session INTEGER, timestamp REAL,
+                stream INTEGER, line TEXT
+            );
+            CREATE INDEX idx_lines_session_stream_id ON lines (session, stream, id);
+            INSERT INTO sources VALUES (1, 'runner');
+            INSERT INTO commands VALUES (1, 'crucible run');
+            INSERT INTO sessions VALUES (1, 'multiline-secret-session', 't0', 1, 1);
+            INSERT INTO streams VALUES (1, 'STDOUT');
+            INSERT INTO lines VALUES (1, 1, 1, 1, 'command --token');
+            INSERT INTO lines VALUES (2, 1, 2, 1, 'logger-secret-token');
+            INSERT INTO lines VALUES (3, 1, 3, 1, 'safe diagnostic');
+            INSERT INTO lines VALUES (4, 1, 4, 1, 'password: |');
+            INSERT INTO lines VALUES (5, 1, 5, 1, '  logger-yaml-secret');
+            INSERT INTO lines VALUES (6, 1, 6, 1, 'safe yaml diagnostic');
+            INSERT INTO lines VALUES (7, 1, 7, 1, 'curl https://alice:\\');
+            INSERT INTO lines VALUES (8, 1, 8, 1, 'url-secret@example.com');
+            INSERT INTO lines VALUES (9, 1, 9, 1, 'safe after url');
+            INSERT INTO sessions VALUES (2, 'inline-sensitive-json', 't1', 1, 1);
+            INSERT INTO lines VALUES (10, 2, 10, 1, '{"token": {');
+            INSERT INTO lines VALUES (11, 2, 11, 1, '  "value": "inline-json-secret",');
+            INSERT INTO lines VALUES (12, 2, 12, 1, '  "nested": {"access": "nested-json-secret"}');
+            INSERT INTO lines VALUES (13, 2, 13, 1, '}');
+            INSERT INTO lines VALUES (14, 2, 14, 1, '{"safe": "safe sibling"}');
+            """
+        )
+        connection.commit()
+        connection.close()
+
+        operations = CrucibleOperations(self.root, log_db=database)
+        session = operations.get_log_session("multiline-secret-session")
+        session_page = operations.get_log_session(
+            "multiline-secret-session", offset=1, limit=1
+        )
+        search = operations.search_logs(
+            "logger-secret-token", session_id="multiline-secret-session"
+        )
+        since_search = operations.search_logs(
+            "logger-secret-token",
+            session_id="multiline-secret-session",
+            since=2,
+        )
+        yaml_session = operations.get_log_session("multiline-secret-session")
+        yaml_search = operations.search_logs(
+            "logger-yaml-secret", session_id="multiline-secret-session", since=5
+        )
+        url_search = operations.search_logs(
+            "url-secret", session_id="multiline-secret-session", since=8
+        )
+        inline_json_session = operations.get_log_session("inline-sensitive-json")
+
+        self.assertNotIn("logger-secret-token", json.dumps(session))
+        self.assertNotIn("logger-secret-token", json.dumps(session_page))
+        self.assertNotIn("logger-secret-token", search["matches"][0]["line"])
+        self.assertNotIn(
+            "logger-secret-token", since_search["matches"][0]["line"]
+        )
+        self.assertNotIn("logger-yaml-secret", json.dumps(yaml_session))
+        self.assertNotIn("logger-yaml-secret", yaml_search["matches"][0]["line"])
+        self.assertNotIn("url-secret", json.dumps(session))
+        self.assertNotIn("url-secret", url_search["matches"][0]["line"])
+        self.assertNotIn("inline-json-secret", json.dumps(inline_json_session))
+        self.assertNotIn("nested-json-secret", json.dumps(inline_json_session))
+        self.assertIn("safe diagnostic", json.dumps(session))
+        self.assertIn("safe yaml diagnostic", json.dumps(yaml_session))
+        self.assertIn("safe after url", json.dumps(session))
+        self.assertIn("safe sibling", json.dumps(inline_json_session))
 
     def test_logger_redaction_bounds_private_key_markers_per_line(self):
         marker = "-----BEGIN RSA PRIVATE KEY-----"
@@ -3090,6 +3683,22 @@ class TestCrucibleOperations(unittest.TestCase):
         result = self.operations.validate_run({"benchmarks": [{"name": "missing"}]})
         self.assertFalse(result["valid"])
         self.assertIn("benchmark is not installed", result["errors"][0])
+
+    def test_validate_run_does_not_echo_rejected_values(self):
+        secret = "validation-secret-should-not-be-echoed"
+
+        result = self.operations.validate_run({"benchmarks": secret})
+
+        self.assertFalse(result["valid"])
+        self.assertNotIn(secret, "\n".join(result["errors"]))
+        self.assertIn("benchmarks", result["errors"][0])
+        self.assertIn("type", result["errors"][0])
+
+        name_secret = "benchmark-name-secret"
+        result = self.operations.validate_run({
+            "benchmarks": [{"name": f"password={name_secret}"}]
+        })
+        self.assertNotIn(name_secret, "\n".join(result["errors"]))
 
     def test_benchmark_name_cannot_escape_subproject_root(self):
         with self.assertRaises(OperationError):
