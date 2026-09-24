@@ -145,6 +145,10 @@ class TestServer(unittest.TestCase):
         self.assertIn("inputSchema", tools["start_run"])
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("plan_digest", tools["start_run"]["inputSchema"]["properties"])
+        self.assertIn(
+            "does not discover configured or reachable deployment targets",
+            tools["list_endpoints"]["description"],
+        )
         self.assertIn("inputSchema", tools["get_run_logs"])
         self.assertIn("offset", tools["list_local_runs"]["inputSchema"]["properties"])
         for tool_name in (

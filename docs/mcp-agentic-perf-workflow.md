@@ -75,16 +75,29 @@ if not endpoints["endpoints"]:
 benchmark_name = choose_benchmark(benchmarks["benchmarks"], requested_benchmark)
 benchmark = call_tool("describe_benchmark", {"name": benchmark_name})
 tools = call_tool("list_tools", {})
-endpoint = choose_endpoint(endpoints["endpoints"], requested_endpoint)
+endpoint_type = choose_endpoint_type(
+    endpoints["endpoints"], requested_endpoint_type_from_task_context
+)
+endpoint = construct_endpoint_block(
+    endpoint_type, caller_supplied_deployment_details
+)
 ```
 
 Use the returned metadata to choose a benchmark and construct its parameters.
 Check `benchmark["parameter_validation"]["rules"]` for accepted parameter
 patterns. If `parameter_validation.complete` is false, treat the rules as a
 partial guide rather than an exhaustive list.
-The endpoint, engine IDs, user environment, and tool configuration are
-deployment-specific; the generic run-file skeleton in
-`how-run-files-work.md` is not necessarily executable without those details.
+`list_endpoints` discovers installed endpoint implementations and their schemas;
+it does not discover operator-configured profiles, reachable hosts or clusters,
+or available credentials. Crucible has no named endpoint-profile registry. The
+caller must bring the endpoint type and deployment details (such as hosts,
+cluster access, engine IDs, user environment, and tool configuration) from the
+user, operator, or task context. If those details are missing, ask for them
+rather than guessing or treating an installed endpoint type as a usable target.
+`validate_run` and `prepare_run` check the supplied configuration statically;
+they do not verify live connectivity. The generic run-file skeleton in
+`how-run-files-work.md` is not necessarily executable without deployment-specific
+details.
 
 ## 3. Construct and validate the run document
 

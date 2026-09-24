@@ -95,7 +95,11 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "list_endpoints",
-        "description": "List installed endpoint implementations, schemas, and coarse capabilities.",
+        "description": (
+            "List installed endpoint types, schemas, and coarse capabilities. "
+            "This does not discover configured or reachable deployment targets; "
+            "the caller must supply target-specific endpoint configuration."
+        ),
         "inputSchema": _EMPTY_INPUT,
     },
     {
