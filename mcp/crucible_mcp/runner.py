@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
+from .host import host_context_command, host_context_environment
 from .jobs import JobConflictError, JobStore, request_hash
 from .models import Job, JobState, ResultStatus
 from .operations import CrucibleOperations, OperationError
@@ -60,6 +61,7 @@ class RunManager:
         crucible_command: Sequence[str],
         max_inline_bytes: int = 1_048_576,
         cdm_readiness_timeout: int = 60,
+        host_execution: bool = True,
     ):
         self.store = store
         self.operations = operations
@@ -67,6 +69,7 @@ class RunManager:
         self.crucible_command = tuple(crucible_command)
         self.max_inline_bytes = max_inline_bytes
         self.cdm_readiness_timeout = cdm_readiness_timeout
+        self.host_execution = host_execution
         self.run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._threads: dict[str, threading.Thread] = {}
 
@@ -559,15 +562,32 @@ class RunManager:
     def _launch(self, job_id: str, session_id: str, run_file: Path, job_directory: Path) -> None:
         self._launch_command(job_id, session_id, job_directory, ["run", str(run_file)])
 
+    def _execution_context_command(
+        self, command: Sequence[str], working_directory: str = "/"
+    ) -> list[str]:
+        if not self.host_execution:
+            return list(command)
+        return host_context_command(command, working_directory)
+
     def _launch_command(self, job_id: str, session_id: str, job_directory: Path, command: list[str]) -> None:
         log_path = job_directory / "runner.log"
         log = log_path.open("ab")
         environment = os.environ.copy()
+        if self.host_execution:
+            environment = host_context_environment(
+                environment, preserve_mcp_session=True
+            )
         event_path = job_directory / "events.jsonl"
         environment["CRUCIBLE_MCP_SESSION_ID"] = session_id
         environment["CRUCIBLE_MCP_EVENT_FILE"] = str(event_path)
         job = self.store.get(job_id)
         launch_command = [*self.crucible_command, *command]
+        # The input and supervision paths are shared with the host, but path
+        # visibility alone does not give this process the host Podman store or
+        # cgroup view. Run the Crucible CLI in host context.
+        launch_command = self._execution_context_command(
+            launch_command, str(self.operations.crucible_home)
+        )
         if job.operation in _MAINTENANCE_OPERATIONS:
             marker = self._processing_completion_marker(job)
             wrapper = (
@@ -710,11 +730,16 @@ class RunManager:
     def _capture_container_id(self, job_id: str, container_name: str) -> None:
         try:
             result = subprocess.run(
-                ["podman", "inspect", "--format", "{{.Id}}", container_name],
+                self._execution_context_command(
+                    ["podman", "inspect", "--format", "{{.Id}}", container_name]
+                ),
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=2,
+                env=host_context_environment(os.environ)
+                if self.host_execution
+                else None,
             )
         except (OSError, subprocess.TimeoutExpired):
             return

@@ -92,6 +92,7 @@ class TestMCPExecutionAcceptance(unittest.TestCase):
             self.run_root,
             [sys.executable, "-c", self.fake_crucible],
             cdm_readiness_timeout=1,
+            host_execution=False,
         )
         self.server = self._make_server(self.store, self.operations, self.manager)
         self.server_thread = threading.Thread(
@@ -220,6 +221,7 @@ class TestMCPExecutionAcceptance(unittest.TestCase):
             self.run_root,
             [sys.executable, "-c", self.fake_crucible],
             cdm_readiness_timeout=1,
+            host_execution=False,
         )
         self.server.jobs = self.store
         self.server.operations = self.operations

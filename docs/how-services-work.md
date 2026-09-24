@@ -186,6 +186,18 @@ MCP-owned jobs prevent service shutdown while they are queued, running,
 post-processing, indexing, or awaiting recovery. This protects jobs that are
 not represented by an active Rickshaw container.
 
+MCP supervises jobs in its service process, but executes every Crucible CLI
+job in the host mount, network, and cgroup namespaces with the host root. This
+includes `crucible run`, local post-processing and indexing, archive and
+unarchive, and indexed-result deletion. The CLI therefore sees the same
+Crucible checkout, configuration, filesystem, and Podman store as a host CLI
+invocation; the MCP controller does not create a separate container store for
+these operations. Dependencies are started by the same host-side CLI process
+and use its normal readiness checks. Host service containers remain running
+after a job completes and can be stopped through normal host service
+management. Running MCP requires the privilege to enter the host namespaces
+used for these CLI jobs.
+
 #### MCP tools
 
 The MCP endpoint is available at `http[s]://<bind>:<port>/mcp`, depending on
@@ -342,16 +354,13 @@ bounded polling and does not provide the CLI's live `--follow` mode. Run-file
 submission remains restricted to the configured `input-root` and its policy
 checks.
 Before the direct indexed-result and metric tools call CDM, the MCP server runs
-the host-side `crucible start opensearch` service path. The MCP container enters
-the host mount namespace and root for this fixed service command, so the host's
-Podman store and Crucible configuration are used. OpenSearch and its CDM
+the host-side `crucible start opensearch` service path. OpenSearch and its CDM
 companion are started when needed, with the CLI's existing readiness probes for
 services it launches. If startup fails, the MCP request returns a structured
 `result_services_unavailable` error with a suggested host CLI command and log
-checks.
-CLI-backed tools such as `start_run`, `index_local_run`, and
-`delete_indexed_result` continue to rely on their own existing service startup
-path; MCP does not start the same dependencies separately for those operations.
+checks. CLI-backed tools use the same host execution context and ordinary CLI
+service-start behavior. If startup fails for a CLI-backed job, its job status
+and runner log report the failure.
 Logger tools redact recognized credential-like values from command metadata and
 returned lines, including private-key blocks that span logger rows or response
 pages. Search matching is performed against the original log line, but matching

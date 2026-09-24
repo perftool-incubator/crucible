@@ -9,6 +9,7 @@ shell commands or exposing arbitrary filesystem access.
 import argparse
 import base64
 import json
+import os
 import socket
 import ssl
 import subprocess
@@ -28,6 +29,7 @@ from .operations import (
     MAX_LOG_RESPONSE_BYTES,
     MAX_PLAN_RESPONSE_BYTES,
 )
+from .host import host_context_command, host_context_environment
 from .policy import InputPolicy, PolicyError, read_token, token_matches
 from .runner import RunManager
 from .audit import AuditLogger
@@ -1100,22 +1102,16 @@ def _ensure_indexing_services(crucible_home: Path, operations: CrucibleOperation
     home = Path(crucible_home).resolve()
     with _RESULT_SERVICE_START_LOCK:
         try:
-            # The controller has a separate Podman store; join the host mount
-            # namespace and root before invoking Crucible's service manager.
+            # The service-manager invocation is a nested CLI session, not part
+            # of an MCP job's logger session or lifecycle event stream.
             result = subprocess.run(
-                [
-                    "nsenter",
-                    "--mount=/proc/1/ns/mnt",
-                    "--root=/proc/1/root",
-                    "--wd=/",
-                    "--",
-                    str(home / "bin" / "crucible"),
-                    "start",
-                    "opensearch",
-                ],
+                host_context_command(
+                    [str(home / "bin" / "crucible"), "start", "opensearch"]
+                ),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=host_context_environment(os.environ),
                 timeout=_RESULT_SERVICE_START_TIMEOUT,
                 check=False,
             )
@@ -1220,6 +1216,7 @@ def main() -> None:
         [str(args.crucible_home / "bin" / "crucible")],
         args.max_request_bytes,
         args.cdm_readiness_timeout,
+        host_execution=True,
     )
     server.audit = AuditLogger(args.audit_log, args.audit_max_bytes, args.audit_retained_files)
     server.run_manager.reconcile()

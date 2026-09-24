@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from crucible_mcp.jobs import JobStore
+from crucible_mcp.host import host_context_command
 from crucible_mcp.models import JobState
 from crucible_mcp.operations import CrucibleOperations, OperationError
 from crucible_mcp.runner import RunManager
@@ -35,11 +36,72 @@ class TestRunManager(unittest.TestCase):
             CrucibleOperations(self.root),
             self.root / "runs",
             [sys.executable, "-c", event_script],
+            host_execution=False,
         )
 
     def tearDown(self):
         self.store.close()
         self.directory.cleanup()
+
+    def test_runner_wraps_cli_commands_in_host_execution_context(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "host-execution-runs",
+            ["/opt/crucible/bin/crucible"],
+            host_execution=True,
+        )
+
+        command = ["/opt/crucible/bin/crucible", "run", "/var/lib/crucible/run-file.json"]
+        self.assertEqual(
+            manager._execution_context_command(command, str(self.root)),
+            host_context_command(command, str(self.root)),
+        )
+
+    def test_runner_launch_preserves_job_correlation_in_host_context(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "host-launch-runs",
+            ["/opt/crucible/bin/crucible"],
+            host_execution=True,
+        )
+        job, _ = self.store.create_or_get("key-host-launch", {"run": True})
+        job_directory = self.root / "host-launch-job"
+        job_directory.mkdir()
+        command = [
+            "/opt/crucible/bin/crucible",
+            "run",
+            "/var/lib/crucible/mcp/runs/job/input/run-file.json",
+        ]
+
+        with (
+            patch("crucible_mcp.runner.subprocess.Popen", return_value=Mock(pid=8765)) as popen,
+            patch.object(manager, "_wait_for_completion"),
+        ):
+            manager._launch_command(
+                job.mcp_job_id,
+                "mcp-session-1",
+                job_directory,
+                ["run", command[-1]],
+            )
+            manager._threads[job.mcp_job_id].join(timeout=5)
+
+        launched_command = popen.call_args.args[0]
+        environment = popen.call_args.kwargs["env"]
+        self.assertEqual(
+            launched_command,
+            host_context_command(command, str(self.manager.operations.crucible_home)),
+        )
+        self.assertEqual(environment["CRUCIBLE_MCP_SESSION_ID"], "mcp-session-1")
+        self.assertEqual(
+            environment["CRUCIBLE_MCP_EVENT_FILE"],
+            str(job_directory / "events.jsonl"),
+        )
+        self.assertNotIn("CONTAINER_HOST", environment)
+        self.assertNotIn("PYTHONPATH", environment)
+        self.assertNotIn("SESSION_ID", environment)
+        popen.call_args.kwargs["stdout"].close()
 
     def test_submission_is_idempotent_and_completes_asynchronously(self):
         document = {"benchmarks": [{"name": "example"}]}
@@ -237,6 +299,7 @@ class TestRunManager(unittest.TestCase):
             self.manager.operations,
             self.root / "failed-runs",
             [sys.executable, "-c", "import sys; sys.exit(7)"],
+            host_execution=False,
         )
         job, _ = manager.submit("key-2", document={"benchmarks": [{"name": "example"}]})
         manager._threads[job.mcp_job_id].join(timeout=5)
@@ -259,6 +322,7 @@ class TestRunManager(unittest.TestCase):
                 "import time; time.sleep(0.2); sys.exit(1)",
             ],
             cdm_readiness_timeout=0.01,
+            host_execution=False,
         )
         job, _ = manager.submit(
             "key-cdm-failure", document={"benchmarks": [{"name": "example"}]}
@@ -357,6 +421,7 @@ class TestRunManager(unittest.TestCase):
             self.manager.operations,
             self.root / "delete-indexed",
             [sys.executable, "-c", "import sys; sys.exit(0)"],
+            host_execution=False,
         )
         job, created = manager.submit_indexed_deletion("key-delete-indexed", "run-1")
         self.assertTrue(created)
@@ -374,6 +439,7 @@ class TestRunManager(unittest.TestCase):
             self.manager.operations,
             self.root / "archive-jobs",
             [sys.executable, "-c", "import sys; sys.exit(0)"],
+            host_execution=False,
         )
         run_path = self.root / "run" / "archive-me"
         run_path.mkdir(parents=True)
@@ -398,6 +464,7 @@ class TestRunManager(unittest.TestCase):
             self.manager.operations,
             self.root / "archive-retry",
             [sys.executable, "-c", "import sys; sys.exit(0)"],
+            host_execution=False,
         )
         run_path = self.root / "run" / "archive-retry-source"
         run_path.mkdir(parents=True)
@@ -561,6 +628,7 @@ class TestRunManager(unittest.TestCase):
             self.manager.operations,
             self.root / "processing-lifecycle",
             [sys.executable, "-c", "import time; time.sleep(0.3)"],
+            host_execution=False,
         )
         target = self.root / "run" / "lifecycle-result"
         target.mkdir(parents=True)
@@ -599,6 +667,7 @@ class TestRunManager(unittest.TestCase):
             self.manager.operations,
             self.root / "failed-index",
             [sys.executable, "-c", "import sys; sys.exit(7)"],
+            host_execution=False,
         )
         target = self.root / "run" / "failed-index-result"
         target.mkdir(parents=True)
@@ -679,6 +748,7 @@ class TestRunManager(unittest.TestCase):
             self.root / "summary-timeout-runs",
             [sys.executable, "-c", "import sys; sys.exit(0)"],
             cdm_readiness_timeout=0.01,
+            host_execution=False,
         )
         job, _ = manager.submit("key-summary-timeout", document={"benchmarks": [{"name": "example"}]})
         manager._threads[job.mcp_job_id].join(timeout=5)

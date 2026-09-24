@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
@@ -758,15 +758,30 @@ class TestServer(unittest.TestCase):
         )
         operations = CrucibleOperations(home, cdm_base_url="http://127.0.0.1:3000")
 
-        with patch("crucible_mcp.server.subprocess.run", return_value=Mock(returncode=0)) as run:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "CRUCIBLE_MCP_SESSION_ID": "parent-mcp-session",
+                    "CRUCIBLE_MCP_EVENT_FILE": "/tmp/parent-events.jsonl",
+                    "SESSION_ID": "parent-mcp-session",
+                    "CONTAINER_HOST": "unix:///nested/podman.sock",
+                    "CONTAINERS_STORAGE_CONF": "/container/storage.conf",
+                    "CRUCIBLE_MCP_HOST_SERVICE_STARTS": "true",
+                },
+            ),
+            patch("crucible_mcp.server.subprocess.run", return_value=Mock(returncode=0)) as run,
+        ):
             _ensure_indexing_services(home, operations)
 
         run.assert_called_once_with(
             [
                 "nsenter",
                 "--mount=/proc/1/ns/mnt",
+                "--cgroup=/proc/1/ns/cgroup",
+                "--net=/proc/1/ns/net",
                 "--root=/proc/1/root",
-                "--wd=/",
+                "--wdns=/",
                 "--",
                 str(home / "bin" / "crucible"),
                 "start",
@@ -775,9 +790,17 @@ class TestServer(unittest.TestCase):
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=ANY,
             timeout=240,
             check=False,
         )
+        delegated_environment = run.call_args.kwargs["env"]
+        self.assertNotIn("CRUCIBLE_MCP_SESSION_ID", delegated_environment)
+        self.assertNotIn("CRUCIBLE_MCP_EVENT_FILE", delegated_environment)
+        self.assertNotIn("SESSION_ID", delegated_environment)
+        self.assertNotIn("CONTAINER_HOST", delegated_environment)
+        self.assertNotIn("CONTAINERS_STORAGE_CONF", delegated_environment)
+        self.assertNotIn("CRUCIBLE_MCP_HOST_SERVICE_STARTS", delegated_environment)
         self.assertEqual(operations.cdm_base_url, "http://127.0.0.1:3001")
 
     def test_indexing_service_bridge_reports_cli_start_failure(self):
