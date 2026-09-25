@@ -1,20 +1,30 @@
 import json
 import os
 import socket
+import sqlite3
+import subprocess
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock, patch
 from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
 
-from crucible_mcp.operations import CrucibleOperations, OperationError
+from crucible_mcp.operations import (
+    CrucibleOperations,
+    OperationError,
+    MAX_LOG_RESPONSE_BYTES,
+)
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.audit import AuditLogger
-from crucible_mcp.models import Job, JobState, ResultStatus
+from crucible_mcp.models import IndexedQueryStatus, Job, JobState, ResultStatus
 from crucible_mcp.policy import InputPolicy, rotate_token
-from crucible_mcp.server import IPv6ThreadingHTTPServer, MCPHandler
+from crucible_mcp.server import (
+    IPv6ThreadingHTTPServer,
+    MCPHandler,
+    _ensure_indexing_services,
+)
 from http.server import ThreadingHTTPServer
 
 
@@ -70,6 +80,28 @@ class TestServer(unittest.TestCase):
         response = connection.getresponse()
         return response.status, response.read(), response.headers
 
+    def create_completed_indexed_job(self, cdm_run_id):
+        job, _ = self.server.jobs.create_or_get(
+            f"indexed-status:{cdm_run_id}", {"cdm_run_id": cdm_run_id}
+        )
+        self.server.jobs.transition(job.mcp_job_id, JobState.STARTING)
+        self.server.jobs.transition(job.mcp_job_id, JobState.RUNNING)
+        self.server.jobs.transition(job.mcp_job_id, JobState.POSTPROCESSING)
+        self.server.jobs.transition(
+            job.mcp_job_id,
+            JobState.INDEXING,
+            cdm_run_id=cdm_run_id,
+            result_status=ResultStatus.PENDING.value,
+        )
+        job = self.server.jobs.transition(
+            job.mcp_job_id,
+            JobState.COMPLETED,
+            result_status=ResultStatus.AVAILABLE.value,
+        )
+        self.server.run_manager = Mock()
+        self.server.run_manager.refresh_result_status.side_effect = self.server.jobs.get
+        return job
+
     def test_health_requires_authentication(self):
         status, _ = self.request("GET", "/health")
         self.assertEqual(status, 401)
@@ -89,6 +121,22 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 405)
         self.assertEqual(payload, b"")
         self.assertEqual(headers["Allow"], "POST")
+
+    def test_invalid_content_length_does_not_echo_header_value(self):
+        secret = "ghp_" + "A" * 36
+
+        status, payload, _ = self.request_raw(
+            "POST",
+            "/mcp",
+            token=self.token,
+            extra_headers={"Content-Length": secret},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertNotIn(secret, payload.decode("utf-8"))
+        self.assertEqual(
+            json.loads(payload)["error"]["message"], "invalid request body"
+        )
 
     def test_mcp_origin_validation_allows_local_and_rejects_remote_origins(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
@@ -135,7 +183,12 @@ class TestServer(unittest.TestCase):
         self.assertIn("inputSchema", tools["start_run"])
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
         self.assertIn("plan_digest", tools["start_run"]["inputSchema"]["properties"])
+        self.assertIn(
+            "does not discover configured or reachable deployment targets",
+            tools["list_endpoints"]["description"],
+        )
         self.assertIn("inputSchema", tools["get_run_logs"])
+        self.assertIn("indexed_query_status", tools["get_run_status"]["description"])
         self.assertIn("offset", tools["list_local_runs"]["inputSchema"]["properties"])
         for tool_name in (
             "list_tools", "list_endpoints", "list_active_runs", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
@@ -199,7 +252,116 @@ class TestServer(unittest.TestCase):
                     request_id=request_id,
                 )
 
+    def test_tool_schema_errors_do_not_echo_rejected_values(self):
+        secret = "tool-argument-secret"
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_metric",
+                "arguments": {
+                    "run": "run-1",
+                    "source": "fio",
+                    "type": "IOPS",
+                    "resolution": f"password={secret}",
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+        self.assertNotIn(secret, json.dumps(payload))
+        self.assertIn("resolution", payload["error"]["message"])
+        self.assertIn("type constraint", payload["error"]["message"])
+
+    def test_operation_errors_redact_echoed_credential_values(self):
+        secret = "operation-error-secret"
+        self.server.operations.add_local_run_tags = Mock(
+            side_effect=OperationError("user", f"invalid tag: password={secret}", "invalid_tag")
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {
+                "name": "add_local_run_tags",
+                "arguments": {"run_path": "/approved/run", "tags": ["ignored"]},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertNotIn(secret, payload["error"]["message"])
+
+    def test_operation_error_redaction_limit_returns_safe_fallback(self):
+        secret = "oversized-error-secret"
+        message = "x" * 20000 + f" password={secret}"
+        self.server.operations.add_local_run_tags = Mock(
+            side_effect=OperationError("user", message, "invalid_tag")
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {
+                "name": "add_local_run_tags",
+                "arguments": {"run_path": "/approved/run", "tags": ["ignored"]},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertNotIn(secret, payload["error"]["message"])
+        self.assertIn("omitted for safety", payload["error"]["message"])
+
+    def test_job_status_redacts_credential_like_error_message(self):
+        secret = "job-error-secret"
+        job = Job(
+            mcp_job_id="failed-job",
+            idempotency_key="password=job-key-secret",
+            request_hash="hash",
+            state=JobState.FAILED,
+            result_status=ResultStatus.UNAVAILABLE,
+            error_category="infrastructure",
+            error_message=f"could not stage input: password={secret}",
+            run_directory="/var/lib/crucible/run/ghp_" + "A" * 36,
+        )
+        self.server.run_manager = Mock()
+        self.server.run_manager.refresh_result_status.return_value = job
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_status",
+                "arguments": {"mcp_job_id": "failed-job"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        job_status = payload["result"]["structuredContent"]
+        self.assertNotIn(secret, json.dumps(job_status))
+        self.assertNotIn("job-key-secret", json.dumps(job_status))
+        self.assertNotIn("ghp_" + "A" * 36, json.dumps(job_status))
+        self.assertEqual(
+            job_status["idempotency_key"], "password=[redacted]"
+        )
+        self.assertEqual(
+            job_status["error_message"], "could not stage input: password=[redacted]"
+        )
+
     def test_start_run_passes_plan_digest_and_returns_plan_summary(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
         plan = {
             "contract_version": "1",
             "input_digest": "digest",
@@ -255,6 +417,7 @@ class TestServer(unittest.TestCase):
             document=document,
             plan_digest="digest",
         )
+        ensure_services.assert_not_called()
 
     def test_start_run_rejects_stale_plan_digest(self):
         self.server.run_manager = Mock()
@@ -565,7 +728,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         info = payload["result"]["structuredContent"]
         self.assertTrue(info["execution_supported"])
-        self.assertEqual(info["mcp_contract_version"], "2")
+        self.assertEqual(info["mcp_contract_version"], "3")
         self.assertIn("start_run", info["capabilities"])
         self.assertIn("get_run_logs", info["capabilities"])
         self.assertIn("get_run_summary", info["capabilities"])
@@ -627,6 +790,309 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32602)
 
+    def test_indexed_query_tools_ensure_result_services(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        cases = (
+            ("list_indexed_results", {}, "list_indexed_results", {"run_ids": [], "count": 0}),
+            ("get_indexed_result", {"run": "run-1"}, "get_indexed_result", {"run_id": "run-1"}),
+            ("list_indexed_periods", {"run": "run-1"}, "list_indexed_periods", {"periods": []}),
+            (
+                "get_indexed_metric",
+                {"run": "run-1", "source": "fio", "type": "IOPS", "period": "measurement"},
+                "get_indexed_metric",
+                {"data": []},
+            ),
+        )
+        for request_id, (tool, arguments, method, result) in enumerate(cases, start=60):
+            ensure_services.reset_mock()
+            operation = Mock(return_value=result)
+            setattr(self.server.operations, method, operation)
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments},
+            })
+
+            status, payload = self.request("POST", "/mcp", body, self.token)
+
+            with self.subTest(tool=tool):
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["result"]["structuredContent"], result)
+                ensure_services.assert_called_once_with()
+                operation.assert_called_once()
+
+    def test_indexed_query_service_start_failure_is_structured(self):
+        job = self.create_completed_indexed_job("cdm-run-unavailable")
+        ensure_services = Mock(
+            side_effect=OperationError(
+                "framework", "start OpenSearch/CDM", "result_services_unavailable"
+            )
+        )
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        operation = Mock()
+        self.server.operations.get_indexed_result = operation
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 64,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_result",
+                "arguments": {"run": "cdm-run-unavailable"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("result_services_unavailable", payload["error"]["message"])
+        operation.assert_not_called()
+
+        status_body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 65,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_status",
+                "arguments": {"mcp_job_id": job.mcp_job_id},
+            },
+        })
+        status, status_payload = self.request("POST", "/mcp", status_body, self.token)
+
+        self.assertEqual(status, 200)
+        status_value = status_payload["result"]["structuredContent"]
+        self.assertEqual(status_value["result_status"], "available")
+        self.assertEqual(
+            status_value["indexed_query_status"],
+            IndexedQueryStatus.UNAVAILABLE.value,
+        )
+        self.assertIsNotNone(status_value["indexed_query_checked_at"])
+        self.assertNotIn("results_ready", status_value)
+        ensure_services.assert_called_once_with()
+
+    def test_indexed_query_success_records_readiness_without_status_probe(self):
+        job = self.create_completed_indexed_job("cdm-run-ready")
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.operations.get_indexed_result = Mock(
+            return_value={"run_id": "cdm-run-ready"}
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 66,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_result",
+                "arguments": {"run": "cdm-run-ready"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        ensure_services.assert_called_once_with()
+        self.server.operations.get_indexed_result.assert_called_once_with("cdm-run-ready")
+        updated = self.server.jobs.get(job.mcp_job_id)
+        self.assertEqual(updated.result_status, ResultStatus.AVAILABLE)
+        self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
+        self.assertIsNotNone(updated.indexed_query_checked_at)
+
+        status_body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 67,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_status",
+                "arguments": {"mcp_job_id": job.mcp_job_id},
+            },
+        })
+        status, status_payload = self.request("POST", "/mcp", status_body, self.token)
+
+        self.assertEqual(status, 200)
+        status_value = status_payload["result"]["structuredContent"]
+        self.assertEqual(status_value["result_status"], "available")
+        self.assertEqual(status_value["indexed_query_status"], "ready")
+        self.assertIsNotNone(status_value["indexed_query_checked_at"])
+        ensure_services.assert_called_once_with()
+
+    def test_list_indexed_results_records_each_comma_separated_run(self):
+        first_job = self.create_completed_indexed_job("cdm-run-first")
+        second_job = self.create_completed_indexed_job("cdm-run-second")
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.operations.list_indexed_results = Mock(
+            return_value={"run_ids": ["cdm-run-first", "cdm-run-second"]}
+        )
+        run_filter = "cdm-run-first,cdm-run-second"
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 69,
+            "method": "tools/call",
+            "params": {
+                "name": "list_indexed_results",
+                "arguments": {"run": run_filter},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        self.server.operations.list_indexed_results.assert_called_once_with(run=run_filter)
+        self.assertEqual(
+            self.server.jobs.get(first_job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.READY,
+        )
+        self.assertEqual(
+            self.server.jobs.get(second_job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.READY,
+        )
+        ensure_services.assert_called_once_with()
+
+    def test_cdm_query_failure_marks_run_readiness_unavailable(self):
+        job = self.create_completed_indexed_job("cdm-run-query-failed")
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.operations.get_indexed_result = Mock(
+            side_effect=OperationError(
+                "framework", "CDM query is unavailable", "result_query_failed"
+            )
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 68,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_result",
+                "arguments": {"run": "cdm-run-query-failed"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        ensure_services.assert_called_once_with()
+        self.assertEqual(
+            self.server.jobs.get(job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.UNAVAILABLE,
+        )
+
+    def test_invalid_metric_window_does_not_start_services(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 66,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_metric",
+                "arguments": {"run": "run-1", "source": "fio", "type": "IOPS"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("invalid_metric_range", payload["error"]["message"])
+        ensure_services.assert_not_called()
+
+    def test_cli_backed_indexing_does_not_prestart_result_services(self):
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.run_manager = Mock()
+        job = Job(
+            mcp_job_id="index-job",
+            idempotency_key="index-key",
+            request_hash="hash",
+            state=JobState.QUEUED,
+            result_status=ResultStatus.NOT_AVAILABLE,
+            operation="index",
+        )
+        self.server.run_manager.submit_processing.return_value = (job, True)
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 65,
+            "method": "tools/call",
+            "params": {
+                "name": "index_local_run",
+                "arguments": {"idempotency_key": "index-key", "run_path": "/var/lib/crucible/run/run-1"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        ensure_services.assert_not_called()
+        self.server.run_manager.submit_processing.assert_called_once()
+
+    def test_indexing_service_bridge_starts_cli_and_refreshes_configured_port(self):
+        home = Path(self.directory.name)
+        config_dir = home / "config"
+        config_dir.mkdir()
+        (config_dir / "services.json").write_text(
+            json.dumps({"cdm-server": {"port": 3001}}), encoding="utf-8"
+        )
+        operations = CrucibleOperations(home, cdm_base_url="http://127.0.0.1:3000")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "CRUCIBLE_MCP_SESSION_ID": "parent-mcp-session",
+                    "CRUCIBLE_MCP_EVENT_FILE": "/tmp/parent-events.jsonl",
+                    "SESSION_ID": "parent-mcp-session",
+                    "CONTAINER_HOST": "unix:///nested/podman.sock",
+                    "CONTAINERS_STORAGE_CONF": "/container/storage.conf",
+                    "CRUCIBLE_MCP_HOST_SERVICE_STARTS": "true",
+                },
+            ),
+            patch("crucible_mcp.server.subprocess.run", return_value=Mock(returncode=0)) as run,
+        ):
+            _ensure_indexing_services(home, operations)
+
+        run.assert_called_once_with(
+            [
+                "nsenter",
+                "--mount=/proc/1/ns/mnt",
+                "--cgroup=/proc/1/ns/cgroup",
+                "--net=/proc/1/ns/net",
+                "--root=/proc/1/root",
+                "--wdns=/",
+                "--",
+                str(home / "bin" / "crucible"),
+                "start",
+                "opensearch",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=ANY,
+            timeout=240,
+            check=False,
+        )
+        delegated_environment = run.call_args.kwargs["env"]
+        self.assertNotIn("CRUCIBLE_MCP_SESSION_ID", delegated_environment)
+        self.assertNotIn("CRUCIBLE_MCP_EVENT_FILE", delegated_environment)
+        self.assertNotIn("SESSION_ID", delegated_environment)
+        self.assertNotIn("CONTAINER_HOST", delegated_environment)
+        self.assertNotIn("CONTAINERS_STORAGE_CONF", delegated_environment)
+        self.assertNotIn("CRUCIBLE_MCP_HOST_SERVICE_STARTS", delegated_environment)
+        self.assertEqual(operations.cdm_base_url, "http://127.0.0.1:3001")
+
+    def test_indexing_service_bridge_reports_cli_start_failure(self):
+        home = Path(self.directory.name)
+        operations = CrucibleOperations(home)
+        with patch("crucible_mcp.server.subprocess.run", return_value=Mock(returncode=1)):
+            with self.assertRaises(OperationError) as raised:
+                _ensure_indexing_services(home, operations)
+        self.assertEqual(raised.exception.code, "result_services_unavailable")
+
     def test_job_store_errors_return_json_rpc_errors(self):
         self.server.run_manager = Mock()
         self.server.run_manager.get_logs.side_effect = JobNotFoundError("unknown MCP job: missing")
@@ -667,6 +1133,164 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32009)
 
+    def test_get_run_logs_redacts_credentials_and_preserves_raw_offsets(self):
+        raw_text = (
+            "worker initialized before the run\n"
+            "crucible run --roadblock-password=roadblock-secret "
+            "--token token-secret --bearer=bearer-secret "
+            "--credential credential-secret\n"
+            "Authorization: Bearer authorization-secret\n"
+            'crucible run --token="\n'
+            "quoted-shell-secret\n"
+            'closing quote"\n'
+            "TOKEN=$(cat <<EOF\n"
+            "server-heredoc-secret\n"
+            "EOF\n"
+            "{\n  \"password\":\n  \"json-secret\"\n}\n"
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            "private-key-material\n"
+            "-----END OPENSSH PRIVATE KEY-----\n"
+            "worker completed teardown successfully\n"
+        )
+        raw_offset = len(raw_text.encode("utf-8"))
+        self.server.run_manager = Mock()
+        self.server.run_manager.get_logs.return_value = {
+            "job_id": "log-job",
+            "offset": 0,
+            "next_offset": raw_offset,
+            "complete": True,
+            "text": raw_text,
+        }
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_logs",
+                "arguments": {"mcp_job_id": "log-job"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        structured = payload["result"]["structuredContent"]
+        serialized = json.dumps(payload)
+        for secret in (
+            "roadblock-secret",
+            "token-secret",
+            "bearer-secret",
+            "credential-secret",
+            "authorization-secret",
+            "quoted-shell-secret",
+            "server-heredoc-secret",
+            "json-secret",
+            "private-key-material",
+        ):
+            with self.subTest(secret=secret):
+                self.assertNotIn(secret, structured["text"])
+                self.assertNotIn(secret, payload["result"]["content"][0]["text"])
+                self.assertNotIn(secret, serialized)
+        self.assertEqual(structured["next_offset"], raw_offset)
+        self.assertTrue(structured["redacted"])
+        self.assertGreaterEqual(structured["redacted_lines"], 5)
+        self.assertIn("worker initialized before the run", structured["text"])
+        self.assertIn("worker completed teardown successfully", structured["text"])
+
+    def test_logger_tools_redact_credentials_in_mcp_content_and_structure(self):
+        database = self.token_path.parent / "logger.db"
+        with sqlite3.connect(database) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE sources (id INTEGER PRIMARY KEY, source TEXT);
+                CREATE TABLE commands (id INTEGER PRIMARY KEY, command TEXT);
+                CREATE TABLE sessions (
+                    id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT,
+                    source INTEGER, command INTEGER
+                );
+                CREATE TABLE streams (id INTEGER PRIMARY KEY, stream TEXT);
+                CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER, stream INTEGER, timestamp, line TEXT);
+                INSERT INTO streams VALUES (1, 'STDOUT');
+                INSERT INTO sources VALUES (1, 'runner');
+                INSERT INTO commands VALUES (1, 'crucible run --roadblock-passwd=command-secret');
+                INSERT INTO sessions VALUES (1, 'sensitive-session', 't0', 1, 1);
+                INSERT INTO lines VALUES (1, 1, 1, 1, 'remotehosts --roadblock-passwd=line-secret');
+                INSERT INTO lines VALUES (2, 1, 1, 2, '-----BEGIN OPENSSH PRIVATE KEY-----');
+                INSERT INTO lines VALUES (3, 1, 1, 3, 'private-key-material');
+                INSERT INTO lines VALUES (4, 1, 1, 4, '-----END OPENSSH PRIVATE KEY-----');
+                """
+            )
+        self.server.operations.log_db = database
+
+        def call_tool(name, arguments, request_id):
+            return self.request(
+                "POST",
+                "/mcp",
+                json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                    "params": {"name": name, "arguments": arguments},
+                }),
+                self.token,
+            )
+
+        for name, arguments in (
+            ("list_log_sessions", {}),
+            ("get_log_session", {"session_id": "sensitive-session", "offset": 2, "limit": 1}),
+            ("search_logs", {"query": ".*", "session_id": "sensitive-session"}),
+        ):
+            with self.subTest(tool=name):
+                status, payload = call_tool(name, arguments, 70)
+                self.assertEqual(status, 200)
+                serialized = json.dumps(payload)
+                for secret in ("command-secret", "line-secret", "private-key-material"):
+                    self.assertNotIn(secret, serialized)
+
+    def test_get_run_logs_bounds_the_serialized_response_resumably(self):
+        raw_text = "\0" * 300_000
+        self.server.run_manager = Mock()
+
+        def read_logs(job_id, offset, limit):
+            chunk = raw_text[offset : offset + limit]
+            next_offset = offset + len(chunk.encode("utf-8"))
+            return {
+                "job_id": job_id,
+                "offset": offset,
+                "next_offset": next_offset,
+                "complete": next_offset == len(raw_text),
+                "text": chunk,
+            }
+
+        self.server.run_manager.get_logs.side_effect = read_logs
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_logs",
+                "arguments": {
+                    "mcp_job_id": "large-log-job",
+                    "offset": 0,
+                    "limit": 1_048_576,
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertLessEqual(
+            len(json.dumps(payload, separators=(",", ":")).encode("utf-8")),
+            MAX_LOG_RESPONSE_BYTES,
+        )
+        structured = payload["result"]["structuredContent"]
+        self.assertEqual(structured["next_offset"], len(structured["text"].encode("utf-8")))
+        self.assertGreater(structured["next_offset"], 0)
+        self.assertLess(structured["next_offset"], len(raw_text))
+        self.assertFalse(structured["complete"])
+        self.assertGreater(self.server.run_manager.get_logs.call_count, 1)
+
     def test_non_string_paths_return_json_rpc_errors(self):
         for tool_name in ("validate_run", "start_run"):
             arguments = {"path": None}
@@ -692,6 +1316,35 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32602)
+
+    def test_get_run_summary_passes_request_id_to_response_bound(self):
+        self.server.run_manager = Mock()
+        expected = {
+            "job_id": "job-1",
+            "result_status": "available",
+            "summary": {"run": "complete"},
+        }
+        self.server.run_manager.get_summary.return_value = expected
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": "summary-request",
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_summary",
+                "arguments": {"mcp_job_id": "job-1"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload["result"]["structuredContent"],
+            expected,
+        )
+        self.server.run_manager.get_summary.assert_called_once_with(
+            "job-1", request_id="summary-request"
+        )
 
     def test_tool_audit_records_tool_name_and_generated_job_id(self):
         audit_path = Path(self.directory.name) / "audit.jsonl"
@@ -743,6 +1396,32 @@ class TestOriginValidation(unittest.TestCase):
         handler.send_header = Mock()
         handler.end_headers = Mock()
         return handler
+
+    def test_audit_write_redacts_client_controlled_operation_and_job_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit_path = root / "audit.jsonl"
+            handler = self.handler()
+            handler.client_address = ("127.0.0.1", 12345)
+            handler.server.audit = AuditLogger(audit_path)
+            handler.server.operations = CrucibleOperations(
+                root, InputPolicy([root / "inputs"])
+            )
+            operation_secret = "notification-operation-secret"
+            job_secret = "ghp_" + "A" * 36
+
+            MCPHandler._audit(
+                handler,
+                f"password={operation_secret}",
+                "denied",
+                job_id=job_secret,
+            )
+
+            record = json.loads(audit_path.read_text(encoding="utf-8"))
+            self.assertNotIn(operation_secret, json.dumps(record))
+            self.assertNotIn(job_secret, json.dumps(record))
+            self.assertEqual(record["operation"], "password=[redacted]")
+            self.assertEqual(record["job_id"], "[redacted]")
 
     def test_wildcard_bind_accepts_allowlisted_origin_on_another_port(self):
         handler = self.handler()

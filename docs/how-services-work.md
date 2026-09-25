@@ -186,6 +186,18 @@ MCP-owned jobs prevent service shutdown while they are queued, running,
 post-processing, indexing, or awaiting recovery. This protects jobs that are
 not represented by an active Rickshaw container.
 
+MCP supervises jobs in its service process, but executes every Crucible CLI
+job in the host mount, network, and cgroup namespaces with the host root. This
+includes `crucible run`, local post-processing and indexing, archive and
+unarchive, and indexed-result deletion. The CLI therefore sees the same
+Crucible checkout, configuration, filesystem, and Podman store as a host CLI
+invocation; the MCP controller does not create a separate container store for
+these operations. Dependencies are started by the same host-side CLI process
+and use its normal readiness checks. Host service containers remain running
+after a job completes and can be stopped through normal host service
+management. Running MCP requires the privilege to enter the host namespaces
+used for these CLI jobs.
+
 #### MCP tools
 
 The MCP endpoint is available at `http[s]://<bind>:<port>/mcp`, depending on
@@ -196,19 +208,19 @@ through the standard `tools/list` request; the current interface is:
 | Tool | Purpose |
 | --- | --- |
 | `crucible_info` | Report the MCP contract version and supported capabilities. |
-| `list_tools` | List installed Crucible tools and their metadata. |
-| `list_endpoints` | List installed endpoint implementations, schemas, and coarse capabilities. |
-| `list_active_runs` | List active MCP jobs, including runs and maintenance operations, with cursor pagination. |
-| `list_benchmarks` | List installed benchmarks. |
+| `list_tools` | List installed Crucible tools and their credential-redacted metadata. |
+| `list_endpoints` | List installed endpoint types, schemas, and coarse capabilities; credential-like schema descriptions are redacted. It does not discover configured or reachable targets; callers supply target-specific endpoint configuration. |
+| `list_active_runs` | List active MCP jobs, including runs and maintenance operations, with cursor pagination; credential-like text in job metadata and errors is redacted. |
+| `list_benchmarks` | List installed benchmarks and credential-redacted metadata. |
 | `list_local_runs` | List local run artifacts from approved run roots with bounded responses and offset pagination. |
-| `get_local_run_summary` | Read a completed result summary from an approved local run artifact. |
+| `get_local_run_summary` | Read a completed result summary with credential-like fields redacted. |
 | `get_local_run_metadata` | Read rickshaw run metadata from an approved local run artifact. |
 | `list_run_artifacts` | List metadata for approved artifacts in a local run. |
-| `get_run_artifact` | Read a bounded UTF-8 slice of an approved text artifact. |
+| `get_run_artifact` | Read a bounded, credential-redacted UTF-8 slice of an approved text artifact. |
 | `list_local_archives` | List local run archives without accessing remote archive backends. |
 | `archive_local_run` | Archive an approved local run and remove the live run after success. |
 | `unarchive_local_run` | Restore a local run archive into the approved run root. |
-| `describe_benchmark` | Return metadata for one installed benchmark. |
+| `describe_benchmark` | Return credential-redacted metadata for one installed benchmark, including accepted parameter validation rules from `multiplex.json` when available. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `prepare_run` | Build a bounded, side-effect-free plan showing benchmark expansion, samples, tools, and static topology. |
 | `estimate_run` | Return derived run counts and runtime-confidence information without executing the run. |
@@ -219,18 +231,38 @@ through the standard `tools/list` request; the current interface is:
 | `list_local_run_tags` | List tags from an approved local run result. |
 | `add_local_run_tags` | Add or replace tags in an approved local run result. |
 | `remove_local_run_tags` | Remove named tags from an approved local run result. |
-| `get_run_status` | Poll the lifecycle and result-readiness state of a submitted run. |
-| `get_run_logs` | Read a bounded slice of runner output for a submitted run. |
-| `get_run_summary` | Retrieve the summary of a completed submitted run. |
+| `get_run_status` | Poll lifecycle state, local summary status, and the last observed indexed-query readiness for a submitted run; credential-like text in job metadata and errors is redacted. |
+| `get_run_logs` | Read a bounded, credential-redacted slice of runner output; pagination offsets refer to raw log bytes, and the response reports `redacted` plus the number of affected `redacted_lines`. |
+| `get_run_summary` | Retrieve a credential-redacted summary of a completed submitted run when the serialized MCP response fits the 1 MiB response budget. |
 | `list_indexed_results` | Search historical indexed result run IDs through CDM. |
 | `get_indexed_result` | Retrieve structured metadata for one historical indexed run. |
 | `list_indexed_periods` | List every primary period and sample associated with an indexed run. |
-| `get_indexed_metric` | Query indexed metric data for a historical run with bounded range and resolution options. |
-| `list_log_sessions` | List recent logger sessions without returning their full contents. |
+| `get_indexed_metric` | Query indexed metric data for a historical run with bounded range and resolution options; credential-like text fields are redacted. |
+| `list_log_sessions` | List recent logger sessions without returning their full contents; command metadata is credential-redacted. |
 | `get_log_info` | Return aggregate counts from the logger database. |
-| `get_log_session` | Read a bounded, structured slice of one logger session with optional stream and regex filters. |
-| `search_logs` | Search logger lines across sessions with bounded regex, stream, and time filters. |
-| `search_documentation` | Search the curated user-facing Crucible documentation catalog. |
+| `get_log_session` | Read a bounded, credential-redacted structured slice of one logger session with optional stream and regex filters. |
+| `search_logs` | Search logger lines across sessions with bounded regex, stream, and time filters; returned lines, command metadata, and query text are credential-redacted. |
+| `search_documentation` | Search curated user-facing documentation; credential-like values in the returned query are redacted. |
+
+`get_run_status` includes `cdm_run_id` when the result summary identifies one
+unique CDM run. If the summary contains multiple run IDs, select the desired ID
+from the summary rather than relying on an arbitrary status value.
+
+In `get_run_status`, `result_status` describes the local result-summary
+artifact only: `available` means the summary can be read, not that CDM-backed
+queries are ready. `indexed_query_status` is tracked separately as
+`not_checked`, `ready`, or `unavailable`; `indexed_query_checked_at` records
+when an indexed query last observed that state. A run-scoped indexed query
+updates these fields for the matching MCP job. Status polling itself does not
+start services or probe CDM, and the indexed-query state is only the last
+observation—not a guarantee that the service is still available. Indexed tools
+continue to return an actionable error if OpenSearch/CDM cannot be started or
+reached.
+
+`get_run_logs` redacts affected line fragments without suppressing unrelated
+lines in the same page. Its `redacted` flag and `redacted_lines` count describe
+redaction within that response page; offsets and `next_offset` remain based on
+the original log bytes, not the rendered text.
 
 `validate_run` is intentionally limited to Crucible run documents: clients can
 validate an inline run document or an approved run-file path. The CLI's other
@@ -238,6 +270,31 @@ validation types—such as multiplex, workshop, tool metadata, repository,
 service, and registry configuration—remain CLI-only because they support
 benchmark/tool development or host administration rather than normal MCP run
 execution.
+
+`validate_run` checks Crucible's run-file schema and installed benchmark names;
+it does not expand benchmark parameters. `describe_benchmark` exposes each
+benchmark's bounded `parameter_validation.rules` from its `multiplex.json`,
+including the parameter names and accepted patterns. `prepare_run` performs
+the canonical parameter expansion and reports confirmed value mismatches with
+code `invalid_parameter`, the benchmark name, and a pointer back to those
+rules. Other expansion failures retain their error classification without
+returning raw exception detail. Run-schema, tool-schema, and parameter-error
+responses do not echo rejected values, since run-file values can contain
+credentials.
+
+Credential-like content in installed benchmark, tool, and endpoint descriptive
+metadata is redacted before discovery responses are returned. Endpoint names
+containing recognized credential-like values are omitted, and redacted schema
+metadata makes endpoint discovery report `complete: false`. Indexed result IDs,
+run metadata, period identifiers, and metric text fields are redacted while
+numeric measurements are preserved. Tool argument validation errors do not echo rejected
+instances, and credential-like text in operation errors and job status
+messages is redacted before it is returned. Audit records redact
+credential-like text in operation labels and caller-supplied job IDs before
+persistence.
+Local run and archive discovery omits entries when a recognized credential-like
+value appears in their names or paths; credential-shaped run IDs are omitted
+from local run listings as well.
 
 `prepare_run` and `estimate_run` are read-only planning operations. They reuse
 Rickshaw's canonical parameter-expansion rules through the installed planning
@@ -294,7 +351,8 @@ or a completed MCP job ID as their source.
 `delete_indexed_result` accepts an indexed run ID and operates only on the
 configured OpenSearch/CDM result; it does not remove local run files.
 `get_local_run_summary` reads the local `run/result-summary.json` artifact and
-does not query CDM.
+does not query CDM. Credential-like fields in local and MCP-job summaries are
+redacted before they are returned.
 `get_local_run_metadata` reads the local `rickshaw-run.json[.xz]` artifact and
 does not query CDM. Credential-like fields are recursively replaced with
 `[redacted]` before metadata is returned; this includes passwords, tokens,
@@ -304,8 +362,12 @@ metadata.
 approved result subtrees: `run/iterations`, `run/tool-data`, `run/sysinfo`, and
 `run/opensearch`, plus `run/result-summary.json`. `get_run_artifact` accepts
 those returned relative paths but retrieves only bounded UTF-8 text from the
-allowlisted subtrees; configuration files, credentials, archives, symlinks,
-environment dumps, binary files, and compressed artifacts are not retrievable.
+allowlisted subtrees; credential-like content is redacted while raw-file byte
+offsets are preserved. To keep content inspection bounded, an individual
+artifact larger than 8 MiB is rejected. Configuration files, credentials,
+archives, symlinks, environment dumps, binary files, and compressed artifacts
+are not retrievable. Artifact paths containing recognized credential-like
+values are omitted from listings and denied for direct reads.
 Both artifact tools accept a completed or failed terminal MCP job ID when the
 job retained a run directory, which supports inspection of failed runs.
 Offsets and limits
@@ -317,7 +379,9 @@ bounded-result error rather than scanning the run tree indefinitely.
 Local archive management is limited to the configured local archive directory;
 remote archive backends are not exposed through MCP.
 Tag operations accept an approved run directory or a completed MCP job ID and
-update the local `rickshaw-run.json[.xz]` artifact. They do not automatically
+update the local `rickshaw-run.json[.xz]` artifact. Credential-like tag values
+are redacted in MCP responses, including tag values read from indexed results.
+They do not automatically
 re-index the result in CDM; run `index_local_run` separately when the indexed result
 must reflect the tag change.
 Metric queries should pass a `primary_period_id` returned by
@@ -328,6 +392,20 @@ use Crucible's configured logger database. `get_log_session` uses offsets for
 bounded polling and does not provide the CLI's live `--follow` mode. Run-file
 submission remains restricted to the configured `input-root` and its policy
 checks.
+Before the direct indexed-result and metric tools call CDM, the MCP server runs
+the host-side `crucible start opensearch` service path. OpenSearch and its CDM
+companion are started when needed, with the CLI's existing readiness probes for
+services it launches. If startup fails, the MCP request returns a structured
+`result_services_unavailable` error with a suggested host CLI command and log
+checks. CLI-backed tools use the same host execution context and ordinary CLI
+service-start behavior. If startup fails for a CLI-backed job, its job status
+and runner log report the failure.
+Logger tools redact recognized credential-like values from command metadata and
+returned lines, including private-key blocks that span logger rows or response
+pages. Search matching is performed against the original log line, but matching
+text is still redacted in the response. If the bounded history needed to
+reconstruct private-key state is unavailable or exceeds its limits, that
+session/stream's returned lines are redacted fail-closed.
 
 For example, after obtaining the token, a client can verify service health
 with:
@@ -420,6 +498,14 @@ Some services require readiness verification after starting:
 - **OpenSearch**: Two-stage check — first waits for the HTTP
   endpoint to respond, then waits for cluster health to reach
   "yellow" or "green" status
+- **MCP server**: Authenticated `GET /health` must respond within
+  30 seconds. This confirms the MCP HTTP process is serving requests;
+  it does not check CDM readiness, endpoint connectivity, or engine-image
+  availability.
+
+An image-sourcing health check confirms that the builder is ready to accept
+requests, not that a particular benchmark image has already been built. Engine
+images are requested and cached as part of a run.
 
 ### Run protection
 

@@ -9,18 +9,27 @@ shell commands or exposing arbitrary filesystem access.
 import argparse
 import base64
 import json
+import os
 import socket
 import ssl
+import subprocess
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from jsonschema import Draft201909Validator
 
-from .jobs import JobConflictError, JobNotFoundError, JobStore
-from .models import Job, JobState
-from .operations import CrucibleOperations, OperationError, MAX_PLAN_RESPONSE_BYTES
+from .jobs import JobConflictError, JobError, JobNotFoundError, JobStore
+from .models import IndexedQueryStatus, Job, JobState
+from .operations import (
+    CrucibleOperations,
+    OperationError,
+    MAX_LOG_RESPONSE_BYTES,
+    MAX_PLAN_RESPONSE_BYTES,
+)
+from .host import host_context_command, host_context_environment
 from .policy import InputPolicy, PolicyError, read_token, token_matches
 from .runner import RunManager
 from .audit import AuditLogger
@@ -65,12 +74,21 @@ TOOL_NAMES = (
     "search_documentation",
 )
 
+_INDEXED_RESULT_TOOLS = {
+    "list_indexed_results",
+    "get_indexed_result",
+    "list_indexed_periods",
+    "get_indexed_metric",
+}
+_RESULT_SERVICE_START_LOCK = threading.Lock()
+_RESULT_SERVICE_START_TIMEOUT = 240
+
 _EMPTY_INPUT = {"type": "object", "properties": {}, "additionalProperties": False}
 TOOL_DEFINITIONS = (
     {"name": "crucible_info", "description": "Describe Crucible MCP capabilities.", "inputSchema": _EMPTY_INPUT},
     {
         "name": "list_tools",
-        "description": "List installed Crucible tools and their metadata.",
+        "description": "List installed Crucible tools and their credential-redacted metadata.",
         "inputSchema": {
             "type": "object",
             "properties": {"name": {"type": "string", "minLength": 1}},
@@ -79,12 +97,20 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "list_endpoints",
-        "description": "List installed endpoint implementations, schemas, and coarse capabilities.",
+        "description": (
+            "List installed endpoint types, schemas, and coarse capabilities. "
+            "Credential-like text in schema descriptions is redacted. "
+            "This does not discover configured or reachable deployment targets; "
+            "the caller must supply target-specific endpoint configuration."
+        ),
         "inputSchema": _EMPTY_INPUT,
     },
     {
         "name": "list_active_runs",
-        "description": "List active MCP jobs, including runs and maintenance operations.",
+        "description": (
+            "List active MCP jobs, including runs and maintenance operations; "
+            "credential-like text in job metadata and errors is redacted."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -94,7 +120,7 @@ TOOL_DEFINITIONS = (
             "additionalProperties": False,
         },
     },
-    {"name": "list_benchmarks", "description": "List installed Crucible benchmarks.", "inputSchema": _EMPTY_INPUT},
+    {"name": "list_benchmarks", "description": "List installed Crucible benchmarks and credential-redacted metadata.", "inputSchema": _EMPTY_INPUT},
     {
         "name": "list_local_runs",
         "description": "List local run artifacts from approved run roots.",
@@ -109,7 +135,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_local_run_summary",
-        "description": "Read a completed result summary from an approved local run artifact.",
+        "description": "Read a completed result summary with credential-like fields redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {"run_path": {"type": "string", "minLength": 1}},
@@ -119,7 +145,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_local_run_metadata",
-        "description": "Read rickshaw run metadata from an approved local run artifact.",
+        "description": "Read rickshaw run metadata from an approved local run artifact with credential-like fields redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {"run_path": {"type": "string", "minLength": 1}},
@@ -149,7 +175,10 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_artifact",
-        "description": "Read a bounded UTF-8 slice of an approved local run artifact.",
+        "description": (
+            "Read a bounded, credential-redacted UTF-8 slice of an approved local run artifact. "
+            "Offsets refer to raw file bytes; artifacts over 8 MiB are rejected."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -207,7 +236,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_indexed_result",
-        "description": "Get structured metadata for a historical CDM run.",
+        "description": "Get structured metadata for a historical CDM run; credential-like tag values are redacted.",
         "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
     },
     {
@@ -217,7 +246,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_indexed_metric",
-        "description": "Query metric data for a historical CDM run.",
+        "description": "Query metric data for a historical CDM run; credential-like text fields are redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -251,7 +280,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "search_logs",
-        "description": "Search Crucible logger lines across sessions.",
+        "description": "Search Crucible logger lines across sessions; returned matches, commands, and query text are credential-redacted.",
         "inputSchema": {"type": "object", "properties": {
             "query": {"type": "string", "minLength": 1, "maxLength": 256},
             "session_id": {"type": "string", "minLength": 1},
@@ -264,7 +293,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "describe_benchmark",
-        "description": "Describe an installed benchmark.",
+        "description": "Describe an installed benchmark with credential-like metadata redacted, including accepted parameter validation rules when available.",
         "inputSchema": {
             "type": "object",
             "properties": {"name": {"type": "string", "minLength": 1}},
@@ -274,7 +303,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "validate_run",
-        "description": "Validate an inline run document or approved run-file path.",
+        "description": "Validate an inline run document or approved run-file path without echoing rejected values.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -337,7 +366,13 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_status",
-        "description": "Get lifecycle and result readiness for an MCP run.",
+        "description": (
+            "Get lifecycle state, local-summary result_status, and indexed_query_status "
+            "(not_checked, ready, or unavailable) for an MCP run. result_status describes "
+            "summary availability, not CDM query readiness; indexed_query_checked_at "
+            "identifies the last observation. Polling does not start or probe services. "
+            "Credential-like text in job metadata and errors is redacted."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {"mcp_job_id": {"type": "string", "minLength": 1}},
@@ -347,7 +382,11 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_logs",
-        "description": "Retrieve bounded runner logs.",
+        "description": (
+            "Retrieve bounded runner logs with raw-byte pagination. Sensitive log lines "
+            "are redacted while unrelated lines are preserved; redacted and redacted_lines "
+            "indicate page-level redaction."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -361,7 +400,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_run_summary",
-        "description": "Retrieve a completed run summary when results are ready.",
+        "description": "Retrieve a completed run summary with credential-like fields redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {"mcp_job_id": {"type": "string", "minLength": 1}},
@@ -399,7 +438,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "list_local_run_tags",
-        "description": "List tags from an approved local run result.",
+        "description": "List tags from an approved local run result with credential-like values redacted.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1}},
@@ -408,7 +447,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "add_local_run_tags",
-        "description": "Add or replace tags on an approved local run result.",
+        "description": "Add or replace tags on an approved local run result; returned credential-like values are redacted.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1},
@@ -418,7 +457,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "remove_local_run_tags",
-        "description": "Remove named tags from an approved local run result.",
+        "description": "Remove named tags from an approved local run result; returned credential-like values are redacted.",
         "inputSchema": {"type": "object", "properties": {
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1},
@@ -428,7 +467,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "search_documentation",
-        "description": "Search curated user-facing Crucible documentation.",
+        "description": "Search curated user-facing Crucible documentation; credential-like values in the returned query are redacted.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -483,8 +522,23 @@ class TLSIPv6ThreadingHTTPServer(TLSHTTPServerMixin, IPv6ThreadingHTTPServer):
     """IPv6 threaded HTTPS server with worker-bound TLS handshakes."""
 
 
-def _job_status(job: Job) -> dict[str, Any]:
-    return job.as_dict()
+def _job_status(job: Job, operations: CrucibleOperations | None = None) -> dict[str, Any]:
+    value = job.as_dict()
+    if operations is not None:
+        value = operations._redact_summary(value)
+    return value
+
+
+def _indexed_query_run_ids(name: str, arguments: dict[str, Any]) -> list[str]:
+    run_filter = arguments.get("run")
+    if not isinstance(run_filter, str) or not run_filter:
+        return []
+    if name == "list_indexed_results":
+        return list(dict.fromkeys(
+            run_id for part in run_filter.split(",")
+            if (run_id := part.strip())
+        ))
+    return [run_filter]
 
 
 def _encode_active_cursor(job: Job) -> str:
@@ -623,8 +677,12 @@ class MCPHandler(BaseHTTPRequestHandler):
                 self._empty(202)
                 return
             response = self._dispatch(request)
-        except (ValueError, json.JSONDecodeError) as exc:
-            response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": str(exc)}}
+        except (ValueError, json.JSONDecodeError):
+            response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "invalid request body"},
+            }
         operation, job_id = self._audit_context(request, response)
         self._audit(
             operation,
@@ -691,6 +749,26 @@ class MCPHandler(BaseHTTPRequestHandler):
     def _audit(self, operation: str, outcome: str, job_id: str | None = None) -> None:
         audit = getattr(self.server, "audit", None)
         if audit is not None:
+            operations = getattr(self.server, "operations", None)
+            redactor = getattr(operations, "redact_log_text", None)
+            if not isinstance(operation, str):
+                operation = "invalid"
+            if callable(redactor):
+                operation = redactor(operation)
+                job_id = redactor(job_id) if isinstance(job_id, str) else None
+            else:
+                known_operations = {
+                    "health",
+                    "mcp",
+                    "initialize",
+                    "ping",
+                    "tools/list",
+                    "tools/call",
+                    "resources/list",
+                    "resources/read",
+                } | set(_TOOL_SCHEMAS)
+                operation = operation if operation in known_operations else "unknown"
+                job_id = None
             audit.record(
                 operation=operation,
                 outcome=outcome,
@@ -795,8 +873,25 @@ class MCPHandler(BaseHTTPRequestHandler):
             return self._error(request_id, -32602, "unknown tool")
         validation_error = next(iter(Draft201909Validator(schema).iter_errors(arguments)), None)
         if validation_error is not None:
-            return self._error(request_id, -32602, f"invalid arguments: {validation_error.message}")
+            detail = self.server.operations._format_validation_error(validation_error)
+            return self._error(request_id, -32602, f"invalid arguments: {detail}")
+        indexed_query_runs = (
+            _indexed_query_run_ids(name, arguments)
+            if name in _INDEXED_RESULT_TOOLS
+            else []
+        )
         try:
+            # Service startup can take minutes; reject an invalid query window first.
+            if (
+                name == "get_indexed_metric"
+                and arguments.get("period") is None
+                and (arguments.get("begin") is None or arguments.get("end") is None)
+            ):
+                raise OperationError(
+                    "user", "provide period or both begin and end", "invalid_metric_range"
+                )
+            if name in _INDEXED_RESULT_TOOLS:
+                self.server.operations.ensure_result_services()
             if name == "crucible_info":
                 value = self.server.operations.crucible_info()
             elif name == "list_tools":
@@ -816,7 +911,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                     jobs = jobs[:limit]
                 next_cursor = _encode_active_cursor(jobs[-1]) if not complete else None
                 value = {
-                    "jobs": [_job_status(job) for job in jobs],
+                    "jobs": [_job_status(job, self.server.operations) for job in jobs],
                     "cursor": cursor,
                     "next_cursor": next_cursor,
                     "complete": complete,
@@ -869,7 +964,7 @@ class MCPHandler(BaseHTTPRequestHandler):
                 job, created = self.server.run_manager.submit_archive_operation(
                     arguments["idempotency_key"], name, path
                 )
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name == "list_indexed_results":
                 value = self.server.operations.list_indexed_results(
                     **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}
@@ -968,27 +1063,51 @@ class MCPHandler(BaseHTTPRequestHandler):
                     )
                 else:
                     return self._error(request_id, -32602, "start_run requires document or path")
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name == "get_run_status":
                 try:
                     job = self.server.run_manager.refresh_result_status(arguments["mcp_job_id"])
-                    value = _job_status(job)
-                    value["results_ready"] = value["result_status"] == "available"
+                    value = _job_status(job, self.server.operations)
                 except KeyError as exc:
                     return self._error(request_id, -32602, str(exc))
             elif name == "get_run_logs":
                 try:
-                    value = self.server.run_manager.get_logs(
-                        arguments["mcp_job_id"],
-                        int(arguments.get("offset", 0)),
-                        int(arguments.get("limit", 65_536)),
-                    )
+                    log_offset = int(arguments.get("offset", 0))
+                    read_limit = int(arguments.get("limit", 65_536))
+                    while True:
+                        value = self.server.run_manager.get_logs(
+                            arguments["mcp_job_id"], log_offset, read_limit
+                        )
+                        value["text"], additional_redacted_lines = (
+                            self.server.operations.redact_log_text_with_stats(
+                                value.get("text", "")
+                            )
+                        )
+                        value["redacted_lines"] = max(
+                            0, int(value.get("redacted_lines", 0))
+                        ) + additional_redacted_lines
+                        value["redacted"] = bool(value.get("redacted")) or bool(
+                            additional_redacted_lines
+                        )
+                        if self.server.operations._mcp_response_size(
+                            value, request_id
+                        ) <= MAX_LOG_RESPONSE_BYTES:
+                            break
+                        if read_limit <= 1:
+                            raise OperationError(
+                                "framework",
+                                "log response exceeds size limit; retry with a smaller limit",
+                                "result_too_large",
+                            )
+                        read_limit = max(1, read_limit // 2)
                 except (KeyError, TypeError, ValueError) as exc:
                     return self._error(request_id, -32602, str(exc))
             elif name == "get_run_summary":
                 if "mcp_job_id" not in arguments:
                     return self._error(request_id, -32602, "mcp_job_id is required")
-                value = self.server.run_manager.get_summary(arguments["mcp_job_id"])
+                value = self.server.run_manager.get_summary(
+                    arguments["mcp_job_id"], request_id=request_id
+                )
             elif name in {"postprocess_local_run", "index_local_run"}:
                 if "run_path" in arguments:
                     processing_path = Path(arguments["run_path"])
@@ -1004,12 +1123,12 @@ class MCPHandler(BaseHTTPRequestHandler):
                     "postprocess" if name == "postprocess_local_run" else "index",
                     processing_path,
                 )
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name == "delete_indexed_result":
                 job, created = self.server.run_manager.submit_indexed_deletion(
                     arguments["idempotency_key"], arguments["run"]
                 )
-                value = {"created": created, "job": _job_status(job)}
+                value = {"created": created, "job": _job_status(job, self.server.operations)}
             elif name in {"list_local_run_tags", "add_local_run_tags", "remove_local_run_tags"}:
                 if "run_path" in arguments:
                     tag_path = Path(arguments["run_path"])
@@ -1032,12 +1151,39 @@ class MCPHandler(BaseHTTPRequestHandler):
                 )
             else:
                 return self._error(request_id, -32602, "unknown tool")
+            for indexed_query_run in indexed_query_runs:
+                self.server.jobs.update_indexed_query_status(
+                    indexed_query_run, IndexedQueryStatus.READY
+                )
         except JobConflictError as exc:
-            return self._error(request_id, -32009, str(exc))
+            return self._error(request_id, -32009, self.server.operations.redact_log_text(str(exc)))
         except JobNotFoundError as exc:
-            return self._error(request_id, -32004, str(exc))
+            return self._error(request_id, -32004, self.server.operations.redact_log_text(str(exc)))
+        except JobError as exc:
+            return self._error(
+                request_id,
+                -32000,
+                json.dumps({
+                    "category": "framework",
+                    "code": "job_store_error",
+                    "message": self.server.operations.redact_log_text(str(exc)),
+                }),
+            )
         except OperationError as exc:
-            return self._error(request_id, -32000, json.dumps(exc.as_dict()))
+            if exc.code in {"result_services_unavailable", "result_query_failed"}:
+                for indexed_query_run in indexed_query_runs:
+                    self.server.jobs.update_indexed_query_status(
+                        indexed_query_run, IndexedQueryStatus.UNAVAILABLE
+                    )
+            try:
+                error = self.server.operations._redact_summary(exc.as_dict())
+            except OperationError:
+                error = {
+                    "category": exc.category,
+                    "code": exc.code,
+                    "message": "operation failed; error details omitted for safety",
+                }
+            return self._error(request_id, -32000, json.dumps(error))
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": json.dumps(value)}], "structuredContent": value}}
 
     @staticmethod
@@ -1046,6 +1192,60 @@ class MCPHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *_: Any) -> None:
         return
+
+
+def _ensure_indexing_services(crucible_home: Path, operations: CrucibleOperations) -> None:
+    """Use the host's service manager to ensure OpenSearch and CDM are ready."""
+
+    home = Path(crucible_home).resolve()
+    with _RESULT_SERVICE_START_LOCK:
+        try:
+            # The service-manager invocation is a nested CLI session, not part
+            # of an MCP job's logger session or lifecycle event stream.
+            result = subprocess.run(
+                host_context_command(
+                    [str(home / "bin" / "crucible"), "start", "opensearch"]
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=host_context_environment(os.environ),
+                timeout=_RESULT_SERVICE_START_TIMEOUT,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise OperationError(
+                "framework",
+                "Host OpenSearch/CDM could not be started or made ready; run `crucible start opensearch` on the host and inspect service status and logs",
+                "result_services_unavailable",
+            ) from exc
+        if result.returncode != 0:
+            raise OperationError(
+                "framework",
+                "Host OpenSearch/CDM could not be started or made ready; run `crucible start opensearch` on the host and inspect service status and logs",
+                "result_services_unavailable",
+            )
+
+        try:
+            services = json.loads(
+                (home / "config" / "services.json").read_text(encoding="utf-8")
+            )
+            port = services["cdm-server"]["port"]
+            if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError("invalid CDM server port")
+            parsed_url = urlsplit(operations.cdm_base_url)
+            if parsed_url.hostname in {"localhost", "127.0.0.1", "::1"}:
+                host = parsed_url.hostname
+                netloc = f"[{host}]" if ":" in host else host
+                operations.cdm_base_url = urlunsplit(
+                    (parsed_url.scheme, f"{netloc}:{port}", parsed_url.path, "", "")
+                ).rstrip("/")
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise OperationError(
+                "framework",
+                "CDM service configuration could not be read after startup; inspect config/services.json",
+                "result_services_unavailable",
+            ) from exc
 
 
 def main() -> None:
@@ -1101,6 +1301,9 @@ def main() -> None:
         run_root=args.run_root,
         log_db=args.log_db,
     )
+    server.operations.set_result_services_ensurer(
+        lambda: _ensure_indexing_services(args.crucible_home, server.operations)
+    )
     server.operations.run_policy = InputPolicy(
         [args.run_root, args.database.parent / "runs"]
     )
@@ -1111,6 +1314,7 @@ def main() -> None:
         [str(args.crucible_home / "bin" / "crucible")],
         args.max_request_bytes,
         args.cdm_readiness_timeout,
+        host_execution=True,
     )
     server.audit = AuditLogger(args.audit_log, args.audit_max_bytes, args.audit_retained_files)
     server.run_manager.reconcile()
