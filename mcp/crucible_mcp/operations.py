@@ -513,7 +513,7 @@ class CrucibleOperations:
     def crucible_info(self) -> dict[str, Any]:
         return {
             "name": "crucible",
-            "mcp_contract_version": "2",
+            "mcp_contract_version": "3",
             "execution_supported": True,
             "capabilities": [
                 "crucible_info",

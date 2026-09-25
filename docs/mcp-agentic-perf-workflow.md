@@ -5,7 +5,7 @@ agent can use Crucible through MCP. It is written for coding agents that need
 to discover Crucible, construct a run document, execute it asynchronously, and
 review the indexed result without reading Crucible's local files directly.
 
-The workflow uses the current Crucible MCP contract (`mcp_contract_version: 2`)
+The workflow uses the current Crucible MCP contract (`mcp_contract_version: 3`)
 and the tool names returned by `tools/list`. SDK method names vary by MCP
 client; the examples below use the language-neutral form
 `call_tool(name, arguments)`.
@@ -18,7 +18,7 @@ Keep those responsibilities separate when configuring MCP access:
 | Agent role | Crucible MCP access | Purpose |
 | --- | --- | --- |
 | Benchmark | Documentation resources, discovery, `validate_run`, `prepare_run`, `estimate_run`, `start_run`, `get_run_status`, `get_run_logs`, `get_run_summary`, and processing tools | Understand Crucible, inspect a bounded plan, construct a run, execute it, and monitor progress. |
-| Review | `get_run_status`, `get_run_summary`, `list_indexed_periods`, `get_indexed_metric`, and indexed-result reads | Determine result readiness and analyze measurements. |
+| Review | `get_run_status`, `get_run_summary`, `list_indexed_periods`, `get_indexed_metric`, and indexed-result reads | Check local summary and last-observed query readiness, then analyze measurements. |
 | Operator/admin | Explicitly approved maintenance tools only | Perform local archive, tag, or indexed-result maintenance when required. |
 
 The MCP server does not provide arbitrary shell access, unrestricted file
@@ -247,12 +247,23 @@ while true:
     sleep(poll_interval)
 ```
 
-The lifecycle state and result status are separate. A completed workload can
-still have `result_status: "pending"` while CDM indexing or consistency work
-finishes, so keep polling within the configured readiness budget. Do not enter
-result review for `unavailable` results. The runner's result status may still
-be `available` for a partial run, so inspect the summary's `partial` and
+The lifecycle state and result status are separate. `result_status` describes
+local summary availability: `available` means the summary artifact can be
+read, not that CDM-backed queries are currently ready. A completed workload
+can still have `result_status: "pending"` while its summary is being written,
+so keep polling within the configured readiness budget. Do not enter summary
+review for `unavailable` results. The runner's result status may still be
+`available` for a partial run, so inspect the summary's `partial` and
 `dropped-engines` fields before treating the measurement as complete.
+
+`indexed_query_status` is independent and begins as `not_checked`. A
+run-scoped indexed query records `ready` after the service check and query
+succeed, or `unavailable` when OpenSearch/CDM cannot be started or reached;
+`indexed_query_checked_at` gives the time of that observation. `get_run_status`
+does not start or probe services, and this status is the last observation, not
+a live availability guarantee. Attempt the desired indexed query and handle
+its structured error; retry after addressing `result_services_unavailable` or
+`result_query_failed`.
 
 If the service restarts, continue polling the same MCP job ID. The managed
 runner reconciles the durable job record and does not launch a duplicate

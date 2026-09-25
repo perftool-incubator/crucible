@@ -1,9 +1,10 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from crucible_mcp.jobs import JobConflictError, JobStore
-from crucible_mcp.models import JobState, ResultStatus
+from crucible_mcp.models import IndexedQueryStatus, JobState, ResultStatus
 
 
 class TestJobStore(unittest.TestCase):
@@ -65,6 +66,55 @@ class TestJobStore(unittest.TestCase):
         self.assertEqual(updated.rickshaw_run_id, "rickshaw-1")
         self.assertEqual(updated.cdm_run_id, "cdm-1")
         self.assertEqual(updated.result_status, ResultStatus.AVAILABLE)
+
+    def test_indexed_query_status_is_persisted_separately(self):
+        job, _ = self.store.create_or_get("request-indexed", {"run": 1})
+        self.assertEqual(job.indexed_query_status, IndexedQueryStatus.NOT_CHECKED)
+        self.assertIsNone(job.indexed_query_checked_at)
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            cdm_run_id="cdm-1",
+            result_status=ResultStatus.AVAILABLE.value,
+        )
+
+        updated_count = self.store.update_indexed_query_status(
+            "cdm-1", IndexedQueryStatus.READY
+        )
+        database_path = self.store.database_path
+        self.store.close()
+        self.store = JobStore(database_path)
+        updated = self.store.get(job.mcp_job_id)
+
+        self.assertEqual(updated_count, 1)
+        self.assertEqual(updated.result_status, ResultStatus.AVAILABLE)
+        self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
+        self.assertIsNotNone(updated.indexed_query_checked_at)
+
+    def test_v4_database_migrates_indexed_query_status_columns(self):
+        database_path = Path(self.directory.name) / "legacy-v4.db"
+        connection = sqlite3.connect(database_path)
+        connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO schema_version(version) VALUES (4)")
+        connection.execute("CREATE TABLE jobs (cdm_run_id TEXT)")
+        connection.commit()
+        connection.close()
+
+        migrated = JobStore(database_path)
+        try:
+            version = migrated._connection.execute(
+                "SELECT version FROM schema_version"
+            ).fetchone()[0]
+            columns = {
+                row[1]
+                for row in migrated._connection.execute("PRAGMA table_info(jobs)")
+            }
+        finally:
+            migrated.close()
+
+        self.assertEqual(version, 5)
+        self.assertIn("indexed_query_status", columns)
+        self.assertIn("indexed_query_checked_at", columns)
 
     def test_plan_summary_persists_across_store_reopen(self):
         summary = {

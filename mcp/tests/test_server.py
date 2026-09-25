@@ -18,7 +18,7 @@ from crucible_mcp.operations import (
 )
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.audit import AuditLogger
-from crucible_mcp.models import Job, JobState, ResultStatus
+from crucible_mcp.models import IndexedQueryStatus, Job, JobState, ResultStatus
 from crucible_mcp.policy import InputPolicy, rotate_token
 from crucible_mcp.server import (
     IPv6ThreadingHTTPServer,
@@ -79,6 +79,28 @@ class TestServer(unittest.TestCase):
         connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         return response.status, response.read(), response.headers
+
+    def create_completed_indexed_job(self, cdm_run_id):
+        job, _ = self.server.jobs.create_or_get(
+            f"indexed-status:{cdm_run_id}", {"cdm_run_id": cdm_run_id}
+        )
+        self.server.jobs.transition(job.mcp_job_id, JobState.STARTING)
+        self.server.jobs.transition(job.mcp_job_id, JobState.RUNNING)
+        self.server.jobs.transition(job.mcp_job_id, JobState.POSTPROCESSING)
+        self.server.jobs.transition(
+            job.mcp_job_id,
+            JobState.INDEXING,
+            cdm_run_id=cdm_run_id,
+            result_status=ResultStatus.PENDING.value,
+        )
+        job = self.server.jobs.transition(
+            job.mcp_job_id,
+            JobState.COMPLETED,
+            result_status=ResultStatus.AVAILABLE.value,
+        )
+        self.server.run_manager = Mock()
+        self.server.run_manager.refresh_result_status.side_effect = self.server.jobs.get
+        return job
 
     def test_health_requires_authentication(self):
         status, _ = self.request("GET", "/health")
@@ -166,6 +188,7 @@ class TestServer(unittest.TestCase):
             tools["list_endpoints"]["description"],
         )
         self.assertIn("inputSchema", tools["get_run_logs"])
+        self.assertIn("indexed_query_status", tools["get_run_status"]["description"])
         self.assertIn("offset", tools["list_local_runs"]["inputSchema"]["properties"])
         for tool_name in (
             "list_tools", "list_endpoints", "list_active_runs", "list_local_runs", "get_local_run_summary", "get_local_run_metadata",
@@ -705,7 +728,7 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         info = payload["result"]["structuredContent"]
         self.assertTrue(info["execution_supported"])
-        self.assertEqual(info["mcp_contract_version"], "2")
+        self.assertEqual(info["mcp_contract_version"], "3")
         self.assertIn("start_run", info["capabilities"])
         self.assertIn("get_run_logs", info["capabilities"])
         self.assertIn("get_run_summary", info["capabilities"])
@@ -801,18 +824,23 @@ class TestServer(unittest.TestCase):
                 operation.assert_called_once()
 
     def test_indexed_query_service_start_failure_is_structured(self):
-        self.server.operations.set_result_services_ensurer(
-            Mock(side_effect=OperationError(
+        job = self.create_completed_indexed_job("cdm-run-unavailable")
+        ensure_services = Mock(
+            side_effect=OperationError(
                 "framework", "start OpenSearch/CDM", "result_services_unavailable"
-            ))
+            )
         )
+        self.server.operations.set_result_services_ensurer(ensure_services)
         operation = Mock()
-        self.server.operations.list_indexed_results = operation
+        self.server.operations.get_indexed_result = operation
         body = json.dumps({
             "jsonrpc": "2.0",
             "id": 64,
             "method": "tools/call",
-            "params": {"name": "list_indexed_results", "arguments": {}},
+            "params": {
+                "name": "get_indexed_result",
+                "arguments": {"run": "cdm-run-unavailable"},
+            },
         })
 
         status, payload = self.request("POST", "/mcp", body, self.token)
@@ -821,6 +849,137 @@ class TestServer(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], -32000)
         self.assertIn("result_services_unavailable", payload["error"]["message"])
         operation.assert_not_called()
+
+        status_body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 65,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_status",
+                "arguments": {"mcp_job_id": job.mcp_job_id},
+            },
+        })
+        status, status_payload = self.request("POST", "/mcp", status_body, self.token)
+
+        self.assertEqual(status, 200)
+        status_value = status_payload["result"]["structuredContent"]
+        self.assertEqual(status_value["result_status"], "available")
+        self.assertEqual(
+            status_value["indexed_query_status"],
+            IndexedQueryStatus.UNAVAILABLE.value,
+        )
+        self.assertIsNotNone(status_value["indexed_query_checked_at"])
+        self.assertNotIn("results_ready", status_value)
+        ensure_services.assert_called_once_with()
+
+    def test_indexed_query_success_records_readiness_without_status_probe(self):
+        job = self.create_completed_indexed_job("cdm-run-ready")
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.operations.get_indexed_result = Mock(
+            return_value={"run_id": "cdm-run-ready"}
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 66,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_result",
+                "arguments": {"run": "cdm-run-ready"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        ensure_services.assert_called_once_with()
+        self.server.operations.get_indexed_result.assert_called_once_with("cdm-run-ready")
+        updated = self.server.jobs.get(job.mcp_job_id)
+        self.assertEqual(updated.result_status, ResultStatus.AVAILABLE)
+        self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
+        self.assertIsNotNone(updated.indexed_query_checked_at)
+
+        status_body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 67,
+            "method": "tools/call",
+            "params": {
+                "name": "get_run_status",
+                "arguments": {"mcp_job_id": job.mcp_job_id},
+            },
+        })
+        status, status_payload = self.request("POST", "/mcp", status_body, self.token)
+
+        self.assertEqual(status, 200)
+        status_value = status_payload["result"]["structuredContent"]
+        self.assertEqual(status_value["result_status"], "available")
+        self.assertEqual(status_value["indexed_query_status"], "ready")
+        self.assertIsNotNone(status_value["indexed_query_checked_at"])
+        ensure_services.assert_called_once_with()
+
+    def test_list_indexed_results_records_each_comma_separated_run(self):
+        first_job = self.create_completed_indexed_job("cdm-run-first")
+        second_job = self.create_completed_indexed_job("cdm-run-second")
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.operations.list_indexed_results = Mock(
+            return_value={"run_ids": ["cdm-run-first", "cdm-run-second"]}
+        )
+        run_filter = "cdm-run-first,cdm-run-second"
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 69,
+            "method": "tools/call",
+            "params": {
+                "name": "list_indexed_results",
+                "arguments": {"run": run_filter},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", payload)
+        self.server.operations.list_indexed_results.assert_called_once_with(run=run_filter)
+        self.assertEqual(
+            self.server.jobs.get(first_job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.READY,
+        )
+        self.assertEqual(
+            self.server.jobs.get(second_job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.READY,
+        )
+        ensure_services.assert_called_once_with()
+
+    def test_cdm_query_failure_marks_run_readiness_unavailable(self):
+        job = self.create_completed_indexed_job("cdm-run-query-failed")
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        self.server.operations.get_indexed_result = Mock(
+            side_effect=OperationError(
+                "framework", "CDM query is unavailable", "result_query_failed"
+            )
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 68,
+            "method": "tools/call",
+            "params": {
+                "name": "get_indexed_result",
+                "arguments": {"run": "cdm-run-query-failed"},
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        ensure_services.assert_called_once_with()
+        self.assertEqual(
+            self.server.jobs.get(job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.UNAVAILABLE,
+        )
 
     def test_invalid_metric_window_does_not_start_services(self):
         ensure_services = Mock()

@@ -30,6 +30,12 @@ class ResultStatus(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class IndexedQueryStatus(str, Enum):
+    NOT_CHECKED = "not_checked"
+    READY = "ready"
+    UNAVAILABLE = "unavailable"
+
+
 ACTIVE_JOB_STATES = frozenset(
     {
         JobState.QUEUED,
@@ -52,6 +58,8 @@ class Job:
     request_hash: str
     state: JobState
     result_status: ResultStatus
+    indexed_query_status: IndexedQueryStatus = IndexedQueryStatus.NOT_CHECKED
+    indexed_query_checked_at: Optional[str] = None
     operation: str = "run"
     plan_digest: Optional[str] = None
     plan_summary: Optional[dict[str, Any]] = None
@@ -72,6 +80,7 @@ class Job:
         values = asdict(self)
         values["state"] = self.state.value
         values["result_status"] = self.result_status.value
+        values["indexed_query_status"] = self.indexed_query_status.value
         plan_summary = values.pop("plan_summary")
         if plan_summary is not None:
             values["plan"] = plan_summary

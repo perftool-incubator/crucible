@@ -231,7 +231,7 @@ through the standard `tools/list` request; the current interface is:
 | `list_local_run_tags` | List tags from an approved local run result. |
 | `add_local_run_tags` | Add or replace tags in an approved local run result. |
 | `remove_local_run_tags` | Remove named tags from an approved local run result. |
-| `get_run_status` | Poll the lifecycle and result-readiness state of a submitted run; credential-like text in job metadata and errors is redacted. |
+| `get_run_status` | Poll lifecycle state, local summary status, and the last observed indexed-query readiness for a submitted run; credential-like text in job metadata and errors is redacted. |
 | `get_run_logs` | Read a bounded, credential-redacted slice of runner output; pagination offsets refer to raw log bytes, and the response reports `redacted` plus the number of affected `redacted_lines`. |
 | `get_run_summary` | Retrieve a credential-redacted summary of a completed submitted run when the serialized MCP response fits the 1 MiB response budget. |
 | `list_indexed_results` | Search historical indexed result run IDs through CDM. |
@@ -247,6 +247,17 @@ through the standard `tools/list` request; the current interface is:
 `get_run_status` includes `cdm_run_id` when the result summary identifies one
 unique CDM run. If the summary contains multiple run IDs, select the desired ID
 from the summary rather than relying on an arbitrary status value.
+
+In `get_run_status`, `result_status` describes the local result-summary
+artifact only: `available` means the summary can be read, not that CDM-backed
+queries are ready. `indexed_query_status` is tracked separately as
+`not_checked`, `ready`, or `unavailable`; `indexed_query_checked_at` records
+when an indexed query last observed that state. A run-scoped indexed query
+updates these fields for the matching MCP job. Status polling itself does not
+start services or probe CDM, and the indexed-query state is only the last
+observation—not a guarantee that the service is still available. Indexed tools
+continue to return an actionable error if OpenSearch/CDM cannot be started or
+reached.
 
 `get_run_logs` redacts affected line fragments without suppressing unrelated
 lines in the same page. Its `redacted` flag and `redacted_lines` count describe

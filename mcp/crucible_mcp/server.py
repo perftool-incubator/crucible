@@ -21,8 +21,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 from jsonschema import Draft201909Validator
 
-from .jobs import JobConflictError, JobNotFoundError, JobStore
-from .models import Job, JobState
+from .jobs import JobConflictError, JobError, JobNotFoundError, JobStore
+from .models import IndexedQueryStatus, Job, JobState
 from .operations import (
     CrucibleOperations,
     OperationError,
@@ -367,8 +367,11 @@ TOOL_DEFINITIONS = (
     {
         "name": "get_run_status",
         "description": (
-            "Get lifecycle and result readiness for an MCP run; "
-            "credential-like text in job metadata and errors is redacted."
+            "Get lifecycle state, local-summary result_status, and indexed_query_status "
+            "(not_checked, ready, or unavailable) for an MCP run. result_status describes "
+            "summary availability, not CDM query readiness; indexed_query_checked_at "
+            "identifies the last observation. Polling does not start or probe services. "
+            "Credential-like text in job metadata and errors is redacted."
         ),
         "inputSchema": {
             "type": "object",
@@ -524,6 +527,18 @@ def _job_status(job: Job, operations: CrucibleOperations | None = None) -> dict[
     if operations is not None:
         value = operations._redact_summary(value)
     return value
+
+
+def _indexed_query_run_ids(name: str, arguments: dict[str, Any]) -> list[str]:
+    run_filter = arguments.get("run")
+    if not isinstance(run_filter, str) or not run_filter:
+        return []
+    if name == "list_indexed_results":
+        return list(dict.fromkeys(
+            run_id for part in run_filter.split(",")
+            if (run_id := part.strip())
+        ))
+    return [run_filter]
 
 
 def _encode_active_cursor(job: Job) -> str:
@@ -860,6 +875,11 @@ class MCPHandler(BaseHTTPRequestHandler):
         if validation_error is not None:
             detail = self.server.operations._format_validation_error(validation_error)
             return self._error(request_id, -32602, f"invalid arguments: {detail}")
+        indexed_query_runs = (
+            _indexed_query_run_ids(name, arguments)
+            if name in _INDEXED_RESULT_TOOLS
+            else []
+        )
         try:
             # Service startup can take minutes; reject an invalid query window first.
             if (
@@ -1048,7 +1068,6 @@ class MCPHandler(BaseHTTPRequestHandler):
                 try:
                     job = self.server.run_manager.refresh_result_status(arguments["mcp_job_id"])
                     value = _job_status(job, self.server.operations)
-                    value["results_ready"] = value["result_status"] == "available"
                 except KeyError as exc:
                     return self._error(request_id, -32602, str(exc))
             elif name == "get_run_logs":
@@ -1132,11 +1151,30 @@ class MCPHandler(BaseHTTPRequestHandler):
                 )
             else:
                 return self._error(request_id, -32602, "unknown tool")
+            for indexed_query_run in indexed_query_runs:
+                self.server.jobs.update_indexed_query_status(
+                    indexed_query_run, IndexedQueryStatus.READY
+                )
         except JobConflictError as exc:
             return self._error(request_id, -32009, self.server.operations.redact_log_text(str(exc)))
         except JobNotFoundError as exc:
             return self._error(request_id, -32004, self.server.operations.redact_log_text(str(exc)))
+        except JobError as exc:
+            return self._error(
+                request_id,
+                -32000,
+                json.dumps({
+                    "category": "framework",
+                    "code": "job_store_error",
+                    "message": self.server.operations.redact_log_text(str(exc)),
+                }),
+            )
         except OperationError as exc:
+            if exc.code in {"result_services_unavailable", "result_query_failed"}:
+                for indexed_query_run in indexed_query_runs:
+                    self.server.jobs.update_indexed_query_status(
+                        indexed_query_run, IndexedQueryStatus.UNAVAILABLE
+                    )
             try:
                 error = self.server.operations._redact_summary(exc.as_dict())
             except OperationError:
