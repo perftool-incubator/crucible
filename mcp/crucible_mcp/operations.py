@@ -2287,6 +2287,7 @@ class CrucibleOperations:
         cls,
         connection: sqlite3.Connection,
         session: int,
+        stream: int,
         before_id: int,
         budget: dict[str, int] | None = None,
     ) -> _LogRedactionState:
@@ -2295,6 +2296,7 @@ class CrucibleOperations:
         return cls._log_redaction_state_in_range(
             connection,
             session,
+            stream,
             after_id=None,
             before_id=before_id,
             state=_LogRedactionState(),
@@ -2306,6 +2308,7 @@ class CrucibleOperations:
         cls,
         connection: sqlite3.Connection,
         session: int,
+        stream: int,
         after_id: int,
         before_id: int,
         state: _LogRedactionState,
@@ -2316,6 +2319,7 @@ class CrucibleOperations:
         return cls._log_redaction_state_in_range(
             connection,
             session,
+            stream,
             after_id=after_id,
             before_id=before_id,
             state=state,
@@ -2327,12 +2331,13 @@ class CrucibleOperations:
         cls,
         connection: sqlite3.Connection,
         session: int,
+        stream: int,
         after_id: int | None,
         before_id: int,
         state: _LogRedactionState,
         budget: dict[str, int] | None,
     ) -> _LogRedactionState:
-        """Process a bounded insertion-order slice across logger streams."""
+        """Process a bounded insertion-order slice for one logger stream."""
 
         if state.unknown:
             return state
@@ -2363,8 +2368,8 @@ class CrucibleOperations:
         if line_budget <= 0 or byte_budget < 0:
             return _LogRedactionState(unknown=True)
 
-        where = "session = ? AND id < ?"
-        params: list[int] = [session, before_id]
+        where = "session = ? AND stream = ? AND id < ?"
+        params: list[int] = [session, stream, before_id]
         if after_id is not None:
             where += " AND id > ?"
             params.append(after_id)
@@ -4401,14 +4406,19 @@ class CrucibleOperations:
                 matched = 0
                 response_bytes = 0
                 complete = True
-                redaction_state = _LogRedactionState()
+                redaction_states: dict[str, _LogRedactionState] = {}
                 for timestamp, line_stream, line in rows:
                     line = line or ""
+                    stream_key = str(line_stream)
+                    redaction_state = redaction_states.setdefault(
+                        stream_key, _LogRedactionState()
+                    )
                     safe_line, redaction_state, _ = (
                         self._redact_log_record_with_state(
                             line, redaction_state
                         )
                     )
+                    redaction_states[stream_key] = redaction_state
                     if stream is not None and str(line_stream).upper() != stream.upper():
                         continue
                     if pattern is not None and pattern.search(safe_line) is None:
@@ -4506,24 +4516,25 @@ class CrucibleOperations:
                 matched = 0
                 response_bytes = 0
                 complete = True
-                redaction_states: dict[str, _LogRedactionState] = {}
-                redaction_last_ids: dict[str, int] = {}
+                redaction_states: dict[tuple[str, int], _LogRedactionState] = {}
+                redaction_last_ids: dict[tuple[str, int], int] = {}
                 redaction_context_budget = {
                     "lines": MAX_LOG_REDACTION_CONTEXT_LINES,
                     "bytes": MAX_LOG_REDACTION_CONTEXT_BYTES,
                 }
                 for row in connection.execute(sql, params):
                     line = row[3] or ""
-                    state_key = row[0]
+                    state_key = (row[0], row[7])
                     if since is not None or until is not None:
                         if state_key not in redaction_states:
-                            # Seed once per pair from bounded indexed history.
+                            # Seed once per session/stream pair from bounded history.
                             # Either timestamp bound can exclude rows that are
                             # still earlier in insertion order when clocks move.
                             redaction_states[state_key] = (
                                 self._log_redaction_state_before(
                                     connection,
                                     row[6],
+                                    row[7],
                                     row[8],
                                     redaction_context_budget,
                                 )
@@ -4533,6 +4544,7 @@ class CrucibleOperations:
                                 self._log_redaction_state_between(
                                     connection,
                                     row[6],
+                                    row[7],
                                     redaction_last_ids[state_key],
                                     row[8],
                                     redaction_states[state_key],

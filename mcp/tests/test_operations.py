@@ -3601,7 +3601,7 @@ class TestCrucibleOperations(unittest.TestCase):
             INSERT INTO sessions VALUES (1, 'sensitive-session', 't0', 1, 1);
             INSERT INTO lines VALUES (1, 1, 1, 1, 'remotehosts --roadblock-passwd=line-secret');
             INSERT INTO lines VALUES (2, 1, 1, 2, '-----BEGIN OPENSSH PRIVATE KEY-----');
-            INSERT INTO lines VALUES (3, 1, 2, 3, 'private-key-material');
+            INSERT INTO lines VALUES (3, 1, 1, 3, 'private-key-material');
             INSERT INTO lines VALUES (4, 1, 1, 4, '-----END OPENSSH PRIVATE KEY-----');
             INSERT INTO lines VALUES (5, 1, 1, 5, '-----BEGIN OPENSSH PRIVATE KEY-----');
             INSERT INTO lines VALUES (6, 1, 1, 6, '-----END RSA PRIVATE KEY-----');
@@ -3644,7 +3644,7 @@ class TestCrucibleOperations(unittest.TestCase):
             "sensitive-session", stream="stderr"
         )
         self.assertNotIn("private-key-material", json.dumps(stderr_pem))
-        self.assertIn("[redacted private key]", json.dumps(stderr_pem))
+        self.assertEqual(stderr_pem["lines"], [])
 
         with patch.object(
             operations,
@@ -3730,13 +3730,13 @@ class TestCrucibleOperations(unittest.TestCase):
             INSERT INTO streams VALUES (1, 'STDOUT');
             INSERT INTO streams VALUES (2, 'STDERR');
             INSERT INTO lines VALUES (1, 1, 1, 1, 'command --token');
-            INSERT INTO lines VALUES (2, 1, 2, 2, 'logger-secret-token');
+            INSERT INTO lines VALUES (2, 1, 2, 1, 'logger-secret-token');
             INSERT INTO lines VALUES (3, 1, 3, 1, 'safe diagnostic');
             INSERT INTO lines VALUES (4, 1, 4, 1, 'password: |');
-            INSERT INTO lines VALUES (5, 1, 5, 2, '  logger-yaml-secret');
+            INSERT INTO lines VALUES (5, 1, 5, 1, '  logger-yaml-secret');
             INSERT INTO lines VALUES (6, 1, 6, 1, 'safe yaml diagnostic');
             INSERT INTO lines VALUES (7, 1, 7, 1, 'curl https://alice:\\');
-            INSERT INTO lines VALUES (8, 1, 8, 2, 'url-secret@example.com');
+            INSERT INTO lines VALUES (8, 1, 8, 1, 'url-secret@example.com');
             INSERT INTO lines VALUES (9, 1, 9, 1, 'safe after url');
             INSERT INTO lines VALUES (10, 1, 10, 2, 'stderr safe diagnostic');
             INSERT INTO sessions VALUES (2, 'inline-sensitive-json', 't1', 1, 1);
@@ -3745,6 +3745,11 @@ class TestCrucibleOperations(unittest.TestCase):
             INSERT INTO lines VALUES (13, 2, 13, 1, '  "nested": {"access": "nested-json-secret"}');
             INSERT INTO lines VALUES (14, 2, 14, 1, '}');
             INSERT INTO lines VALUES (15, 2, 15, 1, '{"safe": "safe sibling"}');
+            INSERT INTO sessions VALUES (3, 'interleaved-stream-json', 't2', 1, 1);
+            INSERT INTO lines VALUES (16, 3, 16, 1, '{"token": {');
+            INSERT INTO lines VALUES (17, 3, 17, 2, '}');
+            INSERT INTO lines VALUES (18, 3, 18, 1, '  "value": "interleaved-json-secret"');
+            INSERT INTO lines VALUES (19, 3, 19, 1, '}');
             """
         )
         connection.commit()
@@ -3777,6 +3782,20 @@ class TestCrucibleOperations(unittest.TestCase):
             "redacted", session_id="multiline-secret-session", stream="stderr"
         )
         inline_json_session = operations.get_log_session("inline-sensitive-json")
+        interleaved_stream_session = operations.get_log_session(
+            "interleaved-stream-json"
+        )
+        interleaved_stream_search = operations.search_logs(
+            "redacted", session_id="interleaved-stream-json"
+        )
+        interleaved_secret_search = operations.search_logs(
+            "interleaved-json-secret", session_id="interleaved-stream-json"
+        )
+        interleaved_since_search = operations.search_logs(
+            "interleaved-json-secret",
+            session_id="interleaved-stream-json",
+            since=18,
+        )
 
         self.assertNotIn("logger-secret-token", json.dumps(session))
         self.assertNotIn("logger-secret-token", json.dumps(session_page))
@@ -3792,6 +3811,14 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertNotIn("url-secret", url_search["matches"][0]["line"])
         self.assertNotIn("inline-json-secret", json.dumps(inline_json_session))
         self.assertNotIn("nested-json-secret", json.dumps(inline_json_session))
+        self.assertNotIn(
+            "interleaved-json-secret", json.dumps(interleaved_stream_session)
+        )
+        self.assertNotIn(
+            "interleaved-json-secret", json.dumps(interleaved_stream_search)
+        )
+        self.assertEqual(interleaved_secret_search["matches"], [])
+        self.assertEqual(interleaved_since_search["matches"], [])
         self.assertIn("safe diagnostic", json.dumps(session))
         self.assertIn("safe yaml diagnostic", json.dumps(yaml_session))
         self.assertIn("safe after url", json.dumps(session))
