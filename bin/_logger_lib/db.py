@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 INIT_SQL = """
 CREATE TABLE IF NOT EXISTS streams (
@@ -52,6 +52,7 @@ MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_lines_session_timestamp ON lines (session, timestamp);
 CREATE INDEX IF NOT EXISTS idx_lines_session_stream_id ON lines (session, stream, id);
+CREATE INDEX IF NOT EXISTS idx_lines_session_id ON lines (session, id);
 CREATE INDEX IF NOT EXISTS idx_lines_stream ON lines (stream);
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions (timestamp);
 """

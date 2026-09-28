@@ -380,6 +380,7 @@ _METADATA_PRIVATE_KEY_BLOCK = re.compile(
     r"(?:-----END (?P=label)-----|$)",
     re.IGNORECASE | re.DOTALL,
 )
+_PRIVATE_KEY_PAYLOAD_LINE = re.compile(r"[A-Za-z0-9+/]{32,}={0,2}")
 _METADATA_PRIVATE_KEY_MARKER = re.compile(
     r"-----\s*(?P<kind>BEGIN|END)\s+"
     r"(?P<label>[A-Z0-9 ]*PRIVATE KEY)\s*-----",
@@ -1387,7 +1388,64 @@ class CrucibleOperations:
             # Logs are untrusted, and an over-complex line must not bypass the
             # credential policy merely because metadata redaction hit its work cap.
             return "[redacted]"
-        return redacted if isinstance(redacted, str) else "[redacted]"
+        if not isinstance(redacted, str):
+            return "[redacted]"
+        return cls._redact_markerless_private_key_payload_lines(redacted)
+
+    @classmethod
+    def _redact_markerless_private_key_payload_lines(cls, value: str) -> str:
+        """Mask base64-only key-body lines even when PEM markers are absent."""
+
+        output: list[str] = []
+        position = 0
+        processed_lines = 0
+        for separator in re.finditer(r"\r\n|\r|\n", value):
+            if processed_lines >= MAX_LOG_REDACTION_LINES:
+                return "[redacted]"
+            if separator.start() - position > MAX_LOG_RESPONSE_BYTES:
+                output.append("[redacted]")
+            else:
+                line = value[position : separator.start()]
+                output.append(
+                    "[redacted private key]"
+                    if cls._is_private_key_payload_line(line)
+                    else line
+                )
+            output.append(separator.group())
+            position = separator.end()
+            processed_lines += 1
+
+        if position < len(value) or processed_lines == 0:
+            if processed_lines >= MAX_LOG_REDACTION_LINES:
+                return "[redacted]"
+            if len(value) - position > MAX_LOG_RESPONSE_BYTES:
+                output.append("[redacted]")
+            else:
+                line = value[position:]
+                output.append(
+                    "[redacted private key]"
+                    if cls._is_private_key_payload_line(line)
+                    else line
+                )
+        return "".join(output)
+
+    @staticmethod
+    def _is_private_key_payload_line(value: str) -> bool:
+        """Match the bounded, markerless private-key heuristic used for logs."""
+
+        if len(value) > MAX_LOG_RESPONSE_BYTES:
+            # Such a record cannot be returned within the MCP log response
+            # budget, so fail closed without copying or scanning it.
+            return True
+        payload = value.strip()
+        if _PRIVATE_KEY_PAYLOAD_LINE.fullmatch(payload) is None:
+            return False
+        if len(payload) <= 4096:
+            return True
+        # Long markerless key bodies are still redacted, but require varied
+        # base64 symbols so repetitive diagnostics (for example a huge line
+        # of ``x`` characters) do not disappear as false-positive key data.
+        return len(set(payload.rstrip("="))) >= 12
 
     @classmethod
     def _redact_log_line_with_context(
@@ -2220,7 +2278,6 @@ class CrucibleOperations:
         cls,
         connection: sqlite3.Connection,
         session: int,
-        stream: int,
         before_id: int,
         budget: dict[str, int] | None = None,
     ) -> _LogRedactionState:
@@ -2229,7 +2286,6 @@ class CrucibleOperations:
         return cls._log_redaction_state_in_range(
             connection,
             session,
-            stream,
             after_id=None,
             before_id=before_id,
             state=_LogRedactionState(),
@@ -2241,7 +2297,6 @@ class CrucibleOperations:
         cls,
         connection: sqlite3.Connection,
         session: int,
-        stream: int,
         after_id: int,
         before_id: int,
         state: _LogRedactionState,
@@ -2252,7 +2307,6 @@ class CrucibleOperations:
         return cls._log_redaction_state_in_range(
             connection,
             session,
-            stream,
             after_id=after_id,
             before_id=before_id,
             state=state,
@@ -2264,13 +2318,12 @@ class CrucibleOperations:
         cls,
         connection: sqlite3.Connection,
         session: int,
-        stream: int,
         after_id: int | None,
         before_id: int,
         state: _LogRedactionState,
         budget: dict[str, int] | None,
     ) -> _LogRedactionState:
-        """Process a bounded insertion-order slice for one logger stream."""
+        """Process a bounded insertion-order slice across logger streams."""
 
         if state.unknown:
             return state
@@ -2285,7 +2338,7 @@ class CrucibleOperations:
 
         index = connection.execute(
             """SELECT 1 FROM sqlite_master
-               WHERE type = 'index' AND name = 'idx_lines_session_stream_id'"""
+               WHERE type = 'index' AND name = 'idx_lines_session_id'"""
         ).fetchone()
         if index is None:
             # Older or externally-created logger databases may not have the
@@ -2301,8 +2354,8 @@ class CrucibleOperations:
         if line_budget <= 0 or byte_budget < 0:
             return _LogRedactionState(unknown=True)
 
-        where = "session = ? AND stream = ? AND id < ?"
-        params: list[int] = [session, stream, before_id]
+        where = "session = ? AND id < ?"
+        params: list[int] = [session, before_id]
         if after_id is not None:
             where += " AND id > ?"
             params.append(after_id)
@@ -4289,25 +4342,23 @@ class CrucibleOperations:
                            JOIN streams ON streams.id = lines.stream
                            WHERE sessions.session_id = ?"""
                 params: list[Any] = [session_id]
-                if stream is not None:
-                    query += " AND streams.stream = ?"
-                    params.append(stream.upper())
                 query += " ORDER BY lines.id"
                 rows = connection.execute(query, params)
                 lines = []
                 matched = 0
                 response_bytes = 0
                 complete = True
-                redaction_states: dict[str, _LogRedactionState] = {}
+                redaction_state = _LogRedactionState()
                 for timestamp, line_stream, line in rows:
                     line = line or ""
-                    stream_key = str(line_stream).upper()
-                    safe_line, redaction_states[stream_key], _ = (
+                    safe_line, redaction_state, _ = (
                         self._redact_log_record_with_state(
-                            line, redaction_states.get(stream_key)
+                            line, redaction_state
                         )
                     )
-                    if pattern is not None and pattern.search(line) is None:
+                    if stream is not None and str(line_stream).upper() != stream.upper():
+                        continue
+                    if pattern is not None and pattern.search(safe_line) is None:
                         continue
                     if matched < offset:
                         matched += 1
@@ -4391,9 +4442,6 @@ class CrucibleOperations:
                     self._require_text(session_id, "session_id")
                     sql += " AND sessions.session_id = ?"
                     params.append(session_id)
-                if stream is not None:
-                    sql += " AND streams.stream = ?"
-                    params.append(stream.upper())
                 if since is not None:
                     sql += " AND lines.timestamp >= ?"
                     params.append(since)
@@ -4405,15 +4453,15 @@ class CrucibleOperations:
                 matched = 0
                 response_bytes = 0
                 complete = True
-                redaction_states: dict[tuple[str, str], _LogRedactionState] = {}
-                redaction_last_ids: dict[tuple[str, str], int] = {}
+                redaction_states: dict[str, _LogRedactionState] = {}
+                redaction_last_ids: dict[str, int] = {}
                 redaction_context_budget = {
                     "lines": MAX_LOG_REDACTION_CONTEXT_LINES,
                     "bytes": MAX_LOG_REDACTION_CONTEXT_BYTES,
                 }
                 for row in connection.execute(sql, params):
                     line = row[3] or ""
-                    state_key = (row[0], str(row[2]).upper())
+                    state_key = row[0]
                     if since is not None or until is not None:
                         if state_key not in redaction_states:
                             # Seed once per pair from bounded indexed history.
@@ -4423,7 +4471,6 @@ class CrucibleOperations:
                                 self._log_redaction_state_before(
                                     connection,
                                     row[6],
-                                    row[7],
                                     row[8],
                                     redaction_context_budget,
                                 )
@@ -4433,7 +4480,6 @@ class CrucibleOperations:
                                 self._log_redaction_state_between(
                                     connection,
                                     row[6],
-                                    row[7],
                                     redaction_last_ids[state_key],
                                     row[8],
                                     redaction_states[state_key],
@@ -4450,7 +4496,9 @@ class CrucibleOperations:
                         )
                     )
                     redaction_last_ids[state_key] = row[8]
-                    if pattern.search(line) is None:
+                    if stream is not None and str(row[2]).upper() != stream.upper():
+                        continue
+                    if pattern.search(safe_line) is None:
                         continue
                     if matched < offset:
                         matched += 1

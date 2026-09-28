@@ -1216,8 +1216,11 @@ class TestServer(unittest.TestCase):
                 INSERT INTO sessions VALUES (1, 'sensitive-session', 't0', 1, 1);
                 INSERT INTO lines VALUES (1, 1, 1, 1, 'remotehosts --roadblock-passwd=line-secret');
                 INSERT INTO lines VALUES (2, 1, 1, 2, '-----BEGIN OPENSSH PRIVATE KEY-----');
-                INSERT INTO lines VALUES (3, 1, 1, 3, 'private-key-material');
+                INSERT INTO streams VALUES (2, 'STDERR');
+                INSERT INTO lines VALUES (3, 1, 2, 3, 'cHJpdmF0ZS1rZXktcGF5bG9hZC1zZWNyZXQ=');
                 INSERT INTO lines VALUES (4, 1, 1, 4, '-----END OPENSSH PRIVATE KEY-----');
+                INSERT INTO lines VALUES (5, 1, 2, 5, 'stderr startup completed');
+                INSERT INTO lines VALUES (6, 1, 1, 6, 'private-key-material');
                 """
             )
         self.server.operations.log_db = database
@@ -1246,6 +1249,42 @@ class TestServer(unittest.TestCase):
                 serialized = json.dumps(payload)
                 for secret in ("command-secret", "line-secret", "private-key-material"):
                     self.assertNotIn(secret, serialized)
+
+        markerless_payload = "cHJpdmF0ZS1rZXktcGF5bG9hZC1zZWNyZXQ="
+        for name, arguments in (
+            (
+                "get_log_session",
+                {"session_id": "sensitive-session", "stream": "stderr"},
+            ),
+            (
+                "search_logs",
+                {
+                    "query": "redacted private key",
+                    "session_id": "sensitive-session",
+                    "stream": "stderr",
+                },
+            ),
+        ):
+            with self.subTest(tool=name, stream="stderr"):
+                status, payload = call_tool(name, arguments, 71)
+                self.assertEqual(status, 200)
+                serialized = json.dumps(payload)
+                self.assertNotIn(markerless_payload, serialized)
+                self.assertIn("[redacted private key]", serialized)
+                if name == "get_log_session":
+                    self.assertIn("stderr startup completed", serialized)
+
+        status, raw_secret_search = call_tool(
+            "search_logs",
+            {
+                "query": "cHJpdmF0",
+                "session_id": "sensitive-session",
+                "stream": "stderr",
+            },
+            72,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(raw_secret_search["result"]["structuredContent"]["matches"], [])
 
     def test_get_run_logs_bounds_the_serialized_response_resumably(self):
         raw_text = "\0" * 300_000

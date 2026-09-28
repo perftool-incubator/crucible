@@ -402,10 +402,10 @@ service-start behavior. If startup fails for a CLI-backed job, its job status
 and runner log report the failure.
 Logger tools redact recognized credential-like values from command metadata and
 returned lines, including private-key blocks that span logger rows or response
-pages. Search matching is performed against the original log line, but matching
-text is still redacted in the response. If the bounded history needed to
-reconstruct private-key state is unavailable or exceeds its limits, that
-session/stream's returned lines are redacted fail-closed.
+pages and logger streams. Grep and search matching are performed against the
+redacted text, so credentials cannot be probed through match/no-match results.
+If the bounded history needed to reconstruct redaction state is unavailable or
+exceeds its limits, returned lines are redacted fail-closed.
 
 For example, after obtaining the token, a client can verify service health
 with:

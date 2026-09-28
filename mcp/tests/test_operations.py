@@ -18,6 +18,7 @@ from crucible_mcp.operations import (
     MAX_ARTIFACT_READ_BYTES,
     MAX_ARTIFACT_RESPONSE_BYTES,
     MAX_LOG_PRIVATE_KEY_MARKERS_PER_LINE,
+    MAX_LOG_RESPONSE_BYTES,
     MAX_METADATA_DECOMPRESSOR_MEMORY,
     MAX_METADATA_JSON_FRAGMENTS,
     MAX_METADATA_REDACTION_WORK,
@@ -3416,6 +3417,33 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(sensitive_query))
         self.assertEqual(sensitive_query["query"], "password=[redacted]")
 
+    def test_redact_log_text_masks_markerless_private_key_payload_lines(self):
+        payload = "cHJpdmF0ZS1rZXktcGF5bG9hZC1zZWNyZXQ="
+        safe = self.operations.redact_log_text(
+            f"before key body\r\n  {payload}  \r\nafter key body\r"
+        )
+
+        self.assertEqual(
+            safe,
+            "before key body\r\n[redacted private key]\r\nafter key body\r",
+        )
+        self.assertNotIn(payload, safe)
+
+    def test_redact_log_text_preserves_safe_lines_around_oversized_records(self):
+        value = "safe before\n" + ("x" * (MAX_LOG_RESPONSE_BYTES + 1)) + "\nsafe after"
+
+        safe = self.operations.redact_log_text(value)
+
+        self.assertEqual(safe, "safe before\n[redacted]\nsafe after")
+
+    def test_redact_log_text_masks_long_varied_markerless_key_payload(self):
+        payload = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" * 100
+
+        safe = self.operations.redact_log_text(f"before\n{payload}\nafter")
+
+        self.assertEqual(safe, "before\n[redacted private key]\nafter")
+        self.assertNotIn(payload, safe)
+
     def test_logger_results_redact_credentials_and_private_key_pages(self):
         database = self.root / "sensitive-logs.db"
         connection = sqlite3.connect(database)
@@ -3430,13 +3458,15 @@ class TestCrucibleOperations(unittest.TestCase):
             CREATE TABLE streams (id INTEGER PRIMARY KEY, stream TEXT);
             CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER, stream INTEGER, timestamp, line TEXT);
             CREATE INDEX idx_lines_session_stream_id ON lines (session, stream, id);
+            CREATE INDEX idx_lines_session_id ON lines (session, id);
             INSERT INTO streams VALUES (1, 'STDOUT');
+            INSERT INTO streams VALUES (2, 'STDERR');
             INSERT INTO sources VALUES (1, 'runner');
             INSERT INTO commands VALUES (1, 'crucible run --roadblock-passwd=command-secret');
             INSERT INTO sessions VALUES (1, 'sensitive-session', 't0', 1, 1);
             INSERT INTO lines VALUES (1, 1, 1, 1, 'remotehosts --roadblock-passwd=line-secret');
             INSERT INTO lines VALUES (2, 1, 1, 2, '-----BEGIN OPENSSH PRIVATE KEY-----');
-            INSERT INTO lines VALUES (3, 1, 1, 3, 'private-key-material');
+            INSERT INTO lines VALUES (3, 1, 2, 3, 'private-key-material');
             INSERT INTO lines VALUES (4, 1, 1, 4, '-----END OPENSSH PRIVATE KEY-----');
             INSERT INTO lines VALUES (5, 1, 1, 5, '-----BEGIN OPENSSH PRIVATE KEY-----');
             INSERT INTO lines VALUES (6, 1, 1, 6, '-----END RSA PRIVATE KEY-----');
@@ -3471,10 +3501,15 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(page["lines"][0]["line"], "[redacted private key]")
         self.assertNotIn("command-secret", json.dumps(page))
         self.assertNotIn("private-key-material", json.dumps(page))
-        search = operations.search_logs("private-key", session_id="sensitive-session")
+        search = operations.search_logs("redacted private key", session_id="sensitive-session")
         self.assertEqual(search["matches"][0]["line"], "[redacted private key]")
         self.assertNotIn("private-key-material", json.dumps(search))
         self.assertNotIn("command-secret", json.dumps(search))
+        stderr_pem = operations.get_log_session(
+            "sensitive-session", stream="stderr"
+        )
+        self.assertNotIn("private-key-material", json.dumps(stderr_pem))
+        self.assertIn("[redacted private key]", json.dumps(stderr_pem))
 
         with patch.object(
             operations,
@@ -3482,12 +3517,12 @@ class TestCrucibleOperations(unittest.TestCase):
             wraps=operations._log_redaction_state_before,
         ) as context_lookup:
             since_search = operations.search_logs(
-                "private-key", session_id="sensitive-session", since=3
+                "redacted private key", session_id="sensitive-session", since=3
             )
         self.assertEqual(context_lookup.call_count, 1)
         self.assertEqual(since_search["matches"][0]["line"], "[redacted private key]")
         clock_step_search = operations.search_logs(
-            "clock-step-key-material",
+            "redacted private key",
             session_id="clock-step-session",
             since=10,
         )
@@ -3495,7 +3530,7 @@ class TestCrucibleOperations(unittest.TestCase):
             clock_step_search["matches"][0]["line"], "[redacted private key]"
         )
         until_only_search = operations.search_logs(
-            "until-only-key-material",
+            "redacted private key",
             session_id="until-clock-step-session",
             until=10,
         )
@@ -3503,7 +3538,7 @@ class TestCrucibleOperations(unittest.TestCase):
             until_only_search["matches"][0]["line"], "[redacted private key]"
         )
         mismatched_end_search = operations.search_logs(
-            "payload-after",
+            "redacted private key",
             session_id="sensitive-session",
             since=7,
         )
@@ -3512,13 +3547,13 @@ class TestCrucibleOperations(unittest.TestCase):
         )
         self.assertNotIn("payload-after-mismatched-end", json.dumps(mismatched_end_search))
         nested_marker_search = operations.search_logs(
-            "rsa-payload", session_id="sensitive-session", since=11
+            "redacted private key", session_id="sensitive-session", since=11
         )
         self.assertEqual(nested_marker_search["matches"][0]["line"], "[redacted private key]")
         self.assertNotIn("rsa-payload-after-nested-markers", json.dumps(nested_marker_search))
         with patch("crucible_mcp.operations.MAX_LOG_REDACTION_CONTEXT_LINES", 2):
             capped_history_search = operations.search_logs(
-                "public data",
+                "redacted",
                 session_id="large-history-session",
                 since=15,
             )
@@ -3527,6 +3562,14 @@ class TestCrucibleOperations(unittest.TestCase):
             "remotehosts", session_id="sensitive-session"
         )
         self.assertNotIn("line-secret", json.dumps(credential_search))
+        secret_search = operations.search_logs(
+            "line-secret", session_id="sensitive-session"
+        )
+        self.assertEqual(secret_search["matches"], [])
+        secret_grep = operations.get_log_session(
+            "sensitive-session", grep="line-secret"
+        )
+        self.assertEqual(secret_grep["lines"], [])
 
     def test_logger_queries_carry_sensitive_option_state_across_rows(self):
         database = self.root / "multiline-sensitive-logs.db"
@@ -3545,25 +3588,28 @@ class TestCrucibleOperations(unittest.TestCase):
                 stream INTEGER, line TEXT
             );
             CREATE INDEX idx_lines_session_stream_id ON lines (session, stream, id);
+            CREATE INDEX idx_lines_session_id ON lines (session, id);
             INSERT INTO sources VALUES (1, 'runner');
             INSERT INTO commands VALUES (1, 'crucible run');
             INSERT INTO sessions VALUES (1, 'multiline-secret-session', 't0', 1, 1);
             INSERT INTO streams VALUES (1, 'STDOUT');
+            INSERT INTO streams VALUES (2, 'STDERR');
             INSERT INTO lines VALUES (1, 1, 1, 1, 'command --token');
-            INSERT INTO lines VALUES (2, 1, 2, 1, 'logger-secret-token');
+            INSERT INTO lines VALUES (2, 1, 2, 2, 'logger-secret-token');
             INSERT INTO lines VALUES (3, 1, 3, 1, 'safe diagnostic');
             INSERT INTO lines VALUES (4, 1, 4, 1, 'password: |');
-            INSERT INTO lines VALUES (5, 1, 5, 1, '  logger-yaml-secret');
+            INSERT INTO lines VALUES (5, 1, 5, 2, '  logger-yaml-secret');
             INSERT INTO lines VALUES (6, 1, 6, 1, 'safe yaml diagnostic');
             INSERT INTO lines VALUES (7, 1, 7, 1, 'curl https://alice:\\');
-            INSERT INTO lines VALUES (8, 1, 8, 1, 'url-secret@example.com');
+            INSERT INTO lines VALUES (8, 1, 8, 2, 'url-secret@example.com');
             INSERT INTO lines VALUES (9, 1, 9, 1, 'safe after url');
+            INSERT INTO lines VALUES (10, 1, 10, 2, 'stderr safe diagnostic');
             INSERT INTO sessions VALUES (2, 'inline-sensitive-json', 't1', 1, 1);
-            INSERT INTO lines VALUES (10, 2, 10, 1, '{"token": {');
-            INSERT INTO lines VALUES (11, 2, 11, 1, '  "value": "inline-json-secret",');
-            INSERT INTO lines VALUES (12, 2, 12, 1, '  "nested": {"access": "nested-json-secret"}');
-            INSERT INTO lines VALUES (13, 2, 13, 1, '}');
-            INSERT INTO lines VALUES (14, 2, 14, 1, '{"safe": "safe sibling"}');
+            INSERT INTO lines VALUES (11, 2, 11, 1, '{"token": {');
+            INSERT INTO lines VALUES (12, 2, 12, 1, '  "value": "inline-json-secret",');
+            INSERT INTO lines VALUES (13, 2, 13, 1, '  "nested": {"access": "nested-json-secret"}');
+            INSERT INTO lines VALUES (14, 2, 14, 1, '}');
+            INSERT INTO lines VALUES (15, 2, 15, 1, '{"safe": "safe sibling"}');
             """
         )
         connection.commit()
@@ -3575,25 +3621,33 @@ class TestCrucibleOperations(unittest.TestCase):
             "multiline-secret-session", offset=1, limit=1
         )
         search = operations.search_logs(
-            "logger-secret-token", session_id="multiline-secret-session"
+            "redacted", session_id="multiline-secret-session"
         )
         since_search = operations.search_logs(
-            "logger-secret-token",
+            "redacted",
             session_id="multiline-secret-session",
             since=2,
         )
         yaml_session = operations.get_log_session("multiline-secret-session")
         yaml_search = operations.search_logs(
-            "logger-yaml-secret", session_id="multiline-secret-session", since=5
+            "redacted", session_id="multiline-secret-session", since=5
         )
         url_search = operations.search_logs(
-            "url-secret", session_id="multiline-secret-session", since=8
+            "redacted", session_id="multiline-secret-session", since=8
+        )
+        stderr_session = operations.get_log_session(
+            "multiline-secret-session", stream="stderr"
+        )
+        stderr_search = operations.search_logs(
+            "redacted", session_id="multiline-secret-session", stream="stderr"
         )
         inline_json_session = operations.get_log_session("inline-sensitive-json")
 
         self.assertNotIn("logger-secret-token", json.dumps(session))
         self.assertNotIn("logger-secret-token", json.dumps(session_page))
         self.assertNotIn("logger-secret-token", search["matches"][0]["line"])
+        self.assertNotIn("logger-secret-token", json.dumps(stderr_session))
+        self.assertNotIn("logger-secret-token", json.dumps(stderr_search))
         self.assertNotIn(
             "logger-secret-token", since_search["matches"][0]["line"]
         )
@@ -3606,6 +3660,19 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertIn("safe diagnostic", json.dumps(session))
         self.assertIn("safe yaml diagnostic", json.dumps(yaml_session))
         self.assertIn("safe after url", json.dumps(session))
+        self.assertIn("stderr safe diagnostic", json.dumps(stderr_session))
+        raw_secret_search = operations.search_logs(
+            "logger-yaml-secret",
+            session_id="multiline-secret-session",
+            stream="stderr",
+        )
+        self.assertEqual(raw_secret_search["matches"], [])
+        raw_secret_grep = operations.get_log_session(
+            "multiline-secret-session",
+            stream="stderr",
+            grep="logger-yaml-secret",
+        )
+        self.assertEqual(raw_secret_grep["lines"], [])
         self.assertIn("safe sibling", json.dumps(inline_json_session))
 
     def test_logger_redaction_bounds_private_key_markers_per_line(self):

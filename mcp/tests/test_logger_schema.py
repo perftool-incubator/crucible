@@ -35,12 +35,18 @@ class TestLoggerSchemaMigration(unittest.TestCase):
 
         self.assertEqual(
             connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0],
-            2,
+            3,
         )
         self.assertIsNotNone(
             connection.execute(
                 """SELECT 1 FROM sqlite_master
                    WHERE type = 'index' AND name = 'idx_lines_session_stream_id'"""
+            ).fetchone()
+        )
+        self.assertIsNotNone(
+            connection.execute(
+                """SELECT 1 FROM sqlite_master
+                   WHERE type = 'index' AND name = 'idx_lines_session_id'"""
             ).fetchone()
         )
 
@@ -65,12 +71,49 @@ class TestLoggerSchemaMigration(unittest.TestCase):
 
         self.assertEqual(
             connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0],
-            2,
+            3,
         )
         self.assertIsNotNone(
             connection.execute(
                 """SELECT 1 FROM sqlite_master
                    WHERE type = 'index' AND name = 'idx_lines_session_stream_id'"""
+            ).fetchone()
+        )
+        self.assertIsNotNone(
+            connection.execute(
+                """SELECT 1 FROM sqlite_master
+                   WHERE type = 'index' AND name = 'idx_lines_session_id'"""
+            ).fetchone()
+        )
+
+    def test_version_two_database_gets_session_wide_order_index(self):
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        connection.executescript(
+            """
+            CREATE TABLE schema_version (version INTEGER PRIMARY KEY NOT NULL);
+            INSERT INTO schema_version (version) VALUES (2);
+            CREATE TABLE lines (
+                id INTEGER PRIMARY KEY,
+                session INTEGER,
+                timestamp REAL,
+                stream INTEGER,
+                line TEXT
+            );
+            CREATE TABLE sessions (timestamp REAL);
+            """
+        )
+
+        _run_migrations(connection)
+
+        self.assertEqual(
+            connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0],
+            3,
+        )
+        self.assertIsNotNone(
+            connection.execute(
+                """SELECT 1 FROM sqlite_master
+                   WHERE type = 'index' AND name = 'idx_lines_session_id'"""
             ).fetchone()
         )
 

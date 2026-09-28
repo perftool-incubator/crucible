@@ -34,7 +34,6 @@ _MAINTENANCE_OPERATIONS = frozenset(
     }
 )
 MAX_LOG_REDACTION_CONTEXT_BYTES = 1_048_576
-_PRIVATE_KEY_PAYLOAD_LINE = re.compile(rb"[A-Za-z0-9+/]{32,}={0,2}")
 _LOG_EMPTY_RECORDS = re.compile(rb"[\r\n]+")
 
 
@@ -585,11 +584,6 @@ class RunManager:
                 pending_sensitive_json_key,
                 pending_sensitive_log_value,
             )
-            if _PRIVATE_KEY_PAYLOAD_LINE.fullmatch(content):
-                # Preserve the legacy fail-closed heuristic for private-key
-                # payloads emitted without PEM delimiters, masking only this
-                # record so adjacent diagnostics stay useful.
-                line_redacted = True
             if processed_lines in sensitive_shell_continuation_lines:
                 line_redacted = True
 

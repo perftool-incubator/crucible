@@ -188,6 +188,7 @@ class TestRunManager(unittest.TestCase):
             + b"-----BEGIN PRIVATE KEY-----\n"
             + b"A" * 64
             + b"\n-----END PRIVATE KEY-----\n"
+            + b"cHJpdmF0ZS1rZXktcGF5bG9hZC1zZWNyZXQ=\n"
             + b"worker completed teardown successfully\n"
         )
         log_path.write_bytes(raw_log)
@@ -209,6 +210,7 @@ class TestRunManager(unittest.TestCase):
         self.assertNotIn("yaml-block-secret", page["text"])
         self.assertNotIn("another-yaml-secret", page["text"])
         self.assertNotIn("A" * 64, page["text"])
+        self.assertNotIn("cHJpdmF0ZS1rZXktcGF5bG9hZC1zZWNyZXQ=", page["text"])
         self.assertTrue(page["redacted"])
         self.assertGreaterEqual(page["redacted_lines"], 3)
         self.assertEqual(page["next_offset"], len(raw_log))
