@@ -27,11 +27,12 @@ from .operations import (
     CrucibleOperations,
     OperationError,
     MAX_LOG_RESPONSE_BYTES,
+    MAX_MCP_RESPONSE_BYTES,
     MAX_PLAN_RESPONSE_BYTES,
 )
 from .host import host_context_command, host_context_environment
 from .policy import InputPolicy, PolicyError, read_token, token_matches
-from .runner import RunManager
+from .runner import MAX_IDEMPOTENCY_KEY_LENGTH, RunManager
 from .audit import AuditLogger
 
 
@@ -73,6 +74,7 @@ TOOL_NAMES = (
     "remove_local_run_tags",
     "search_documentation",
 )
+MAX_JSONRPC_ID_BYTES = MAX_MCP_RESPONSE_BYTES - 512
 
 _INDEXED_RESULT_TOOLS = {
     "list_indexed_results",
@@ -206,7 +208,7 @@ TOOL_DEFINITIONS = (
         "name": "archive_local_run",
         "description": "Archive an approved local run and remove the live run after success.",
         "inputSchema": {"type": "object", "properties": {
-            "idempotency_key": {"type": "string", "minLength": 1},
+            "idempotency_key": {"type": "string", "minLength": 1, "maxLength": MAX_IDEMPOTENCY_KEY_LENGTH},
             "run_path": {"type": "string", "minLength": 1}},
             "required": ["idempotency_key", "run_path"], "additionalProperties": False},
     },
@@ -214,7 +216,7 @@ TOOL_DEFINITIONS = (
         "name": "unarchive_local_run",
         "description": "Restore a local run archive into the approved run root.",
         "inputSchema": {"type": "object", "properties": {
-            "idempotency_key": {"type": "string", "minLength": 1},
+            "idempotency_key": {"type": "string", "minLength": 1, "maxLength": MAX_IDEMPOTENCY_KEY_LENGTH},
             "archive_path": {"type": "string", "minLength": 1}},
             "required": ["idempotency_key", "archive_path"], "additionalProperties": False},
     },
@@ -354,7 +356,7 @@ TOOL_DEFINITIONS = (
         "inputSchema": {
             "type": "object",
             "properties": {
-                "idempotency_key": {"type": "string", "minLength": 1},
+                "idempotency_key": {"type": "string", "minLength": 1, "maxLength": MAX_IDEMPOTENCY_KEY_LENGTH},
                 "plan_digest": {"type": "string", "minLength": 1, "maxLength": 128},
                 "document": {"type": "object"},
                 "path": {"type": "string", "minLength": 1},
@@ -412,7 +414,7 @@ TOOL_DEFINITIONS = (
         "name": "postprocess_local_run",
         "description": "Post-process an approved Crucible run directory.",
         "inputSchema": {"type": "object", "properties": {
-            "idempotency_key": {"type": "string", "minLength": 1},
+            "idempotency_key": {"type": "string", "minLength": 1, "maxLength": MAX_IDEMPOTENCY_KEY_LENGTH},
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1}},
             "required": ["idempotency_key"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
@@ -422,7 +424,7 @@ TOOL_DEFINITIONS = (
         "name": "index_local_run",
         "description": "Index an approved Crucible run directory into CDM.",
         "inputSchema": {"type": "object", "properties": {
-            "idempotency_key": {"type": "string", "minLength": 1},
+            "idempotency_key": {"type": "string", "minLength": 1, "maxLength": MAX_IDEMPOTENCY_KEY_LENGTH},
             "run_path": {"type": "string", "minLength": 1},
             "mcp_job_id": {"type": "string", "minLength": 1}},
             "required": ["idempotency_key"], "oneOf": [{"required": ["run_path"]}, {"required": ["mcp_job_id"]}],
@@ -432,7 +434,7 @@ TOOL_DEFINITIONS = (
         "name": "delete_indexed_result",
         "description": "Delete one indexed CDM result without removing local run artifacts.",
         "inputSchema": {"type": "object", "properties": {
-            "idempotency_key": {"type": "string", "minLength": 1},
+            "idempotency_key": {"type": "string", "minLength": 1, "maxLength": MAX_IDEMPOTENCY_KEY_LENGTH},
             "run": {"type": "string", "minLength": 1}},
             "required": ["idempotency_key", "run"], "additionalProperties": False},
     },
@@ -683,6 +685,16 @@ class MCPHandler(BaseHTTPRequestHandler):
                 "id": None,
                 "error": {"code": -32600, "message": "invalid request body"},
             }
+        try:
+            response_size = len(json.dumps(response).encode("utf-8"))
+        except (TypeError, ValueError, UnicodeEncodeError):
+            response_size = MAX_MCP_RESPONSE_BYTES + 1
+        if response_size > MAX_MCP_RESPONSE_BYTES:
+            response = self._error(
+                response.get("id") if isinstance(response, dict) else None,
+                -32000,
+                "MCP response exceeds the configured size limit",
+            )
         operation, job_id = self._audit_context(request, response)
         self._audit(
             operation,
@@ -805,6 +817,12 @@ class MCPHandler(BaseHTTPRequestHandler):
         if not isinstance(request, dict):
             return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid JSON-RPC request"}}
         request_id = request.get("id")
+        try:
+            encoded_id = json.dumps(request_id, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError, UnicodeEncodeError):
+            return self._error(None, -32600, "invalid JSON-RPC request id")
+        if len(encoded_id) > MAX_JSONRPC_ID_BYTES or isinstance(request_id, (dict, list, bool)):
+            return self._error(None, -32600, "invalid JSON-RPC request id")
         method = request.get("method")
         params = request.get("params", {})
         if params is None:
@@ -970,9 +988,13 @@ class MCPHandler(BaseHTTPRequestHandler):
                     **{key: arguments[key] for key in ("run", "name", "email", "harness", "benchmark", "limit") if key in arguments}
                 )
             elif name == "get_indexed_result":
-                value = self.server.operations.get_indexed_result(arguments.get("run", ""))
+                value = self.server.operations.get_indexed_result(
+                    arguments.get("run", ""), request_id=request_id
+                )
             elif name == "list_indexed_periods":
-                value = self.server.operations.list_indexed_periods(arguments.get("run", ""))
+                value = self.server.operations.list_indexed_periods(
+                    arguments.get("run", ""), request_id=request_id
+                )
             elif name == "get_indexed_metric":
                 value = self.server.operations.get_indexed_metric(
                     run=arguments.get("run", ""), source=arguments.get("source", ""),
@@ -984,7 +1006,9 @@ class MCPHandler(BaseHTTPRequestHandler):
                     allow_incompatible_aggregation=arguments.get("allow_incompatible_aggregation", False),
                 )
             elif name == "list_log_sessions":
-                value = self.server.operations.list_log_sessions(arguments.get("limit", 100))
+                value = self.server.operations.list_log_sessions(
+                    arguments.get("limit", 100), request_id=request_id
+                )
             elif name == "get_log_info":
                 value = self.server.operations.get_log_info()
             elif name == "get_log_session":
@@ -1140,17 +1164,29 @@ class MCPHandler(BaseHTTPRequestHandler):
                         return self._error(request_id, -32000, "source job has no run directory")
                     tag_path = Path(source_job.run_directory)
                 if name == "list_local_run_tags":
-                    value = self.server.operations.list_local_run_tags(tag_path)
+                    value = self.server.operations.list_local_run_tags(
+                        tag_path, request_id=request_id
+                    )
                 elif name == "add_local_run_tags":
-                    value = self.server.operations.add_local_run_tags(tag_path, arguments["tags"])
+                    value = self.server.operations.add_local_run_tags(
+                        tag_path, arguments["tags"], request_id=request_id
+                    )
                 else:
-                    value = self.server.operations.remove_local_run_tags(tag_path, arguments["names"])
+                    value = self.server.operations.remove_local_run_tags(
+                        tag_path, arguments["names"], request_id=request_id
+                    )
             elif name == "search_documentation":
                 value = self.server.operations.search_documentation(
                     arguments["query"], arguments.get("limit", 10)
                 )
             else:
                 return self._error(request_id, -32602, "unknown tool")
+            if self.server.operations._mcp_response_size(value, request_id) > MAX_MCP_RESPONSE_BYTES:
+                raise OperationError(
+                    "framework",
+                    "tool response exceeds the configured size limit",
+                    "result_too_large",
+                )
             for indexed_query_run in indexed_query_runs:
                 self.server.jobs.update_indexed_query_status(
                     indexed_query_run, IndexedQueryStatus.READY

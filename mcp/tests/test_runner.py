@@ -14,6 +14,7 @@ from crucible_mcp.operations import (
     CrucibleOperations,
     OperationError,
 )
+from crucible_mcp.policy import InputPolicy
 from crucible_mcp.runner import (
     MAX_LOG_REDACTION_CONTEXT_BYTES,
     MAX_LOG_REDACTION_LINES,
@@ -39,9 +40,13 @@ class TestRunManager(unittest.TestCase):
             "open(os.environ['CRUCIBLE_MCP_EVENT_FILE'], 'a').write("
             "'{\\\"state\\\":\\\"postprocessing\\\"}\\n')"
         )
+        operations = CrucibleOperations(self.root)
+        operations.run_policy = InputPolicy(
+            [self.root / "run", self.root / "runs"]
+        )
         self.manager = RunManager(
             self.store,
-            CrucibleOperations(self.root),
+            operations,
             self.root / "runs",
             [sys.executable, "-c", event_script],
             host_execution=False,
@@ -1490,7 +1495,7 @@ class TestRunManager(unittest.TestCase):
         manager = RunManager(
             self.store,
             self.manager.operations,
-            self.root / "summary-timeout-runs",
+            self.root / "runs" / "summary-timeout-runs",
             [sys.executable, "-c", "import sys; sys.exit(0)"],
             cdm_readiness_timeout=0.01,
             host_execution=False,
@@ -1505,7 +1510,7 @@ class TestRunManager(unittest.TestCase):
 
     def test_summary_response_is_bounded_after_redaction(self):
         job, _ = self.store.create_or_get("key-summary-response-bound", {"run": 1})
-        run_directory = self.root / "summary-response-bound-run"
+        run_directory = self.root / "runs" / "summary-response-bound-run"
         summary_path = run_directory / "run" / "result-summary.json"
         summary_path.parent.mkdir(parents=True)
         raw_summary = json.dumps(
@@ -1526,6 +1531,50 @@ class TestRunManager(unittest.TestCase):
             self.manager.get_summary(job.mcp_job_id, request_id="summary-request")
 
         self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_summary_reader_rejects_symlinked_result_artifact(self):
+        job, _ = self.store.create_or_get("key-summary-symlink", {"run": 1})
+        run_directory = self.root / "runs" / "summary-symlink-run"
+        summary_directory = run_directory / "run"
+        summary_directory.mkdir(parents=True)
+        outside_summary = self.root / "outside-summary.json"
+        outside_summary.write_text('{"password":"outside-secret"}', encoding="utf-8")
+        (summary_directory / "result-summary.json").symlink_to(outside_summary)
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            run_directory=str(run_directory),
+        )
+        self.store.transition(job.mcp_job_id, JobState.RUNNING)
+        self.store.transition(job.mcp_job_id, JobState.COMPLETED)
+
+        with self.assertRaises(OperationError) as raised:
+            self.manager.get_summary(job.mcp_job_id)
+
+        self.assertEqual(raised.exception.code, "path_rejected")
+        self.assertNotIn("outside-secret", str(raised.exception))
+
+    def test_all_job_submissions_bound_idempotency_keys(self):
+        oversized_key = "k" * 257
+        submitters = (
+            lambda: self.manager.submit(
+                oversized_key, document={"benchmarks": []}
+            ),
+            lambda: self.manager.submit_processing(
+                oversized_key, "index", self.root / "runs" / "some-run"
+            ),
+            lambda: self.manager.submit_indexed_deletion(oversized_key, "run-id"),
+            lambda: self.manager.submit_archive_operation(
+                oversized_key,
+                "archive_local_run",
+                self.root / "runs" / "some-run",
+            ),
+        )
+        for submitter in submitters:
+            with self.subTest(submitter=submitter):
+                with self.assertRaises(OperationError) as raised:
+                    submitter()
+                self.assertEqual(raised.exception.code, "invalid_idempotency_key")
 
 
 if __name__ == "__main__":

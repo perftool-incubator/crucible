@@ -41,7 +41,9 @@ MAX_ARTIFACT_READ_BYTES = 131_072
 MAX_ARTIFACT_REDACTION_BYTES = 8_388_608
 MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
 MAX_METADATA_RESPONSE_BYTES = 1_048_576
+MAX_MCP_RESPONSE_BYTES = 1_048_576
 MAX_PLAN_RESPONSE_BYTES = 1_048_576
+MAX_LOG_SESSION_COMMAND_CHARS = 4096
 MAX_PLAN_BENCHMARKS = 100
 MAX_PLAN_PARAMETER_WORK = 100_000
 MAX_PLAN_PARAMETER_ENTRY_WORK = 1_000_000
@@ -105,6 +107,7 @@ _TEXT_ARTIFACT_SUFFIXES = {
     ".yaml": "application/yaml",
     ".yml": "application/yaml",
 }
+_ARTIFACT_SUFFIXES_WITHOUT_SAFE_REDACTION = {".csv", ".xml"}
 _ARTIFACT_SUFFIX_MEDIA_TYPES = {
     **_TEXT_ARTIFACT_SUFFIXES,
     ".xz": "application/x-xz",
@@ -588,15 +591,21 @@ class CrucibleOperations:
             "count": len(resources),
         }
 
-    def list_local_run_tags(self, run_directory: Path) -> dict[str, Any]:
+    def list_local_run_tags(
+        self, run_directory: Path, request_id: Any = None
+    ) -> dict[str, Any]:
         _, document = self._load_run_metadata(run_directory)
         tags = self._validated_tags(document)
-        return {
+        result = {
             "run_path": str(run_directory),
             "tags": self._redact_metadata(tags),
         }
+        self._ensure_mcp_response_size(result, request_id, "tag response")
+        return result
 
-    def add_local_run_tags(self, run_directory: Path, tags: list[str]) -> dict[str, Any]:
+    def add_local_run_tags(
+        self, run_directory: Path, tags: list[str], request_id: Any = None
+    ) -> dict[str, Any]:
         canonical = self._canonical_run_directory(run_directory)
         with self._tag_lock(canonical):
             path, document = self._load_run_metadata(canonical)
@@ -611,13 +620,14 @@ class CrucibleOperations:
                 else:
                     existing["val"] = match.group(2)
             response_tags = self._redact_metadata(current)
+            result = {"run_path": str(run_directory), "tags": response_tags}
+            self._ensure_mcp_response_size(result, request_id, "tag response")
             self._write_run_metadata(path, document)
-            return {
-                "run_path": str(run_directory),
-                "tags": response_tags,
-            }
+            return result
 
-    def remove_local_run_tags(self, run_directory: Path, names: list[str]) -> dict[str, Any]:
+    def remove_local_run_tags(
+        self, run_directory: Path, names: list[str], request_id: Any = None
+    ) -> dict[str, Any]:
         canonical = self._canonical_run_directory(run_directory)
         with self._tag_lock(canonical):
             path, document = self._load_run_metadata(canonical)
@@ -628,11 +638,10 @@ class CrucibleOperations:
             if len(document["tags"]) == len(existing):
                 raise OperationError("user", "no matching tags were found", "tag_not_found")
             response_tags = self._redact_metadata(document["tags"])
+            result = {"run_path": str(run_directory), "tags": response_tags}
+            self._ensure_mcp_response_size(result, request_id, "tag response")
             self._write_run_metadata(path, document)
-            return {
-                "run_path": str(run_directory),
-                "tags": response_tags,
-            }
+            return result
 
     def _tag_lock(self, run_directory: Path) -> threading.Lock:
         with self._tag_locks_guard:
@@ -3282,6 +3291,12 @@ class CrucibleOperations:
             raise OperationError(
                 "user", "artifact is not an approved UTF-8 text artifact", "artifact_not_text"
             )
+        if Path(relative).suffix.lower() in _ARTIFACT_SUFFIXES_WITHOUT_SAFE_REDACTION:
+            raise OperationError(
+                "authorization",
+                "credential redaction is not supported for this artifact format",
+                "artifact_not_retrievable",
+            )
         if not self._is_retrievable_artifact(relative):
             raise OperationError(
                 "authorization",
@@ -3414,7 +3429,12 @@ class CrucibleOperations:
 
     @classmethod
     def _is_retrievable_artifact(cls, relative: str) -> bool:
-        return cls._is_text_artifact(relative) and not cls._is_sensitive_artifact(relative)
+        return (
+            cls._is_text_artifact(relative)
+            and Path(relative).suffix.lower()
+            not in _ARTIFACT_SUFFIXES_WITHOUT_SAFE_REDACTION
+            and not cls._is_sensitive_artifact(relative)
+        )
 
     @staticmethod
     def _artifact_media_type(path: Path) -> str:
@@ -4134,7 +4154,9 @@ class CrucibleOperations:
             {"run_ids": run_ids[:limit], "count": min(len(run_ids), limit)}
         )
 
-    def get_indexed_result(self, run: str) -> dict[str, Any]:
+    def get_indexed_result(
+        self, run: str, request_id: Any = None
+    ) -> dict[str, Any]:
         """Return structured metadata for one historical CDM run."""
 
         self._require_text(run, "run")
@@ -4143,7 +4165,7 @@ class CrucibleOperations:
         if not matches:
             raise OperationError("user", f"unknown result run: {run}", "not_found")
         prefix = f"/api/v1/run/{encoded_run}"
-        periods = self.list_indexed_periods(run)["periods"]
+        periods = self.list_indexed_periods(run, request_id=request_id)["periods"]
         tags = self._cdm_request(f"{prefix}/tags").get("tags", [])
         result = self._redact_summary({
             "run_id": run,
@@ -4154,9 +4176,12 @@ class CrucibleOperations:
             "metric_sources": self._cdm_request(f"{prefix}/metric-sources").get("sources", []),
         })
         result["periods"] = periods
+        self._ensure_mcp_response_size(result, request_id, "indexed result response")
         return result
 
-    def list_indexed_periods(self, run: str) -> dict[str, Any]:
+    def list_indexed_periods(
+        self, run: str, request_id: Any = None
+    ) -> dict[str, Any]:
         """List every primary period and sample associated with a run."""
 
         self._require_text(run, "run")
@@ -4166,7 +4191,9 @@ class CrucibleOperations:
         if not isinstance(iterations, list) or not all(isinstance(item, str) for item in iterations):
             raise OperationError("framework", "CDM returned invalid iteration data", "invalid_result_response")
         if not iterations:
-            return self._redact_summary({"run_id": run, "periods": []})
+            result = self._redact_summary({"run_id": run, "periods": []})
+            self._ensure_mcp_response_size(result, request_id, "indexed periods response")
+            return result
 
         def post(path: str, body: dict[str, Any]) -> dict[str, Any]:
             return self._cdm_request(path, method="POST", body=body)
@@ -4206,7 +4233,9 @@ class CrucibleOperations:
                         "end": period_range.get("end") if isinstance(period_range, dict) else None,
                     }
                 )
-        return self._redact_summary({"run_id": run, "periods": periods})
+        result = self._redact_summary({"run_id": run, "periods": periods})
+        self._ensure_mcp_response_size(result, request_id, "indexed periods response")
+        return result
 
     def get_indexed_metric(
         self,
@@ -4253,7 +4282,9 @@ class CrucibleOperations:
             self._cdm_request("/api/v1/metric-data", method="POST", body=body)
         )
 
-    def list_log_sessions(self, limit: int = 100) -> dict[str, Any]:
+    def list_log_sessions(
+        self, limit: int = 100, request_id: Any = None
+    ) -> dict[str, Any]:
         """List recent Crucible logger sessions without reading log contents."""
 
         if self.log_db is None:
@@ -4264,8 +4295,10 @@ class CrucibleOperations:
             with sqlite3.connect(f"file:{self.log_db}?mode=ro", uri=True) as connection:
                 rows = connection.execute(
                     """
-                    SELECT sessions.session_id, sessions.timestamp,
-                           sources.source, commands.command,
+                    SELECT substr(sessions.session_id, 1, 257),
+                           substr(sessions.timestamp, 1, 129),
+                           substr(sources.source, 1, 257),
+                           substr(commands.command, 1, ?),
                            COUNT(lines.id) AS line_count
                     FROM sessions
                     JOIN sources ON sources.id = sessions.source
@@ -4274,22 +4307,42 @@ class CrucibleOperations:
                     GROUP BY sessions.id
                     ORDER BY sessions.timestamp DESC LIMIT ?
                     """,
-                    (limit,),
-                ).fetchall()
+                    (MAX_LOG_SESSION_COMMAND_CHARS + 1, limit),
+                )
+                sessions = []
+                for row in rows:
+                    session_id, timestamp, source, raw_command, line_count = row
+                    if (
+                        len(session_id or "") > 256
+                        or len(timestamp or "") > 128
+                        or len(source or "") > 256
+                    ):
+                        raise OperationError(
+                            "framework",
+                            "logger session metadata exceeds size limits",
+                            "result_too_large",
+                        )
+                    command_truncated = len(raw_command or "") > MAX_LOG_SESSION_COMMAND_CHARS
+                    command = (
+                        "[command omitted: exceeds the session-list limit]"
+                        if command_truncated
+                        else self.redact_log_text(raw_command or "")
+                    )
+                    sessions.append(
+                        {
+                            "session_id": session_id,
+                            "timestamp": timestamp,
+                            "source": source,
+                            "command": command,
+                            "command_truncated": command_truncated,
+                            "line_count": line_count,
+                        }
+                    )
         except sqlite3.Error as exc:
             raise OperationError("framework", "log database is unavailable", "log_unavailable") from exc
-        return {
-            "sessions": [
-                {
-                    "session_id": row[0],
-                    "timestamp": row[1],
-                    "source": row[2],
-                    "command": self.redact_log_text(row[3] or ""),
-                    "line_count": row[4],
-                }
-                for row in rows
-            ]
-        }
+        result = {"sessions": sessions}
+        self._ensure_mcp_response_size(result, request_id, "logger session response")
+        return result
 
     def get_log_info(self) -> dict[str, Any]:
         """Return aggregate logger database information."""
@@ -4587,6 +4640,17 @@ class CrucibleOperations:
             },
         }
         return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+    @classmethod
+    def _ensure_mcp_response_size(
+        cls, value: dict[str, Any], request_id: Any, description: str
+    ) -> None:
+        if cls._mcp_response_size(value, request_id) > MAX_MCP_RESPONSE_BYTES:
+            raise OperationError(
+                "framework",
+                f"{description} exceeds the configured response limit; reduce the requested result size",
+                "result_too_large",
+            )
 
     @classmethod
     def _bound_log_items(

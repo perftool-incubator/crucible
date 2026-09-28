@@ -34,6 +34,7 @@ _MAINTENANCE_OPERATIONS = frozenset(
     }
 )
 MAX_LOG_REDACTION_CONTEXT_BYTES = 1_048_576
+MAX_IDEMPOTENCY_KEY_LENGTH = 256
 _LOG_EMPTY_RECORDS = re.compile(rb"[\r\n]+")
 
 
@@ -87,8 +88,7 @@ class RunManager:
         plan_digest: str | None = None,
         verified_plan: dict[str, Any] | None = None,
     ) -> tuple[Job, bool]:
-        if not idempotency_key:
-            raise OperationError("user", "idempotency_key is required", "missing_idempotency_key")
+        self._validate_idempotency_key(idempotency_key)
         if (document is None) == (path is None):
             raise OperationError(
                 "user", "provide exactly one of document or path", "invalid_input"
@@ -203,6 +203,7 @@ class RunManager:
         return changed
 
     def submit_processing(self, idempotency_key: str, operation: str, run_directory: Path) -> tuple[Job, bool]:
+        self._validate_idempotency_key(idempotency_key)
         if operation not in {"postprocess", "index"}:
             raise OperationError("user", "unsupported processing operation", "invalid_operation")
         try:
@@ -236,6 +237,7 @@ class RunManager:
     def submit_indexed_deletion(self, idempotency_key: str, run: str) -> tuple[Job, bool]:
         """Delete one indexed result through Crucible's existing CLI path."""
 
+        self._validate_idempotency_key(idempotency_key)
         if not isinstance(run, str) or not run:
             raise OperationError("user", "run is required", "missing_argument")
         if "\x00" in run:
@@ -277,6 +279,7 @@ class RunManager:
     ) -> tuple[Job, bool]:
         """Run one local archive operation through the existing CLI."""
 
+        self._validate_idempotency_key(idempotency_key)
         if operation not in {"archive_local_run", "unarchive_local_run"}:
             raise OperationError("user", "unsupported archive operation", "invalid_operation")
         request = {"operation": operation, "path": str(path)}
@@ -322,6 +325,19 @@ class RunManager:
         )
         self._launch_command(job.mcp_job_id, session_id, job_directory, commands[operation])
         return self.store.get(job.mcp_job_id), True
+
+    @staticmethod
+    def _validate_idempotency_key(idempotency_key: str) -> None:
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise OperationError(
+                "user", "idempotency_key is required", "missing_idempotency_key"
+            )
+        if len(idempotency_key) > MAX_IDEMPOTENCY_KEY_LENGTH:
+            raise OperationError(
+                "user",
+                f"idempotency_key must be at most {MAX_IDEMPOTENCY_KEY_LENGTH} characters",
+                "invalid_idempotency_key",
+            )
 
     def _fail_recovery_job(self, job: Job, message: str) -> Job:
         return self.store.transition(
@@ -838,19 +854,49 @@ class RunManager:
             raise OperationError("user", "run has not completed", "result_not_ready")
         if not job.run_directory:
             raise OperationError("framework", "run directory is unavailable", "result_unavailable")
-        summary_path = Path(job.run_directory) / "run" / "result-summary.json"
+        run_directory = self.operations._canonical_run_directory(
+            Path(job.run_directory)
+        )
         deadline = time.monotonic() + self.cdm_readiness_timeout
-        while not summary_path.is_file():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+        while True:
+            try:
+                summary_stream = self.operations._open_artifact_readonly(
+                    run_directory, "run/result-summary.json"
+                )
                 break
-            time.sleep(min(0.1, remaining))
-        if not summary_path.is_file():
-            raise OperationError("framework", "result summary is unavailable", "result_unavailable")
-        if summary_path.stat().st_size > max_bytes:
-            raise OperationError("framework", "result summary exceeds size limit", "result_too_large")
+            except FileNotFoundError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise OperationError(
+                        "framework",
+                        "result summary is unavailable",
+                        "result_unavailable",
+                    )
+                time.sleep(min(0.1, remaining))
+            except OSError as exc:
+                raise OperationError(
+                    "framework",
+                    "result summary could not be opened",
+                    "result_unavailable",
+                ) from exc
         try:
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            with summary_stream:
+                if os.fstat(summary_stream.fileno()).st_size > max_bytes:
+                    raise OperationError(
+                        "framework",
+                        "result summary exceeds size limit",
+                        "result_too_large",
+                    )
+                encoded_summary = summary_stream.read(max_bytes + 1)
+            if len(encoded_summary) > max_bytes:
+                raise OperationError(
+                    "framework",
+                    "result summary exceeds size limit",
+                    "result_too_large",
+                )
+            summary = json.loads(encoded_summary.decode("utf-8"))
+        except OperationError:
+            raise
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise OperationError("framework", "result summary is not valid JSON", "invalid_result") from exc
         try:

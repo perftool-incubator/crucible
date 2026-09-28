@@ -15,6 +15,7 @@ from crucible_mcp.operations import (
     CrucibleOperations,
     OperationError,
     MAX_LOG_RESPONSE_BYTES,
+    MAX_MCP_RESPONSE_BYTES,
 )
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.audit import AuditLogger
@@ -22,6 +23,7 @@ from crucible_mcp.models import IndexedQueryStatus, Job, JobState, ResultStatus
 from crucible_mcp.policy import InputPolicy, rotate_token
 from crucible_mcp.server import (
     IPv6ThreadingHTTPServer,
+    MAX_JSONRPC_ID_BYTES,
     MCPHandler,
     _ensure_indexing_services,
 )
@@ -182,6 +184,10 @@ class TestServer(unittest.TestCase):
         self.assertIn("start_run", tools)
         self.assertIn("inputSchema", tools["start_run"])
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
+        self.assertEqual(
+            tools["start_run"]["inputSchema"]["properties"]["idempotency_key"]["maxLength"],
+            256,
+        )
         self.assertIn("plan_digest", tools["start_run"]["inputSchema"]["properties"])
         self.assertIn(
             "does not discover configured or reachable deployment targets",
@@ -894,7 +900,9 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("error", payload)
         ensure_services.assert_called_once_with()
-        self.server.operations.get_indexed_result.assert_called_once_with("cdm-run-ready")
+        self.server.operations.get_indexed_result.assert_called_once_with(
+            "cdm-run-ready", request_id=66
+        )
         updated = self.server.jobs.get(job.mcp_job_id)
         self.assertEqual(updated.result_status, ResultStatus.AVAILABLE)
         self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
@@ -1355,6 +1363,52 @@ class TestServer(unittest.TestCase):
         status, payload = self.request("POST", "/mcp", body, self.token)
         self.assertEqual(status, 200)
         self.assertEqual(payload["error"]["code"], -32602)
+
+    def test_oversized_idempotency_key_is_rejected_by_tool_schema(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 91,
+            "method": "tools/call",
+            "params": {
+                "name": "start_run",
+                "arguments": {
+                    "idempotency_key": "k" * 257,
+                    "document": {"benchmarks": []},
+                },
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+        self.assertIn("idempotency_key", payload["error"]["message"])
+
+    def test_oversized_jsonrpc_id_is_rejected_without_echoing_it(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": "i" * (MAX_JSONRPC_ID_BYTES + 1),
+            "method": "ping",
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["id"])
+        self.assertEqual(payload["error"]["code"], -32600)
+
+    def test_tool_response_envelope_is_bounded(self):
+        self.server.operations.crucible_info = Mock(
+            return_value={"payload": "x" * MAX_MCP_RESPONSE_BYTES}
+        )
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": "bounded-response",
+            "method": "tools/call",
+            "params": {"name": "crucible_info", "arguments": {}},
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertLess(len(json.dumps(payload).encode("utf-8")), MAX_MCP_RESPONSE_BYTES)
 
     def test_get_run_summary_passes_request_id_to_response_bound(self):
         self.server.run_manager = Mock()

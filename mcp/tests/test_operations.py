@@ -2721,6 +2721,47 @@ class TestCrucibleOperations(unittest.TestCase):
             "application/octet-stream",
         )
 
+    def test_csv_and_xml_artifacts_are_not_retrievable_without_format_redaction(self):
+        run_directory = self.root / "run" / "structured-text-artifacts"
+        tool_data = run_directory / "run" / "tool-data"
+        tool_data.mkdir(parents=True)
+        (tool_data / "results.csv").write_text(
+            "username,password\nalice,csv-secret", encoding="utf-8"
+        )
+        (tool_data / "settings.xml").write_text(
+            "<configuration><password>xml-secret</password></configuration>",
+            encoding="utf-8",
+        )
+
+        listing = self.operations.list_run_artifacts(run_directory)
+        retrievable = {
+            item["name"]: item["retrievable"] for item in listing["artifacts"]
+        }
+        self.assertEqual(retrievable, {"results.csv": False, "settings.xml": False})
+        for artifact_path in (
+            "run/tool-data/results.csv",
+            "run/tool-data/settings.xml",
+        ):
+            with self.subTest(artifact_path=artifact_path):
+                with self.assertRaises(OperationError) as raised:
+                    self.operations.get_run_artifact(run_directory, artifact_path)
+                self.assertEqual(raised.exception.code, "artifact_not_retrievable")
+
+    def test_tag_mutation_checks_response_size_before_persisting(self):
+        run_directory = self.root / "run" / "tag-response-limit"
+        metadata_path = run_directory / "run" / "rickshaw-run.json"
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text('{"tags": []}', encoding="utf-8")
+
+        with patch("crucible_mcp.operations.MAX_MCP_RESPONSE_BYTES", 512):
+            with self.assertRaises(OperationError) as raised:
+                self.operations.add_local_run_tags(
+                    run_directory, ["description:" + "x" * 300], request_id="tag-test"
+                )
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+        self.assertEqual(json.loads(metadata_path.read_text(encoding="utf-8")), {"tags": []})
+
     def test_list_run_artifacts_bounds_scan_work_independent_of_offset(self):
         run_directory = self.root / "run" / "scan-cap"
         iterations = run_directory / "run" / "iterations"
@@ -3345,6 +3386,100 @@ class TestCrucibleOperations(unittest.TestCase):
 
         self.assertEqual([period["primary_period_id"] for period in result["periods"]], ["period-1", "period-2"])
         self.assertEqual(result["periods"][1]["begin"], 30)
+
+    def test_indexed_period_aggregation_enforces_mcp_response_limit(self):
+        iterations = [f"iteration-{index}" for index in range(30)]
+        payloads = {
+            "/api/v1/run/run-1/iterations": {"iterations": iterations},
+            "/api/v1/run/run-1/iterations/samples": {
+                "samples": [[f"sample-{index}"] for index in range(30)]
+            },
+            "/api/v1/run/run-1/samples/statuses": {
+                "statuses": [["pass"] for _ in range(30)]
+            },
+            "/api/v1/run/run-1/iterations/primary-period-name": {
+                "periodNames": ["measurement"] * 30
+            },
+            "/api/v1/run/run-1/samples/primary-period-id": {
+                "periodIds": [[f"period-{index}"] for index in range(30)]
+            },
+            "/api/v1/run/run-1/periods/range": {
+                "ranges": [[{"begin": index, "end": index + 1}] for index in range(30)]
+            },
+        }
+        with patch.object(
+            self.operations, "_cdm_request", side_effect=lambda path, **_: payloads[path]
+        ), patch("crucible_mcp.operations.MAX_MCP_RESPONSE_BYTES", 1500):
+            with self.assertRaises(OperationError) as raised:
+                self.operations.list_indexed_periods("run-1", request_id="period-test")
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_indexed_result_checks_combined_response_size(self):
+        with patch.object(
+            self.operations,
+            "list_indexed_results",
+            return_value={"run_ids": ["run-1"]},
+        ), patch.object(
+            self.operations,
+            "list_indexed_periods",
+            return_value={"periods": [{"safe": "x" * 1200}]},
+        ), patch.object(
+            self.operations,
+            "_cdm_request",
+            side_effect=lambda path, **_: {
+                "tags": {"tags": []},
+                "benchmark": {"benchmark": "fio"},
+                "partial-status": {"status": "complete"},
+                "iterations": {"iterations": []},
+                "metric-sources": {"sources": []},
+            }[path.rsplit("/", 1)[-1]],
+        ), patch("crucible_mcp.operations.MAX_MCP_RESPONSE_BYTES", 1500):
+            with self.assertRaises(OperationError) as raised:
+                self.operations.get_indexed_result("run-1", request_id="result-test")
+
+        self.assertEqual(raised.exception.code, "result_too_large")
+
+    def test_log_session_listing_bounds_commands_and_response_size(self):
+        database = self.root / "bounded-log-sessions.db"
+        connection = sqlite3.connect(database)
+        connection.executescript(
+            """
+            CREATE TABLE sources (id INTEGER PRIMARY KEY, source TEXT);
+            CREATE TABLE commands (id INTEGER PRIMARY KEY, command TEXT);
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT,
+                source INTEGER, command INTEGER
+            );
+            CREATE TABLE lines (id INTEGER PRIMARY KEY, session INTEGER);
+            INSERT INTO sources VALUES (1, 'runner');
+            INSERT INTO commands VALUES (1, 'safe command');
+            """
+        )
+        connection.execute("INSERT INTO commands VALUES (2, ?)", ("x" * 5000,))
+        connection.executemany(
+            "INSERT INTO sessions VALUES (?, ?, ?, 1, ?)",
+            [
+                (
+                    index,
+                    f"session-{index}",
+                    f"2026-09-28T00:00:{index:02d}Z",
+                    2 if index == 30 else 1,
+                )
+                for index in range(1, 31)
+            ],
+        )
+        connection.commit()
+        connection.close()
+
+        operations = CrucibleOperations(self.root, log_db=database)
+        result = operations.list_log_sessions(limit=1)
+        self.assertTrue(result["sessions"][0]["command_truncated"])
+        self.assertNotIn("x" * 100, json.dumps(result))
+        with patch("crucible_mcp.operations.MAX_MCP_RESPONSE_BYTES", 1000):
+            with self.assertRaises(OperationError) as raised:
+                operations.list_log_sessions(limit=30, request_id="logs-test")
+        self.assertEqual(raised.exception.code, "result_too_large")
 
     def test_get_indexed_metric_posts_typed_query(self):
         response = Mock()

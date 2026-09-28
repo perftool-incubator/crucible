@@ -238,11 +238,17 @@ through the standard `tools/list` request; the current interface is:
 | `get_indexed_result` | Retrieve structured metadata for one historical indexed run. |
 | `list_indexed_periods` | List every primary period and sample associated with an indexed run. |
 | `get_indexed_metric` | Query indexed metric data for a historical run with bounded range and resolution options; credential-like text fields are redacted. |
-| `list_log_sessions` | List recent logger sessions without returning their full contents; command metadata is credential-redacted. |
+| `list_log_sessions` | List recent logger sessions without returning their full contents; command metadata is credential-redacted and oversized command strings are omitted. |
 | `get_log_info` | Return aggregate counts from the logger database. |
 | `get_log_session` | Read a bounded, credential-redacted structured slice of one logger session with optional stream and regex filters. |
 | `search_logs` | Search logger lines across sessions with bounded regex, stream, and time filters; returned lines, command metadata, and query text are credential-redacted. |
 | `search_documentation` | Search curated user-facing documentation; credential-like values in the returned query are redacted. |
+
+Successful MCP responses are limited to 1 MiB after JSON-RPC/MCP serialization.
+If a result cannot fit, the tool returns `result_too_large`; narrow the query or
+reduce its `limit` where available. Idempotency keys are limited to 256
+characters. `list_log_sessions` replaces command strings longer than 4096
+characters with a fixed omission marker and sets `command_truncated: true`.
 
 `get_run_status` includes `cdm_run_id` when the result summary identifies one
 unique CDM run. If the summary contains multiple run IDs, select the desired ID
@@ -365,9 +371,11 @@ those returned relative paths but retrieves only bounded UTF-8 text from the
 allowlisted subtrees; credential-like content is redacted while raw-file byte
 offsets are preserved. To keep content inspection bounded, an individual
 artifact larger than 8 MiB is rejected. Configuration files, credentials,
-archives, symlinks, environment dumps, binary files, and compressed artifacts
-are not retrievable. Artifact paths containing recognized credential-like
-values are omitted from listings and denied for direct reads.
+archives, symlinks, environment dumps, binary files, compressed artifacts,
+CSV, and XML are not retrievable. CSV and XML remain visible as artifact
+metadata, but are marked non-retrievable because the generic redactor does not
+parse their formats safely. Artifact paths containing recognized
+credential-like values are omitted from listings and denied for direct reads.
 Both artifact tools accept a completed or failed terminal MCP job ID when the
 job retained a run directory, which supports inspection of failed runs.
 Offsets and limits
