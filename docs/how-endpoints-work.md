@@ -115,14 +115,15 @@ latency-sensitive benchmarks (cyclictest, oslat) that need
 direct access to CPUs, DPDK devices, or kernel tracing
 infrastructure without container isolation layers.
 
-**Host mounts**: The `host-mounts` setting allows mounting host
-directories into the engine's environment. This is commonly
-used to expose a specific host path, such as an application
-socket or a device file, to the engine. It is not necessary to
-add a host mount simply because a benchmark reads ordinary
-system, network, or process information. The runtime already
-provides standard views of those interfaces, and the effective
-view also depends on the namespace and privilege options below.
+**Host mounts are endpoint-specific.** For `remotehosts`, the
+`host-mounts` setting binds explicit host paths into the engine
+environment, for example an application socket or device file.
+For `kube`, `host-mounts` instead enables or disables a small set
+of built-in host-path mounts; it is not an arbitrary bind list.
+Neither form is necessary simply because a benchmark reads
+ordinary system, network, or process information. The runtime
+already provides standard views of those interfaces, and the
+effective view also depends on namespace and privilege options.
 
 #### Effective Podman environment
 
@@ -411,7 +412,9 @@ modification.
                     "userenv": "rhubi9",
                     "osruntime": "podman",
                     "cpu-partitioning": false,
-                    "host-mounts": []
+                    "host-mounts": [
+                        { "src": "/srv/benchmark-data", "dest": "/mnt/benchmark-data" }
+                    ]
                 }
             }
         }]
@@ -439,32 +442,26 @@ Key settings:
 {
     "endpoints": [{
         "type": "kube",
-        "settings": {
-            "user": "root"
+        "host": "k8s-controller.example.com",
+        "user": "root",
+        "engines": {
+            "client": "1-2",
+            "server": "3-4"
         },
-        "remotes": [{
-            "engines": [
-                { "role": "client", "ids": [1, 2] },
-                { "role": "server", "ids": [3, 4] }
-            ],
-            "config": {
-                "host": "k8s-controller.example.com",
-                "settings": {
-                    "userenv": "rhubi9",
-                    "controller-ip-address": "10.0.0.1"
-                }
-            }
-        }]
+        "host-mounts": {
+            "run": true,
+            "modules": true,
+            "firmware": true
+        }
     }]
 }
 ```
 
 ### Per-engine configuration
 
-Both endpoint types support per-engine configuration through a
-`config` array with `targets`. This allows different settings
-for different engines — for example, different userenvs for
-client vs server, or node selection for specific engine IDs.
+The `kube` endpoint supports per-engine configuration through its `config`
+array with `targets`. The `remotehosts` endpoint uses endpoint-level defaults
+and per-remote overrides under `remotes[*].config.settings` instead.
 
 ## Cleanup
 

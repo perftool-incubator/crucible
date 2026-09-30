@@ -92,6 +92,10 @@ lines table:
 
 The millisecond timestamps enable precise ordering of
 interleaved stdout and stderr lines.
+The logger maintains indexes for session/time queries, session/stream line
+order, and session-wide line order across interleaved stdout/stderr; schema
+migrations keep these indexes current for bounded log reads and redaction-state
+recovery.
 
 ## Viewing logs
 

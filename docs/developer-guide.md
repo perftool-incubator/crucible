@@ -254,6 +254,88 @@ This exercises the full pipeline: image sourcing, engine
 deployment, benchmark execution, tool collection,
 post-processing, and result indexing.
 
+#### Preparing a warm MCP smoke test
+
+A cold end-to-end run includes service startup and any missing engine-image
+builds, so its wall time is not a useful measure of a short benchmark's
+execution. To test the MCP path after those one-time costs:
+
+This procedure assumes the controller image and requested benchmark/tool
+checkouts are installed, the MCP service and client token are configured, and
+the run's endpoint and image registry are reachable. To source missing engine
+images, image sourcing must be enabled for each required architecture.
+
+1. Validate the service configuration and the exact run file you intend to
+   exercise:
+
+   ```bash
+   crucible validate --type services config/services.json
+   crucible validate path/to/smoke-run.json
+   ```
+
+2. For a warm-path test, start the run dependencies and MCP listener before
+   submitting the job:
+
+   ```bash
+   crucible start valkey
+   crucible start httpd opensearch
+   crucible start mcp-server
+   ```
+
+   If `image-sourcing.use` is `true` in `config/services.json`, also run
+   `crucible start image-sourcing`. If it is `false`, skip this service and
+   ensure the required engine images are already available; `crucible run`
+   skips image sourcing in that configuration. OpenSearch startup also starts
+   its CDM companion. For a remote engine architecture, confirm that the
+   configured remote image-sourcing service is reachable; Crucible starts
+   only the local native-architecture builder.
+
+3. Warm the engine-image cache with a representative, safe run using the same
+   benchmark and tool set, endpoint architecture, and user environment as the
+   MCP smoke test:
+
+   ```bash
+   crucible run path/to/smoke-run.json
+   ```
+
+   This is a real benchmark run, not a build-only or dry-run operation. It
+   creates normal run artifacts and an indexed result. Crucible has no
+   standalone CLI command for prebuilding engine images; images are sourced
+   on demand and reused by content hash when their inputs match. Use a warm-up
+   workload that is safe to execute and account for its result in the test
+   environment.
+
+4. Submit the intended smoke test through MCP with the same image inputs, then
+   poll its job status until it reaches a terminal state. `start_run` returns
+   after submission; its tool-call latency does not include service startup,
+   image sourcing, or benchmark execution. Measure from submission through
+   terminal job status when comparing warm and cold run duration, and track
+   submission latency separately if that is also of interest. Only some
+   service starts include readiness checks: image-sourcing waits up to 60
+   seconds for its health endpoint, OpenSearch waits up to 60 seconds for
+   cluster health, CDM waits up to 120 seconds for `/health` when it needs to
+   start, and MCP waits up to 30 seconds for its authenticated `/health`
+   endpoint. Starting Valkey or HTTPD only launches its container; it does not
+   verify readiness. Passing a probe verifies only that probe's stated
+   endpoint, not the full benchmark workflow. MCP `/health` does not verify
+   CDM, endpoints, or engine images. If a probed service is ready but the MCP
+   job fails, inspect its status and runner logs to diagnose the run path
+   rather than attributing the failure to service startup.
+
+For a cold-start run test, skip the warm-up run and do not start the run's
+dependencies from step 2. Start only `mcp-server` before submitting the job;
+the listener must be available to accept the request, so its startup is not
+part of the job duration. Ensure Valkey, HTTPD, and OpenSearch/CDM are stopped,
+including HTTPD if it was left running by prior Crucible activity. If
+`image-sourcing.use` is `true`, also leave the local image-sourcing service
+stopped; if it is `false`, that service is not part of the run path. The
+`start_run` execution path starts or checks these services as needed, so their
+startup and any required image sourcing are included in the elapsed time from
+submission until terminal job status. If you also want to measure MCP listener
+startup, time `crucible start mcp-server` separately. Record which components
+were cold, since remote image-sourcing services are outside the local startup
+path.
+
 ### CI testing
 
 Run the full CI suite locally:

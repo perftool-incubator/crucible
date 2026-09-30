@@ -72,7 +72,7 @@ class TestMCPExecutionAcceptance(unittest.TestCase):
             "    while not pathlib.Path(os.environ['MCP_ACCEPTANCE_RELEASE']).exists():\n"
             "        time.sleep(0.01)\n"
             "    (run_directory / 'result-summary.json').write_text("
-            "json.dumps({'cdm_run_id': 'cdm-e2e', 'status': 'pass'})\n"
+            "json.dumps({'runs': [{'run-id': 'cdm-e2e', 'status': 'pass'}]})\n"
             ")\n"
             "elif operation in ('postprocess', 'index'):\n"
             "    target.mkdir(parents=True, exist_ok=True)\n"
@@ -92,6 +92,7 @@ class TestMCPExecutionAcceptance(unittest.TestCase):
             self.run_root,
             [sys.executable, "-c", self.fake_crucible],
             cdm_readiness_timeout=1,
+            host_execution=False,
         )
         self.server = self._make_server(self.store, self.operations, self.manager)
         self.server_thread = threading.Thread(
@@ -220,6 +221,7 @@ class TestMCPExecutionAcceptance(unittest.TestCase):
             self.run_root,
             [sys.executable, "-c", self.fake_crucible],
             cdm_readiness_timeout=1,
+            host_execution=False,
         )
         self.server.jobs = self.store
         self.server.operations = self.operations
@@ -281,7 +283,7 @@ class TestMCPExecutionAcceptance(unittest.TestCase):
         )
         summary_value = summary["result"]["structuredContent"]
         self.assertEqual(summary_value["result_status"], "available")
-        self.assertEqual(summary_value["summary"]["cdm_run_id"], "cdm-e2e")
+        self.assertEqual(summary_value["summary"]["runs"][0]["run-id"], "cdm-e2e")
 
         retry = self._call(
             "retry",

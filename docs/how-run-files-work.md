@@ -247,7 +247,9 @@ configuration:
                     "userenv": "rhubi9",
                     "osruntime": "podman",
                     "cpu-partitioning": false,
-                    "host-mounts": []
+                    "host-mounts": [
+                        { "src": "/srv/benchmark-data", "dest": "/mnt/benchmark-data" }
+                    ]
                 }
             }
         }
@@ -260,26 +262,38 @@ configuration:
 ```json
 {
     "type": "kube",
-    "settings": {
-        "user": "root"
+    "host": "k8s-controller.example.com",
+    "user": "root",
+    "engines": {
+        "client": "1-2",
+        "server": "3-4"
     },
-    "remotes": [
-        {
-            "engines": [
-                { "role": "client", "ids": [1, 2] },
-                { "role": "server", "ids": [3, 4] }
-            ],
-            "config": {
-                "host": "k8s-controller.example.com",
-                "settings": {
-                    "userenv": "rhubi9",
-                    "controller-ip-address": "10.0.0.1"
-                }
-            }
-        }
-    ]
+    "host-mounts": {
+        "run": true,
+        "modules": true,
+        "firmware": true
+    }
 }
 ```
+
+### Host-mount settings
+
+`host-mounts` has different shapes for the two endpoint types and must be
+placed at the level each endpoint schema accepts:
+
+- For `remotehosts`, it is a list of explicit host bind mounts. Put it in the
+  endpoint's `settings` for a default shared by all remotes, or in
+  `remotes[*].config.settings` for a host-specific override. Each item requires
+  `src` and may specify `dest`; omit `host-mounts` when no extra mounts are
+  needed (an explicitly empty list is rejected by the current schema).
+- For `kube`, it is an object on the endpoint itself with optional boolean
+  fields `run`, `modules`, and `firmware`. These enable or disable the
+  endpoint's built-in host-path mounts; all default to enabled. This does not
+  accept the arbitrary `{src, dest}` entries used by `remotehosts`.
+
+The `remotehosts` example above shows a per-remote custom mount. To set a
+default for all remotes, move the same `host-mounts` list into the endpoint's
+top-level `settings` object.
 
 ### Key endpoint settings
 
@@ -288,19 +302,20 @@ configuration:
 | `userenv` | Base container image name | From rickshaw-settings |
 | `osruntime` | Runtime mode: `"podman"` or `"chroot"` | `"podman"` |
 | `cpu-partitioning` | Enable CPU isolation | `false` |
-| `host-mounts` | Host directories to mount into engines | `[]` |
+| `host-mounts` | Endpoint-specific mounts; see [Host-mount settings](#host-mount-settings) | Varies by endpoint |
 | `controller-ip-address` | IP for engines to reach the controller | Auto-detected |
 | `disable-tools` | Skip tool collection on this endpoint | `false` |
 
 ### Settings hierarchy
 
-Endpoint settings can be specified at multiple levels:
+For `remotehosts`, settings can be specified at two levels:
 
-1. **Top-level `settings`**: Defaults for all remotes/configs
-2. **Per-remote/per-config `settings`**: Override defaults for
-   specific hosts or engine groups
+1. **Endpoint-level `settings`**: Defaults for all remotes
+2. **`remotes[*].config.settings`**: Override defaults for one remote host
 
-Per-remote settings override top-level settings.
+For `kube`, cluster-level settings such as `host-mounts` are top-level
+properties of the endpoint. Its `config` array applies settings to selected
+engines.
 
 ### Per-engine configuration
 

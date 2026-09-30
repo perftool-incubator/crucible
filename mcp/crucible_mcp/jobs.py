@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from .models import ACTIVE_JOB_STATES, Job, JobState, ResultStatus
+from .models import ACTIVE_JOB_STATES, IndexedQueryStatus, Job, JobState, ResultStatus
 
 
 class JobError(RuntimeError):
@@ -143,6 +143,8 @@ class JobStore:
                         supervision_directory TEXT,
                         state TEXT NOT NULL,
                         result_status TEXT NOT NULL,
+                        indexed_query_status TEXT NOT NULL DEFAULT 'not_checked',
+                        indexed_query_checked_at TEXT,
                         logger_session_id TEXT,
                         rickshaw_run_id TEXT,
                         cdm_run_id TEXT,
@@ -157,24 +159,37 @@ class JobStore:
                     )
                     """
                 )
-                connection.execute("UPDATE schema_version SET version = 4")
+                connection.execute("UPDATE schema_version SET version = 5")
             elif version[0] == 1:
                 connection.execute("ALTER TABLE jobs ADD COLUMN operation TEXT NOT NULL DEFAULT 'run'")
                 connection.execute("ALTER TABLE jobs ADD COLUMN supervision_directory TEXT")
                 connection.execute("ALTER TABLE jobs ADD COLUMN plan_digest TEXT")
                 connection.execute("ALTER TABLE jobs ADD COLUMN plan_summary TEXT")
-                connection.execute("UPDATE schema_version SET version = 4")
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_status TEXT NOT NULL DEFAULT 'not_checked'")
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_checked_at TEXT")
+                connection.execute("UPDATE schema_version SET version = 5")
             elif version[0] == 2:
                 connection.execute("ALTER TABLE jobs ADD COLUMN supervision_directory TEXT")
                 connection.execute("ALTER TABLE jobs ADD COLUMN plan_digest TEXT")
                 connection.execute("ALTER TABLE jobs ADD COLUMN plan_summary TEXT")
-                connection.execute("UPDATE schema_version SET version = 4")
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_status TEXT NOT NULL DEFAULT 'not_checked'")
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_checked_at TEXT")
+                connection.execute("UPDATE schema_version SET version = 5")
             elif version[0] == 3:
                 connection.execute("ALTER TABLE jobs ADD COLUMN plan_digest TEXT")
                 connection.execute("ALTER TABLE jobs ADD COLUMN plan_summary TEXT")
-                connection.execute("UPDATE schema_version SET version = 4")
-            elif version[0] != 4:
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_status TEXT NOT NULL DEFAULT 'not_checked'")
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_checked_at TEXT")
+                connection.execute("UPDATE schema_version SET version = 5")
+            elif version[0] == 4:
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_status TEXT NOT NULL DEFAULT 'not_checked'")
+                connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_checked_at TEXT")
+                connection.execute("UPDATE schema_version SET version = 5")
+            elif version[0] != 5:
                 raise JobError(f"unsupported MCP job database schema: {version[0]}")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS jobs_cdm_run_id_idx ON jobs(cdm_run_id)"
+            )
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -260,6 +275,23 @@ class JobStore:
             ).fetchone()
         return self._row_to_job(row) if row is not None else None
 
+    def update_indexed_query_status(
+        self, cdm_run_id: str, status: IndexedQueryStatus
+    ) -> int:
+        """Record the latest indexed-query readiness observation for a CDM run."""
+
+        if not cdm_run_id:
+            return 0
+        status = IndexedQueryStatus(status)
+        checked_at = _now()
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                "UPDATE jobs SET indexed_query_status = ?, indexed_query_checked_at = ?, "
+                "updated_at = ? WHERE cdm_run_id = ?",
+                (status.value, checked_at, checked_at, cdm_run_id),
+            )
+            return cursor.rowcount
+
     def list_active(
         self,
         limit: int | None = None,
@@ -321,6 +353,9 @@ class JobStore:
         values = dict(row)
         values["state"] = JobState(values["state"])
         values["result_status"] = ResultStatus(values["result_status"])
+        values["indexed_query_status"] = IndexedQueryStatus(
+            values["indexed_query_status"]
+        )
         if values.get("plan_summary") is not None:
             try:
                 values["plan_summary"] = json.loads(values["plan_summary"])
