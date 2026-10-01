@@ -61,6 +61,7 @@
           "procps-ng",
           "bc",
           "sshpass",
+          "openssh-clients",
           "awk"
         ]
       }
