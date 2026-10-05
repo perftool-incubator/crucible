@@ -70,21 +70,23 @@ start_mcp_server_unlocked() {
     fi
     return "${START_RC:-0}"
 }
-python3() {
+mcp_controller_tool() {
+    local operation="${1:-}"
+    shift || true
     if [ "${TEST_FAKE_ROTATION:-0}" = "1" ]; then
         ROTATION_CALLS=$((ROTATION_CALLS + 1))
-        if [ "${PREFLIGHT_FAIL:-0}" = "1" ] && [ ${ROTATION_CALLS} -eq 1 ]; then
+        if [ "${operation}" = "validate-token" ] && [ "${PREFLIGHT_FAIL:-0}" = "1" ]; then
             return 1
         fi
-        if [ "${ROTATION_FAIL:-0}" = "1" ] && [ ${ROTATION_CALLS} -gt 1 ]; then
+        if [ "${operation}" = "rotate-token" ] && [ "${ROTATION_FAIL:-0}" = "1" ]; then
             return 1
         fi
-        if [ ${ROTATION_CALLS} -gt 1 ]; then
+        if [ "${operation}" = "rotate-token" ]; then
             printf 'new-token\n' > "$TEST_TOKEN"
         fi
         return 0
     fi
-    command python3 "$@"
+    return 1
 }
 STOP_COUNT=0
 START_COUNT=0

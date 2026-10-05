@@ -243,6 +243,7 @@ configuration:
             ],
             "config": {
                 "host": "testhost.example.com",
+                "ssh-identity-profile": "lab-admin",
                 "settings": {
                     "userenv": "rhubi9",
                     "osruntime": "podman",
@@ -264,6 +265,7 @@ configuration:
     "type": "kube",
     "host": "k8s-controller.example.com",
     "user": "root",
+    "ssh-identity-profile": "cluster-admin",
     "engines": {
         "client": "1-2",
         "server": "3-4"
@@ -275,6 +277,18 @@ configuration:
     }
 }
 ```
+
+### SSH identity profile selection
+
+The optional endpoint-level `ssh-identity-profile` selects a Crucible-managed
+SSH identity for the controller-to-management-host connection. It is supported
+by `remotehosts`, `kube`, and `osp`. For `remotehosts`, a specific remote can
+override the endpoint default with `remotes[*].config.ssh-identity-profile`,
+as shown above. If the field is omitted, the endpoint keeps its existing
+ambient SSH authentication behavior. Profiles refer to keys loaded into
+Crucible's managed SSH agent; profile metadata does not store private-key data. See
+[SSH identity profiles and host-key trust](how-endpoints-work.md#ssh-identity-profiles-and-host-key-trust)
+for setup, versioning, and first-use host-key behavior.
 
 ### Host-mount settings
 
@@ -303,6 +317,7 @@ top-level `settings` object.
 | `osruntime` | Runtime mode: `"podman"` or `"chroot"` | `"podman"` |
 | `cpu-partitioning` | Enable CPU isolation | `false` |
 | `host-mounts` | Endpoint-specific mounts; see [Host-mount settings](#host-mount-settings) | Varies by endpoint |
+| `ssh-identity-profile` | Crucible-managed controller-to-management SSH identity profile | Ambient authentication |
 | `controller-ip-address` | IP for engines to reach the controller | Auto-detected |
 | `disable-tools` | Skip tool collection on this endpoint | `false` |
 

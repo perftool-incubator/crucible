@@ -76,7 +76,8 @@ controller containers:
 
 ### Utilities
 
-- git, curl, jq, ssh tools, network utilities
+- git, curl, jq, OpenSSH client tools (including `ssh-agent` and `ssh-add`),
+  network utilities
 - GitHub CLI (gh) — for GitHub API operations
 - tar, xz, gzip — for data archival
 
@@ -87,7 +88,7 @@ of 7 repos, each contributing its own dependencies:
 
 | Repo | What it adds |
 |------|-------------|
-| crucible | Core packages: podman, buildah, valkey, opensearch, httpd, build tools, gh CLI |
+| crucible | Core packages: podman, buildah, valkey, opensearch, httpd, OpenSSH client tools, build tools, gh CLI |
 | rickshaw | Python packages for orchestration (FastAPI, pydantic, etc.) |
 | workshop | Workshop script dependencies (Perl modules for JSON, HTTP) |
 | toolbox | Python libraries and utilities |

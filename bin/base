@@ -7,6 +7,7 @@ EC_FAIL_USER=2
 # This descriptor is process-local state.  Never trust a value inherited from
 # the environment when running the root-only service-management commands.
 unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+unset CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD
 
 function exit_error() {
     echo "ERROR: ${1}"
@@ -726,6 +727,378 @@ function mcp_lifecycle_lock_release() {
     unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
 }
 
+function crucible_ssh_agent_socket() {
+    printf '%s\n' "$(crucible_ssh_agent_dir)/agent.sock"
+}
+
+function crucible_ssh_agent_dir() {
+    printf '%s\n' "/run/crucible/ssh-agent"
+}
+
+function start_ssh_agent() {
+    local start_rc lock_owned=0
+
+    if [ -n "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        case "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}" in
+            *[!0-9]*)
+                echo "ERROR: Invalid MCP lifecycle lock descriptor"
+                return 1
+                ;;
+        esac
+    else
+        lock_owned=1
+        if ! mcp_lifecycle_lock_acquire; then
+            return 1
+        fi
+    fi
+    start_ssh_agent_unlocked "$@"
+    start_rc=$?
+    if [ ${lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
+    return ${start_rc}
+}
+
+function start_ssh_agent_unlocked() {
+    local agent_dir="$(crucible_ssh_agent_dir)"
+    local agent_parent="$(dirname "${agent_dir}")"
+    local agent_socket="${agent_dir}/agent.sock"
+    local RC=0 attempt
+
+    if [ -z "${CRUCIBLE_CONTROLLER_IMAGE}" ]; then
+        echo "ERROR: CRUCIBLE_CONTROLLER_IMAGE is not defined"
+        return 1
+    fi
+    if ! mkdir -p "${agent_parent}" || [ -L "${agent_parent}" ] || \
+        [ ! -d "${agent_parent}" ] || [ "$(stat -c '%u' "${agent_parent}")" != "0" ] || \
+        ! chmod 700 "${agent_parent}"; then
+        echo "ERROR: Could not secure Crucible SSH-agent parent directory"
+        return 1
+    fi
+    if ! mkdir -p "${agent_dir}" || [ -L "${agent_dir}" ] || [ ! -d "${agent_dir}" ]; then
+        echo "ERROR: Could not prepare Crucible SSH-agent storage"
+        return 1
+    fi
+    if [ "$(stat -c '%u' "${agent_dir}")" != "0" ]; then
+        echo "ERROR: Crucible SSH-agent storage must be root-owned"
+        return 1
+    fi
+    if ! chmod 700 "${agent_dir}"; then
+        echo "ERROR: Could not secure Crucible SSH-agent storage"
+        return 1
+    fi
+
+    echo -n "Checking for Crucible SSH agent"
+    if podman_running crucible-ssh-agent >/dev/null; then
+        if [ -S "${agent_socket}" ]; then
+            echo "...appears to be available"
+            return 0
+        fi
+        echo "...appears to be running"
+        echo "ERROR: SSH-agent container is running without its socket"
+        return 1
+    fi
+    echo "...not present"
+
+    if [ -e "${agent_socket}" ] || [ -L "${agent_socket}" ]; then
+        if [ ! -S "${agent_socket}" ] || [ -L "${agent_socket}" ]; then
+            echo "ERROR: Refusing to replace an unexpected SSH-agent socket path"
+            return 1
+        fi
+        if ! rm -- "${agent_socket}"; then
+            echo "ERROR: Could not remove stale SSH-agent socket"
+            return 1
+        fi
+    fi
+
+    echo "Starting Crucible SSH agent"
+    ${podman_run} --name crucible-ssh-agent \
+        "--mount=type=bind,source=${agent_dir},destination=${agent_dir}" \
+        "${container_common_args[@]}" "${container_service_args[@]}" \
+        "${CRUCIBLE_CONTROLLER_IMAGE}" /usr/bin/ssh-agent -D -a "${agent_socket}" > /dev/null
+    RC=$?
+    if [ ${RC} -ne 0 ]; then
+        # Another concurrent start may have created the service after our
+        # initial check; accept it only when its socket is actually ready.
+        if podman_running crucible-ssh-agent >/dev/null && [ -S "${agent_socket}" ]; then
+            echo "Successfully started Crucible SSH agent"
+            return 0
+        fi
+        echo "ERROR: Could not start Crucible SSH agent"
+        return ${RC}
+    fi
+
+    for ((attempt = 1; attempt <= 10; attempt++)); do
+        if [ -S "${agent_socket}" ] && podman_running crucible-ssh-agent >/dev/null; then
+            echo "Successfully started Crucible SSH agent"
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "ERROR: Crucible SSH agent did not become available"
+    if podman_running crucible-ssh-agent >/dev/null; then
+        ${podman_stop} crucible-ssh-agent > /dev/null 2>&1
+    fi
+    if [ -S "${agent_socket}" ]; then
+        rm -- "${agent_socket}"
+    fi
+    return 1
+}
+
+function ssh_agent_run_start_reserve() {
+    local lock_owned=0 agent_dir reservation_file
+
+    if [ -n "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD:-}" ]; then
+        case "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD}" in
+            *[!0-9]*)
+                echo "ERROR: Invalid SSH-agent run-start lock descriptor"
+                return 1
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    fi
+
+    if [ -n "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        case "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}" in
+            *[!0-9]*)
+                echo "ERROR: Invalid MCP lifecycle lock descriptor"
+                return 1
+                ;;
+        esac
+    else
+        lock_owned=1
+        if ! mcp_lifecycle_lock_acquire; then
+            return 1
+        fi
+    fi
+
+    if ! start_ssh_agent; then
+        if [ ${lock_owned} -eq 1 ]; then
+            mcp_lifecycle_lock_release
+        fi
+        return 1
+    fi
+
+    # A shared reservation spans run setup so stop/clear cannot remove keys
+    # after the agent starts but before the workload container is visible.
+    agent_dir="${var_crucible}/ssh-identities"
+    reservation_file="${agent_dir}/run-start.lock"
+    if ! mkdir -p "${agent_dir}" || [ -L "${agent_dir}" ] || [ ! -d "${agent_dir}" ] || \
+        [ "$(stat -c '%u' "${agent_dir}")" != "0" ] || ! chmod 700 "${agent_dir}"; then
+        echo "ERROR: Could not secure SSH-agent run-start reservation storage"
+        if [ ${lock_owned} -eq 1 ]; then
+            mcp_lifecycle_lock_release
+        fi
+        return 1
+    fi
+    if [ ! -e "${reservation_file}" ]; then
+        if ! (umask 077; set -C; : > "${reservation_file}"); then
+            echo "ERROR: Could not create SSH-agent run-start reservation"
+            if [ ${lock_owned} -eq 1 ]; then
+                mcp_lifecycle_lock_release
+            fi
+            return 1
+        fi
+    fi
+    if [ -L "${reservation_file}" ] || [ ! -f "${reservation_file}" ] || \
+        [ "$(stat -c '%u' "${reservation_file}")" != "0" ] || ! chmod 600 "${reservation_file}"; then
+        echo "ERROR: SSH-agent run-start reservation must be a root-owned regular file"
+        if [ ${lock_owned} -eq 1 ]; then
+            mcp_lifecycle_lock_release
+        fi
+        return 1
+    fi
+    if ! exec {CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD}<>"${reservation_file}" || \
+        ! flock -s "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD}"; then
+        echo "ERROR: Could not reserve the SSH agent for run startup"
+        if [ -n "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD:-}" ]; then
+            exec {CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD}>&-
+            unset CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD
+        fi
+        if [ ${lock_owned} -eq 1 ]; then
+            mcp_lifecycle_lock_release
+        fi
+        return 1
+    fi
+
+    if [ ${lock_owned} -eq 1 ] && ! mcp_lifecycle_lock_release; then
+        ssh_agent_run_start_release
+        echo "ERROR: Could not release the MCP lifecycle lock after reserving the SSH agent"
+        return 1
+    fi
+    return 0
+}
+
+function ssh_agent_run_start_release() {
+    local release_rc=0
+    if [ -z "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD:-}" ]; then
+        return 0
+    fi
+    case "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD}" in
+        *[!0-9]*)
+            unset CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD
+            echo "ERROR: Invalid SSH-agent run-start lock descriptor"
+            return 1
+            ;;
+    esac
+    flock -u "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD}" || release_rc=$?
+    exec {CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD}>&-
+    unset CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD
+    return ${release_rc}
+}
+
+function ssh_agent_run_start_reservation_is_clear() {
+    local agent_dir reservation_file check_fd
+
+    agent_dir="${var_crucible}/ssh-identities"
+    reservation_file="${agent_dir}/run-start.lock"
+    if [ ! -e "${reservation_file}" ] && [ ! -L "${reservation_file}" ]; then
+        return 0
+    fi
+    if [ -L "${agent_dir}" ] || [ ! -d "${agent_dir}" ] || \
+        [ "$(stat -c '%u' "${agent_dir}")" != "0" ] || [ -L "${reservation_file}" ] || \
+        [ ! -f "${reservation_file}" ] || [ "$(stat -c '%u' "${reservation_file}")" != "0" ]; then
+        echo "ERROR: Cannot safely verify SSH-agent run-start reservation"
+        return 1
+    fi
+    if ! exec {check_fd}<>"${reservation_file}"; then
+        echo "ERROR: Cannot open SSH-agent run-start reservation"
+        return 1
+    fi
+    if flock -n -x "${check_fd}"; then
+        flock -u "${check_fd}"
+        exec {check_fd}>&-
+        return 0
+    fi
+    exec {check_fd}>&-
+    return 1
+}
+
+function stop_ssh_agent() {
+    local stop_rc lock_owned=0
+
+    if [ -n "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        case "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD}" in
+            *[!0-9]*)
+                echo "ERROR: Invalid MCP lifecycle lock descriptor"
+                return 1
+                ;;
+        esac
+    else
+        lock_owned=1
+        if ! mcp_lifecycle_lock_acquire; then
+            return 1
+        fi
+    fi
+    stop_ssh_agent_unlocked "$@"
+    stop_rc=$?
+    if [ ${lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
+    return ${stop_rc}
+}
+
+function stop_ssh_agent_unlocked() {
+    local RC=0 agent_socket="$(crucible_ssh_agent_socket)" run_containers mcp_jobs
+
+    if podman_running crucible-mcp-server >/dev/null; then
+        echo "ERROR: Stop mcp-server before stopping its SSH-agent dependency"
+        return 1
+    fi
+    if ! run_containers=$(${podman_ps} --filter "name=crucible-rickshaw-run" \
+        --filter "status=running" --format "{{.Names}}"); then
+        echo "ERROR: Cannot verify Crucible run state; refusing to stop SSH agent"
+        return 1
+    fi
+    if [ -n "${run_containers}" ]; then
+        echo "ERROR: Cannot stop SSH agent while a Crucible run is active"
+        return 1
+    elif ! mcp_jobs=$(mcp_active_jobs); then
+        echo "ERROR: Cannot verify MCP job state; refusing to stop SSH agent"
+        return 1
+    elif [ -n "${mcp_jobs}" ]; then
+        echo "ERROR: Cannot stop SSH agent while MCP jobs are active"
+        return 1
+    elif ! ssh_agent_run_start_reservation_is_clear; then
+        echo "ERROR: Cannot stop SSH agent while a profile-enabled run is starting"
+        return 1
+    fi
+    echo -n "Checking for Crucible SSH agent"
+    if podman_running crucible-ssh-agent >/dev/null; then
+        echo "...appears to be running"
+        ${podman_stop} crucible-ssh-agent > /dev/null
+        RC=$?
+        if [ ${RC} -ne 0 ]; then
+            echo "ERROR: Could not stop Crucible SSH agent"
+            return ${RC}
+        fi
+    else
+        echo "...not present"
+    fi
+    if [ -S "${agent_socket}" ]; then
+        if ! rm -- "${agent_socket}"; then
+            echo "ERROR: Could not remove stopped SSH-agent socket"
+            return 1
+        fi
+    elif [ -L "${agent_socket}" ] || [ -e "${agent_socket}" ]; then
+        echo "ERROR: Refusing to remove an unexpected SSH-agent socket path"
+        return 1
+    fi
+    echo "Successfully stopped Crucible SSH agent"
+    return ${RC}
+}
+
+function clear_ssh_agent() {
+    local RC=0 lock_owned=0 run_containers mcp_jobs agent_socket agent_dir
+
+    if [ -z "${CRUCIBLE_MCP_LIFECYCLE_LOCK_FD:-}" ]; then
+        lock_owned=1
+    fi
+    if ! mcp_lifecycle_lock_acquire; then
+        return 1
+    fi
+
+    if ! run_containers=$(${podman_ps} --filter "name=crucible-rickshaw-run" \
+        --filter "status=running" --format "{{.Names}}"); then
+        echo "ERROR: Cannot verify Crucible run state; refusing to clear SSH identities"
+        RC=1
+    elif [ -n "${run_containers}" ]; then
+        echo "ERROR: Cannot clear SSH identities while a Crucible run is active"
+        RC=1
+    elif ! ssh_agent_run_start_reservation_is_clear; then
+        echo "ERROR: Cannot clear SSH identities while a profile-enabled run is starting"
+        RC=1
+    elif ! mcp_jobs=$(mcp_active_jobs); then
+        echo "ERROR: Cannot verify MCP job state; refusing to clear SSH identities"
+        RC=1
+    elif [ -n "${mcp_jobs}" ]; then
+        echo "ERROR: Cannot clear SSH identities while MCP jobs are active"
+        RC=1
+    elif ! start_ssh_agent_unlocked; then
+        RC=1
+    else
+        agent_socket=$(crucible_ssh_agent_socket)
+        agent_dir=$(dirname "${agent_socket}")
+        ${podman_run} --name "crucible-ssh-agent-clear-${SESSION_ID}" \
+            --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \
+            "--mount=type=bind,source=${agent_dir},destination=${agent_dir}" \
+            "${container_common_args[@]}" "${container_non_service_args[@]}" \
+            "${CRUCIBLE_CONTROLLER_IMAGE}" python3 \
+            "${CRUCIBLE_HOME}/mcp/ssh_identity_profiles.py" \
+            --catalog "${var_crucible}/ssh-identities/profiles.json" \
+            --agent-socket "${agent_socket}" agent clear
+        RC=$?
+    fi
+
+    if [ ${lock_owned} -eq 1 ]; then
+        mcp_lifecycle_lock_release
+    fi
+    return ${RC}
+}
+
 function start_mcp_server() {
     local mcp_start_rc mcp_start_lock_owned=0
 
@@ -752,6 +1125,7 @@ function start_mcp_server_unlocked() {
     local mcp_private_dir mcp_private_file
     local -a mcp_cmd mcp_data_mounts mcp_data_paths mcp_data_readonly_flags mcp_origins
     local mcp_data_path mcp_data_readonly mcp_data_index mcp_existing_index
+    local mcp_ssh_agent_socket mcp_ssh_agent_dir
     local mcp_mount_index mcp_health_host
 
     mcp_bind=$(jq_query ${SERVICES_CFG} '."mcp-server".bind')
@@ -834,6 +1208,12 @@ function start_mcp_server_unlocked() {
     fi
     chmod 600 "${mcp_token_file}"
 
+    # The listener may accept jobs that immediately use SSH profiles. Keep its
+    # agent dependency alive before exposing the MCP endpoint.
+    if ! start_ssh_agent; then
+        return 1
+    fi
+
     echo -n "Checking for MCP server"
     if ! podman_running crucible-mcp-server; then
         actual_port=$(find_available_port "mcp-server" ${mcp_port})
@@ -856,6 +1236,7 @@ function start_mcp_server_unlocked() {
             --database "${mcp_database}"
             --max-request-bytes "${mcp_max_inline_bytes}"
             --crucible-home "${CRUCIBLE_HOME}"
+            --controller-image "${CRUCIBLE_CONTROLLER_IMAGE}"
             --input-root "${mcp_input_root}"
             --run-root "${var_run_crucible}"
             --max-run-file-bytes "${mcp_max_run_file_bytes}"
@@ -865,7 +1246,11 @@ function start_mcp_server_unlocked() {
             --audit-log "${mcp_audit_log}"
             --audit-max-bytes "${mcp_audit_max_bytes}"
             --audit-retained-files "${mcp_audit_retained_files}"
+            --ssh-profile-catalog "${var_crucible}/ssh-identities/profiles.json"
         )
+        mcp_ssh_agent_socket=$(crucible_ssh_agent_socket)
+        mcp_ssh_agent_dir=$(dirname "${mcp_ssh_agent_socket}")
+        mcp_cmd+=(--ssh-agent-socket "${mcp_ssh_agent_socket}")
         if [ -n "${mcp_tls_cert}" ]; then
             mcp_cmd+=(--tls-cert "${mcp_tls_cert}" --tls-key "${mcp_tls_key}")
         fi
@@ -922,6 +1307,7 @@ function start_mcp_server_unlocked() {
         ${podman_run} --name crucible-mcp-server \
             --env "PYTHONPATH=${CRUCIBLE_HOME}/mcp" \
             "--mount=type=bind,source=${mcp_token_file},destination=${mcp_token_file},readonly" \
+            "--mount=type=bind,source=${mcp_ssh_agent_dir},destination=${mcp_ssh_agent_dir}" \
             "${mcp_data_mounts[@]}" "${container_common_args[@]}" "${container_service_args[@]}" \
             ${CRUCIBLE_CONTROLLER_IMAGE} "${mcp_cmd[@]}" > /dev/null
         RC=$?
@@ -1011,8 +1397,25 @@ function stop_mcp_server_unlocked() {
     return ${RC}
 }
 
+function mcp_controller_tool() {
+    local -a pythonpath_args
+    pythonpath_args=(--env "PYTHONPATH=${CRUCIBLE_HOME}/mcp")
+    ${podman_run} --name "crucible-mcp-host-tool-${SESSION_ID}" \
+        "${container_common_args[@]}" "${container_non_service_args[@]}" \
+        "${pythonpath_args[@]}" "${CRUCIBLE_CONTROLLER_IMAGE}" \
+        python3 -m crucible_mcp.host_tools "$@"
+}
+
+function mcp_host_path_in_controller() {
+    local host_path="${1}"
+    case "${host_path}" in
+        /*) printf '/hostfs%s' "${host_path}" ;;
+        *) printf '/hostfs%s/%s' "$(pwd -P)" "${host_path}" ;;
+    esac
+}
+
 function rotate_mcp_token() {
-    local mcp_token_file mcp_database active_jobs was_running=0
+    local mcp_token_file mcp_database mcp_token_container_path active_jobs was_running=0
 
     mcp_token_file=$(jq_query ${SERVICES_CFG} '."mcp-server"."token-file"')
     mcp_database=$(jq_query ${SERVICES_CFG} '."mcp-server".database')
@@ -1041,15 +1444,8 @@ function rotate_mcp_token() {
         return 1
     fi
 
-    if ! PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_token_file}" <<'PY'
-import sys
-from pathlib import Path
-
-from crucible_mcp.policy import validate_token_rotation_path
-
-validate_token_rotation_path(Path(sys.argv[1]))
-PY
-    then
+    mcp_token_container_path=$(mcp_host_path_in_controller "${mcp_token_file}")
+    if ! mcp_controller_tool validate-token --path "${mcp_token_container_path}"; then
         echo "ERROR: Invalid MCP token destination; refusing to stop MCP"
         mcp_lifecycle_lock_release
         return 1
@@ -1063,16 +1459,7 @@ PY
         fi
     fi
 
-    if ! PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_token_file}" <<'PY'
-import sys
-from pathlib import Path
-
-from crucible_mcp.policy import rotate_token
-
-token_path = Path(sys.argv[1])
-rotate_token(token_path)
-PY
-    then
+    if ! mcp_controller_tool rotate-token --path "${mcp_token_container_path}"; then
         echo "ERROR: Could not rotate the MCP token"
         if [ ${was_running} -eq 1 ]; then
             if start_mcp_server_unlocked; then
@@ -1104,17 +1491,9 @@ function mcp_active_jobs() {
     if [ ! -f "${mcp_database}" ]; then
         return 0
     fi
-    PYTHONPATH="${CRUCIBLE_HOME}/mcp" python3 - "${mcp_database}" <<'PY'
-import sys
-from crucible_mcp.jobs import JobStore
-
-store = JobStore(sys.argv[1])
-try:
-    for job in store.list_active():
-        print(f"{job.mcp_job_id} {job.state.value}")
-finally:
-    store.close()
-PY
+    local mcp_database_container_path
+    mcp_database_container_path=$(mcp_host_path_in_controller "${mcp_database}")
+    mcp_controller_tool active-jobs --database "${mcp_database_container_path}"
 }
 
 function extract_run_id() {
@@ -1826,9 +2205,15 @@ function service_control() {
         shift
 
         if [ "${service}" == "all" ]; then
-            local all_services="httpd opensearch valkey cdm-server image-sourcing mcp-server"
-            if [ "${action}" == "start" ] && [ "$(jq_query ${SERVICES_CFG} '."mcp-server".enabled // false')" != "true" ]; then
-                all_services="httpd opensearch valkey cdm-server image-sourcing"
+            local all_services
+            if [ "${action}" == "start" ]; then
+                all_services="httpd opensearch valkey cdm-server image-sourcing ssh-agent mcp-server"
+                if [ "$(jq_query ${SERVICES_CFG} '."mcp-server".enabled // false')" != "true" ]; then
+                    all_services="httpd opensearch valkey cdm-server image-sourcing"
+                fi
+            else
+                # MCP must stop before its agent dependency.
+                all_services="httpd opensearch valkey cdm-server image-sourcing mcp-server ssh-agent"
             fi
             service_control ${action} ${all_services}
             service_rc=$?
@@ -1846,6 +2231,10 @@ function service_control() {
         case "${service}" in
             "httpd"|"opensearch"|"valkey")
                 ${action}_${service}
+                service_rc=$?
+                ;;
+            "ssh-agent")
+                ${action}_ssh_agent
                 service_rc=$?
                 ;;
             "mcp-server")
@@ -2011,6 +2400,23 @@ function run_help() {
     echo "                       verbose - includes detailed subsystem output"
     echo "                       debug   - full diagnostic output"
     echo "  --help               Show this help and exit"
+}
+
+function ssh_help() {
+    echo "Usage: crucible ssh <command> [options]"
+    echo ""
+    echo "Manage Crucible SSH identity profiles and accepted host keys."
+    echo ""
+    echo "Commands:"
+    echo "  profiles list                         List profile names, versions, and availability"
+    echo "  profiles agent-keys                   List identities loaded in Crucible's managed agent"
+    echo "  profiles import <name> <key-file>     Load a private key and bind it to a profile"
+    echo "  profiles add <name> <fingerprint>     Bind a loaded agent key to a profile version"
+    echo "  profiles remove <name>                Revoke a profile"
+    echo "  agent clear                           Remove all loaded identities from the managed agent"
+    echo "  known-hosts list                      List Crucible-managed host-key pins"
+    echo "  known-hosts forget <host>             Forget one host (next connection uses TOFU)"
+    echo "  known-hosts reset                     Interactively clear all managed host-key pins"
 }
 
 # Helper function to get instance metadata (instance, cdmver_opt, access_opt)

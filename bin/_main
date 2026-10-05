@@ -28,6 +28,10 @@ function mcp_event() {
     fi
 }
 
+ssh_identity_helper="${CRUCIBLE_HOME}/mcp/ssh_identity_profiles.py"
+ssh_identity_catalog="/var/lib/crucible/ssh-identities/profiles.json"
+ssh_identity_known_hosts="/var/lib/crucible/ssh-identities/known_hosts"
+
 LOG_DB="${1}"
 shift
 
@@ -436,6 +440,19 @@ elif [ "${1}" == "run" ]; then
     # so containers can access on blockbreaker commands
     cp ${run_file} ${base_run_dir}/config/${run_file_json}
 
+    # The profile proxy is started inside the same controller container as
+    # Rickshaw so its temporary Unix sockets never need host-side creation or
+    # bind mounts.
+    ssh_identity_profile_lock=""
+    if [ "$(basename "$(dirname "${run_file}")")" == "input" ]; then
+        source_profile_lock="$(dirname "$(dirname "${run_file}")")/ssh-identities.lock.json"
+        if [ -f "${source_profile_lock}" ]; then
+            ssh_identity_profile_lock="${base_run_dir}/config/ssh-identities.lock.json"
+            cp "${source_profile_lock}" "${ssh_identity_profile_lock}" || \
+                exit_error "Could not stage the SSH identity profile snapshot"
+        fi
+    fi
+
     rickshaw_run_args=()
     rickshaw_run_args+=("--from-file")
     rickshaw_run_args+=("${base_run_dir}/config/${run_file_json}")
@@ -455,6 +472,22 @@ elif [ "${1}" == "run" ]; then
     ${CRUCIBLE_HOME}/bin/repo info > ${base_run_dir}/config/crucible.repo.info
     ${CRUCIBLE_HOME}/bin/repo details > ${base_run_dir}/config/crucible.repo.details
     ${CRUCIBLE_HOME}/bin/repo config show > ${base_run_dir}/config/crucible.repo.config.show
+
+    # Direct CLI runs can use SSH profiles without an MCP server being
+    # present. Reserve the shared agent before startup and keep that
+    # reservation until the workload container has finished using it. The
+    # upstream socket is mounted for setup; run_with_profiles masks it from
+    # the Rickshaw child after creating any selected-profile proxies.
+    ssh_identity_agent_mount_args=()
+    if ssh_identity_profile_count=$(jq '[.. | objects | .["ssh-identity-profile"]? | strings | select(length > 0)] | length' "${run_file}" 2>/dev/null) && \
+        [[ "${ssh_identity_profile_count}" =~ ^[0-9]+$ ]] && \
+        [ "${ssh_identity_profile_count}" -gt 0 ]; then
+        if ! ssh_agent_run_start_reserve; then
+            exit_error "Could not reserve Crucible's managed SSH agent for this run"
+        fi
+        ssh_identity_agent_dir=$(dirname "$(crucible_ssh_agent_socket)")
+        ssh_identity_agent_mount_args+=("--mount=type=bind,source=${ssh_identity_agent_dir},destination=${ssh_identity_agent_dir}")
+    fi
 
     start_valkey
     if [ -f "${CRUCIBLE_HOME}/config/valkey_pass" ]; then
@@ -492,24 +525,46 @@ elif [ "${1}" == "run" ]; then
         echo "Wrote per-architecture image sourcing URL mapping to ${base_run_dir}/config/image-sourcing-urls.json"
     fi
 
-    rs_run_cmd="${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run.py"
-    rs_run_cmd+=" ${params_args}"
-    rs_run_cmd+=" --id ${SESSION_ID}"
-    rs_run_cmd+=" --bench-dir $benchmark_subproj_dir"
-    rs_run_cmd+=" --engine-dir=${CRUCIBLE_HOME}/subprojects/core/engine"
-    rs_run_cmd+=" --roadblock-dir=${CRUCIBLE_HOME}/subprojects/core/roadblock"
-    rs_run_cmd+=" --roadblock-password=$roadblock_password"
-    rs_run_cmd+=" --workshop-dir=${CRUCIBLE_HOME}/subprojects/core/workshop"
-    rs_run_cmd+=" --packrat-dir=${CRUCIBLE_HOME}/subprojects/core/packrat"
-    rs_run_cmd+=" --tools-dir=${CRUCIBLE_HOME}/subprojects/tools"
-    rs_run_cmd+=" --registries-json=${REGISTRIES_CFG}"
-    rs_run_cmd+=" --base-run-dir=$base_run_dir"
-    rs_run_cmd+=" --external-userenvs-dir=${CRUCIBLE_HOME}/subprojects/userenvs"
-    rs_run_cmd+=" --workshop-script=workshop.py"
-    rs_run_cmd+=" --log-level=${run_log_level}"
-    rs_run_cmd+=" ${rickshaw_run_args[@]}"
+    rickshaw_command=("${CRUCIBLE_HOME}/subprojects/core/rickshaw/rickshaw-run.py")
+    if [ -n "${params_args:-}" ]; then
+        read -r -a params_args_array <<< "${params_args}"
+        rickshaw_command+=("${params_args_array[@]}")
+    fi
+    rickshaw_command+=(
+        --id "${SESSION_ID}"
+        --bench-dir "${benchmark_subproj_dir}"
+        --engine-dir="${CRUCIBLE_HOME}/subprojects/core/engine"
+        --roadblock-dir="${CRUCIBLE_HOME}/subprojects/core/roadblock"
+        --roadblock-password="${roadblock_password}"
+        --workshop-dir="${CRUCIBLE_HOME}/subprojects/core/workshop"
+        --packrat-dir="${CRUCIBLE_HOME}/subprojects/core/packrat"
+        --tools-dir="${CRUCIBLE_HOME}/subprojects/tools"
+        --registries-json="${REGISTRIES_CFG}"
+        --base-run-dir="${base_run_dir}"
+        --external-userenvs-dir="${CRUCIBLE_HOME}/subprojects/userenvs"
+        --workshop-script=workshop.py
+        --log-level="${run_log_level}"
+        "${rickshaw_run_args[@]}"
+    )
+    printf -v rs_run_cmd '%q ' "${rickshaw_command[@]}"
+    rs_run_cmd="${rs_run_cmd% }"
+    echo "rickshaw-run command: ${rs_run_cmd}"
 
-    echo "rickshaw-run command: $rs_run_cmd"
+    ssh_identity_run_command=(
+        python3 "${ssh_identity_helper}"
+        --catalog "${ssh_identity_catalog}"
+        --known-hosts "${ssh_identity_known_hosts}"
+        --agent-socket "$(crucible_ssh_agent_socket)"
+    )
+    ssh_identity_run_command+=(
+        run
+        --run-file "${base_run_dir}/config/${run_file_json}"
+        --run-directory "${base_run_dir}"
+    )
+    if [ -n "${ssh_identity_profile_lock}" -a -f "${ssh_identity_profile_lock}" ]; then
+        ssh_identity_run_command+=(--profile-lock "${ssh_identity_profile_lock}")
+    fi
+    ssh_identity_run_command+=(-- "${rickshaw_command[@]}")
 
     if [ -n "$CRUCIBLE_DRY_RUN" ]; then
         echo "Warning: CRUCIBLE_DRY_RUN environment variable is set, exiting..."
@@ -593,8 +648,14 @@ elif [ "${1}" == "run" ]; then
     cat ${RUN_SSH_DIR}/${SESSION_ID}.pub >> ${SSH_AUTH_KEYS_FILE}
 
     mcp_event running "${base_run_dir}"
-    ${podman_run} --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} ${rs_run_cmd}
+    ${podman_run} --name crucible-rickshaw-run-${SESSION_ID} --tty "${container_common_args[@]}" "${ssh_identity_agent_mount_args[@]}" "${container_rs_args[@]}" "${container_build_args[@]}" "${container_non_service_args[@]}" ${CRUCIBLE_CONTROLLER_IMAGE} "${ssh_identity_run_command[@]}"
     RC=$?
+    if [ -n "${CRUCIBLE_SSH_AGENT_RUN_START_LOCK_FD:-}" ] && ! ssh_agent_run_start_release; then
+        echo "ERROR: Could not release the SSH-agent run-start reservation"
+        if [ ${RC} -eq 0 ]; then
+            RC=1
+        fi
+    fi
 
     # remove SSH key
     echo "Removing run SSH key as an authorized key"

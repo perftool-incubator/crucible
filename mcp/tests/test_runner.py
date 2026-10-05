@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import tempfile
 import time
@@ -19,6 +20,7 @@ from crucible_mcp.runner import (
     MAX_LOG_REDACTION_CONTEXT_BYTES,
     MAX_LOG_REDACTION_LINES,
     RunManager,
+    SupervisorInspectionError,
 )
 
 
@@ -115,6 +117,375 @@ class TestRunManager(unittest.TestCase):
         self.assertNotIn("PYTHONPATH", environment)
         self.assertNotIn("SESSION_ID", environment)
         popen.call_args.kwargs["stdout"].close()
+
+    def test_host_execution_starts_a_detached_job_supervisor_container(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "host-supervisor-runs",
+            ["/opt/crucible/bin/crucible"],
+            host_execution=True,
+            supervisor_image="quay.io/crucible/controller:test",
+        )
+        job, _ = self.store.create_or_get("key-host-supervisor", {"run": True})
+        job_directory = self.root / "host-supervisor-job"
+        job_directory.mkdir()
+        container_info = {
+            "id": "supervisor-container-id",
+            "state": "running",
+            "exit_code": 0,
+            "pid": 8765,
+        }
+
+        with (
+            patch(
+                "crucible_mcp.runner.subprocess.run",
+                return_value=Mock(returncode=0, stdout="supervisor-container-id\n", stderr=""),
+            ) as run,
+            patch.object(manager, "_inspect_supervisor_container", return_value=container_info),
+            patch.object(manager, "_reattach_supervisor") as reattach,
+        ):
+            manager._launch_command(
+                job.mcp_job_id,
+                "mcp-session-1",
+                job_directory,
+                ["run", "/var/lib/crucible/run-file.json"],
+            )
+
+        launched_command = run.call_args.args[0]
+        self.assertEqual(
+            launched_command,
+            host_context_command(launched_command[7:], "/"),
+        )
+        self.assertIn("--detach", launched_command)
+        self.assertIn("--rm", launched_command)
+        self.assertIn(
+            f"--mount=type=bind,source={job_directory.resolve()},destination=/job",
+            launched_command,
+        )
+        self.assertNotIn("--mount=type=bind,source=/,destination=/hostfs", launched_command)
+        self.assertIn("quay.io/crucible/controller:test", launched_command)
+        self.assertIn("crucible_mcp.supervisor", launched_command)
+        updated = self.store.get(job.mcp_job_id)
+        self.assertEqual(updated.state, JobState.STARTING)
+        self.assertEqual(updated.supervisor_container_name, f"crucible-mcp-job-{job.mcp_job_id}")
+        self.assertEqual(updated.supervisor_container_id, "supervisor-container-id")
+        self.assertEqual(updated.runner_pid, 8765)
+        reattach.assert_called_once()
+
+    def test_timed_out_supervisor_launch_reattaches_to_created_container(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "host-supervisor-timeout-runs",
+            ["/opt/crucible/bin/crucible"],
+            host_execution=True,
+            supervisor_image="quay.io/crucible/controller:test",
+        )
+        job, _ = self.store.create_or_get("key-host-supervisor-timeout", {"run": True})
+        job_directory = self.root / "host-supervisor-timeout-job"
+        job_directory.mkdir()
+        container_info = {
+            "id": "created-before-timeout",
+            "state": "running",
+            "exit_code": 0,
+            "pid": 9876,
+        }
+
+        with (
+            patch(
+                "crucible_mcp.runner.subprocess.run",
+                side_effect=subprocess.TimeoutExpired("podman run", 30),
+            ),
+            patch.object(
+                manager, "_inspect_supervisor_container", return_value=container_info
+            ) as inspect,
+            patch.object(manager, "_reattach_supervisor") as reattach,
+            patch.object(manager, "_fail_supervisor_launch") as fail,
+        ):
+            manager._launch_supervisor_container(
+                job.mcp_job_id,
+                "session-supervisor-timeout",
+                job_directory,
+                job_directory / "events.jsonl",
+                ["run", "/tmp/run-file.json"],
+            )
+
+        inspect.assert_called_once_with(f"crucible-mcp-job-{job.mcp_job_id}")
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.STARTING)
+        self.assertEqual(
+            self.store.get(job.mcp_job_id).supervisor_container_id,
+            "created-before-timeout",
+        )
+        self.assertEqual(self.store.get(job.mcp_job_id).runner_pid, 9876)
+        reattach.assert_called_once_with(self.store.get(job.mcp_job_id))
+        fail.assert_not_called()
+
+    def test_uncertain_launch_uses_outcome_when_supervisor_disappeared(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "host-supervisor-outcome-runs",
+            ["/opt/crucible/bin/crucible"],
+            host_execution=True,
+            supervisor_image="quay.io/crucible/controller:test",
+        )
+        job, _ = self.store.create_or_get("key-host-supervisor-outcome", {"run": True})
+        job_directory = self.root / "host-supervisor-outcome-job"
+        job_directory.mkdir()
+        (job_directory / "supervisor-outcome.json").write_text(
+            json.dumps({"operation": "run", "exit_code": 23}), encoding="utf-8"
+        )
+        event_path = job_directory / "events.jsonl"
+
+        with (
+            patch(
+                "crucible_mcp.runner.subprocess.run",
+                side_effect=subprocess.TimeoutExpired("podman run", 30),
+            ),
+            patch.object(manager, "_inspect_supervisor_container", return_value=None),
+            patch.object(manager, "_finish_supervised_job") as finish,
+            patch.object(manager, "_fail_supervisor_launch") as fail,
+        ):
+            manager._launch_supervisor_container(
+                job.mcp_job_id,
+                "session-supervisor-outcome",
+                job_directory,
+                event_path,
+                ["run", "/tmp/run-file.json"],
+            )
+
+        finish.assert_called_once_with(job.mcp_job_id, 23, event_path.resolve())
+        fail.assert_not_called()
+
+    def test_supervisor_path_setup_failure_marks_job_failed(self):
+        manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "supervisor-failure-runs",
+            ["crucible"],
+            host_execution=True,
+            supervisor_image="controller:test",
+        )
+        job, _ = self.store.create_or_get("key-supervisor-failure", {"run": True})
+        job_directory = self.root / "supervisor-failure-job"
+        job_directory.mkdir()
+
+        with patch.object(
+            manager, "_launch_supervisor_container", side_effect=OSError("host path unavailable")
+        ):
+            manager._launch_command(
+                job.mcp_job_id,
+                "session-failure",
+                job_directory,
+                ["run", "/tmp/run-file.json"],
+            )
+
+        failed = self.store.get(job.mcp_job_id)
+        self.assertEqual(failed.state, JobState.FAILED)
+        self.assertEqual(failed.error_category, "infrastructure")
+        self.assertEqual(failed.exit_code, 127)
+
+    def test_reconcile_finishes_a_removed_supervisor_from_durable_outcome(self):
+        job, _ = self.store.create_or_get("key-supervisor-outcome", {"run": True})
+        job_directory = self.root / "runs" / job.mcp_job_id
+        job_directory.mkdir(parents=True)
+        (job_directory / "supervisor-outcome.json").write_text(
+            json.dumps({"operation": "run", "exit_code": 0}), encoding="utf-8"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            supervision_directory=str(job_directory),
+            supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+        )
+
+        with patch.object(self.manager, "_inspect_supervisor_container", return_value=None):
+            changed = self.manager.reconcile()
+
+        self.assertEqual(len(changed), 1)
+        self.assertEqual(changed[0].state, JobState.COMPLETED)
+        self.assertEqual(changed[0].exit_code, 0)
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.COMPLETED)
+
+    def test_reconcile_retries_transient_supervisor_inspection_failure(self):
+        job, _ = self.store.create_or_get("key-supervisor-inspect-retry", {"run": True})
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            supervision_directory=str(self.root / "runs" / job.mcp_job_id),
+            supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+        )
+        container_info = "supervisor-id|running|0|1234\n"
+
+        with (
+            patch(
+                "crucible_mcp.runner.subprocess.run",
+                side_effect=[
+                    subprocess.TimeoutExpired("podman inspect", 5),
+                    Mock(returncode=0, stdout=container_info, stderr=""),
+                ],
+            ) as inspect,
+            patch.object(self.manager, "_reattach_supervisor") as reattach,
+        ):
+            changed = self.manager.reconcile()
+
+        self.assertEqual(changed, [])
+        self.assertEqual(inspect.call_count, 2)
+        reattach.assert_called_once_with(self.store.get(job.mcp_job_id))
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.STARTING)
+
+    def test_reconcile_keeps_job_active_when_supervisor_state_stays_unknown(self):
+        job, _ = self.store.create_or_get("key-supervisor-inspect-unknown", {"run": True})
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            supervision_directory=str(self.root / "runs" / job.mcp_job_id),
+            supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+        )
+
+        with (
+            patch.object(
+                self.manager,
+                "_inspect_supervisor_container",
+                side_effect=SupervisorInspectionError("Podman temporarily unavailable"),
+            ),
+            patch.object(self.manager, "_reattach_supervisor") as reattach,
+        ):
+            changed = self.manager.reconcile()
+
+        self.assertEqual(changed, [])
+        self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.STARTING)
+        reattach.assert_called_once_with(self.store.get(job.mcp_job_id))
+
+    def test_reconcile_reattaches_during_transitional_supervisor_states(self):
+        jobs = []
+        for state in ("configured", "removing"):
+            job, _ = self.store.create_or_get(f"key-supervisor-{state}", {"run": True})
+            self.store.transition(
+                job.mcp_job_id,
+                JobState.STARTING,
+                supervision_directory=str(self.root / "runs" / job.mcp_job_id),
+                supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+            )
+            jobs.append(self.store.get(job.mcp_job_id))
+
+        container_states = [
+            {"id": f"container-{index}", "state": state, "exit_code": 0, "pid": 1}
+            for index, state in enumerate(("configured", "removing"))
+        ]
+        with (
+            patch.object(
+                self.manager,
+                "_inspect_supervisor_container",
+                side_effect=container_states,
+            ),
+            patch.object(self.manager, "_reattach_supervisor") as reattach,
+        ):
+            changed = self.manager.reconcile()
+
+        self.assertEqual(changed, [])
+        for job in jobs:
+            self.assertEqual(self.store.get(job.mcp_job_id).state, JobState.STARTING)
+        self.assertEqual(
+            {call_args.args[0].mcp_job_id for call_args in reattach.call_args_list},
+            {job.mcp_job_id for job in jobs},
+        )
+
+    def test_wait_retries_when_podman_wait_does_not_confirm_supervisor_exit(self):
+        jobs = []
+        for key in ("key-wait-active", "key-wait-uncertain"):
+            job, _ = self.store.create_or_get(key, {"run": True})
+            self.store.transition(
+                job.mcp_job_id,
+                JobState.STARTING,
+                supervision_directory=str(self.root / "runs" / job.mcp_job_id),
+                supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+            )
+            jobs.append(self.store.get(job.mcp_job_id))
+
+        def wait_result(returncode, stdout, stderr):
+            process = Mock()
+            process.poll.return_value = returncode
+            process.returncode = returncode
+            process.communicate.return_value = (stdout, stderr)
+            return process
+
+        active_container = {
+            "id": "supervisor-id",
+            "state": "running",
+            "exit_code": 0,
+            "pid": 1234,
+        }
+        with (
+            patch(
+                "crucible_mcp.runner.subprocess.Popen",
+                side_effect=[
+                    wait_result(125, "", "temporary Podman failure"),
+                    wait_result(0, "0\n", ""),
+                    wait_result(125, "", "temporary Podman failure"),
+                    wait_result(0, "0\n", ""),
+                ],
+            ) as podman_wait,
+            patch.object(
+                self.manager,
+                "_inspect_supervisor_container",
+                side_effect=[
+                    active_container,
+                    SupervisorInspectionError("Podman inspection timed out"),
+                ],
+            ),
+            patch.object(self.manager, "_consume_events", return_value=0),
+            patch.object(self.manager, "_finish_supervised_job") as finish,
+            patch.object(self.manager, "_fail_recovery_job") as fail,
+            patch("crucible_mcp.runner.time.sleep"),
+        ):
+            for job in jobs:
+                event_path = self.root / "runs" / job.mcp_job_id / "events.jsonl"
+                self.manager._wait_for_supervisor(
+                    job.mcp_job_id, job.supervisor_container_name, event_path
+                )
+
+        self.assertEqual(podman_wait.call_count, 4)
+        self.assertEqual(
+            [call.args[:2] for call in finish.call_args_list],
+            [(jobs[0].mcp_job_id, 0), (jobs[1].mcp_job_id, 0)],
+        )
+        fail.assert_not_called()
+
+    def test_wait_prefers_durable_child_signal_exit_code(self):
+        job, _ = self.store.create_or_get("key-wait-signal-exit", {"run": True})
+        job_directory = self.root / "runs" / job.mcp_job_id
+        job_directory.mkdir(parents=True)
+        (job_directory / "supervisor-outcome.json").write_text(
+            json.dumps({"operation": "run", "exit_code": -15}), encoding="utf-8"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            supervision_directory=str(job_directory),
+            supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+        )
+        process = Mock()
+        process.poll.return_value = 0
+        process.returncode = 0
+        process.communicate.return_value = ("241\n", "")
+        event_path = job_directory / "events.jsonl"
+
+        with (
+            patch("crucible_mcp.runner.subprocess.Popen", return_value=process),
+            patch.object(self.manager, "_consume_events", return_value=0),
+            patch.object(self.manager, "_inspect_supervisor_container") as inspect,
+            patch.object(self.manager, "_finish_supervised_job") as finish,
+        ):
+            self.manager._wait_for_supervisor(
+                job.mcp_job_id,
+                f"crucible-mcp-job-{job.mcp_job_id}",
+                event_path,
+            )
+
+        finish.assert_called_once_with(job.mcp_job_id, -15, event_path)
+        inspect.assert_not_called()
 
     def test_submission_is_idempotent_and_completes_asynchronously(self):
         document = {"benchmarks": [{"name": "example"}]}

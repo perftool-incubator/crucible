@@ -70,6 +70,8 @@ class Job:
     run_directory: Optional[str] = None
     runner_pid: Optional[int] = None
     runner_container_id: Optional[str] = None
+    supervisor_container_name: Optional[str] = None
+    supervisor_container_id: Optional[str] = None
     exit_code: Optional[int] = None
     error_category: Optional[str] = None
     error_message: Optional[str] = None
@@ -81,6 +83,8 @@ class Job:
         values["state"] = self.state.value
         values["result_status"] = self.result_status.value
         values["indexed_query_status"] = self.indexed_query_status.value
+        values.pop("supervisor_container_name")
+        values.pop("supervisor_container_id")
         plan_summary = values.pop("plan_summary")
         if plan_summary is not None:
             values["plan"] = plan_summary

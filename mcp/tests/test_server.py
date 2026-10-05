@@ -25,8 +25,10 @@ from crucible_mcp.server import (
     IPv6ThreadingHTTPServer,
     MAX_JSONRPC_ID_BYTES,
     MCPHandler,
+    _host_key_file_path,
     _ensure_indexing_services,
 )
+from ssh_identity_profiles import SSHIdentityError, SSHIdentityProfiles
 from http.server import ThreadingHTTPServer
 
 
@@ -47,6 +49,7 @@ class TestServer(unittest.TestCase):
             InputPolicy([root / "inputs"]),
             run_root=root / "runs",
         )
+        server.ssh_identity_profiles = SSHIdentityProfiles(root / "ssh-profiles.json")
         server.max_request_bytes = 1024 * 1024
         self.server = server
         self.thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -181,6 +184,16 @@ class TestServer(unittest.TestCase):
         body = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         _, payload = self.request("POST", "/mcp", body, self.token)
         tools = {tool["name"]: tool for tool in payload["result"]["tools"]}
+        self.assertIn("list_ssh_identity_profiles", tools)
+        self.assertEqual(
+            tools["list_ssh_identity_profiles"]["inputSchema"]["type"],
+            "object",
+        )
+        self.assertIn("import_ssh_identity_profile", tools)
+        self.assertEqual(
+            tools["import_ssh_identity_profile"]["inputSchema"]["required"],
+            ["name", "key_file"],
+        )
         self.assertIn("start_run", tools)
         self.assertIn("inputSchema", tools["start_run"])
         self.assertEqual(tools["start_run"]["inputSchema"]["required"], ["idempotency_key"])
@@ -218,6 +231,27 @@ class TestServer(unittest.TestCase):
         })
         _, payload = self.request("POST", "/mcp", body, self.token)
         self.assertIn("endpoints", payload["result"]["structuredContent"])
+
+    def test_ssh_profile_discovery_returns_structured_error_for_invalid_catalog(self):
+        self.server.ssh_identity_profiles.catalog_path.write_text(
+            "not-json", encoding="utf-8"
+        )
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "list_ssh_identity_profiles",
+                    "arguments": {},
+                },
+            }
+        )
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("ssh_identity_unavailable", payload["error"]["message"])
+        self.assertNotIn(str(self.server.ssh_identity_profiles.catalog_path), payload["error"]["message"])
 
     def test_run_planning_tools_dispatch_inline_documents(self):
         plan = {
@@ -743,6 +777,109 @@ class TestServer(unittest.TestCase):
         self.assertIn("unarchive_local_run", info["capabilities"])
         self.assertIn("list_run_artifacts", info["capabilities"])
         self.assertIn("get_run_artifact", info["capabilities"])
+        self.assertIn("list_ssh_identity_profiles", info["capabilities"])
+        self.assertIn("import_ssh_identity_profile", info["capabilities"])
+
+    def test_ssh_identity_profile_discovery_exposes_only_safe_metadata(self):
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {
+                "name": "list_ssh_identity_profiles",
+                "arguments": {},
+            },
+        })
+        status, payload = self.request("POST", "/mcp", body, self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["structuredContent"], {"profiles": []})
+        self.assertNotIn("fingerprint", json.dumps(payload))
+        self.assertNotIn("socket", json.dumps(payload))
+
+    def test_import_ssh_identity_profile_uses_host_file_reference(self):
+        key_path = Path(self.directory.name) / "id_ed25519"
+        key_path.write_text("test key", encoding="utf-8")
+        imported = {"name": "lab-admin", "version": 1}
+        with (
+            patch("crucible_mcp.server._host_key_file_path", return_value=key_path),
+            patch.object(
+                self.server.ssh_identity_profiles,
+                "import_key",
+                return_value=imported,
+            ) as import_key,
+        ):
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": 33,
+                "method": "tools/call",
+                "params": {
+                    "name": "import_ssh_identity_profile",
+                    "arguments": {
+                        "name": "lab-admin",
+                        "key_file": "/home/alice/.ssh/id_ed25519",
+                    },
+                },
+            })
+            status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["structuredContent"], imported)
+        import_key.assert_called_once_with("lab-admin", key_path, interactive=False)
+
+    def test_noninteractive_key_import_returns_cli_fallback_for_encrypted_keys(self):
+        with (
+            patch(
+                "crucible_mcp.server._host_key_file_path",
+                return_value=Path("/hostfs/home/alice/.ssh/id_ed25519"),
+            ),
+            patch.object(
+                self.server.ssh_identity_profiles,
+                "import_key",
+                side_effect=SSHIdentityError(
+                    "the key could not be imported non-interactively; if it is "
+                    "passphrase-protected, use `crucible ssh profiles import` "
+                    "from a terminal to enter its passphrase"
+                ),
+            ),
+        ):
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": 34,
+                "method": "tools/call",
+                "params": {
+                    "name": "import_ssh_identity_profile",
+                    "arguments": {
+                        "name": "lab-admin",
+                        "key_file": "/home/alice/.ssh/id_ed25519",
+                    },
+                },
+            })
+            status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        self.assertIn("ssh_identity_import_failed", payload["error"]["message"])
+        self.assertIn("passphrase-protected", payload["error"]["message"])
+        self.assertNotIn("/home/alice", payload["error"]["message"])
+
+    def test_host_key_file_reference_must_resolve_inside_host_root(self):
+        root = Path(self.directory.name) / "host"
+        key_file = root / "home" / "alice" / ".ssh" / "id_ed25519"
+        key_file.parent.mkdir(parents=True)
+        key_file.write_text("key", encoding="utf-8")
+        self.assertEqual(
+            _host_key_file_path("/home/alice/.ssh/id_ed25519", root),
+            key_file,
+        )
+        with self.assertRaises(SSHIdentityError):
+            _host_key_file_path("relative/key", root)
+
+        outside = Path(self.directory.name) / "outside-key"
+        outside.write_text("key", encoding="utf-8")
+        link = root / "home" / "alice" / ".ssh" / "outside"
+        link.symlink_to(outside)
+        with self.assertRaises(SSHIdentityError):
+            _host_key_file_path("/home/alice/.ssh/outside", root)
 
     def test_invalid_parameter_shapes_return_json_rpc_errors(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": []})

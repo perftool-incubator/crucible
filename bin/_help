@@ -73,9 +73,10 @@ function help() {
     echo "ps                            |  Show running crucible containers"
     echo "images                        |  Show crucible container images"
     echo "start <service list>          |  Start the specified service(s) manually.  Not required, Crucible will start the services it needs when it needs them."
-    echo "                              |  A service list is a space separated list of one or more of: all, cdm-server, httpd, image-sourcing, mcp-server, opensearch, & valkey"
+    echo "                              |  A service list is a space separated list of one or more of: all, cdm-server, httpd, image-sourcing, mcp-server, opensearch, ssh-agent, & valkey"
     echo "stop <service list>           |  Stop the specified service(s) manually.  See the start command for more details."
     echo "mcp rotate-token              |  Atomically rotate the MCP bearer token and restart MCP if it is running"
+    echo "ssh                           |  Manage Crucible SSH identity profiles, its SSH agent, and accepted host keys"
     echo "reset [hard]                  |  Clear the log and re-initialize OpenSearch.  If the optional hard parameter is specified then all run data is also deleted."
     echo "run-ci                        |  Run crucible-ci stage1.  For development testing purposes only!"
     echo ""
@@ -106,6 +107,8 @@ function help() {
         ${CRUCIBLE_HOME}/bin/update help
     elif [ "${1}" == "run" ]; then
         run_help
+    elif [ "${1}" == "ssh" ]; then
+        ssh_help
     elif [ "${1}" == "archive" -o "${1}" == "unarchive" ]; then
         archive_help
     else

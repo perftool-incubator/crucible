@@ -521,6 +521,8 @@ class CrucibleOperations:
             "execution_supported": True,
             "capabilities": [
                 "crucible_info",
+                "list_ssh_identity_profiles",
+                "import_ssh_identity_profile",
                 "list_benchmarks",
                 "describe_benchmark",
                 "list_tools",
