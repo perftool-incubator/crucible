@@ -19,6 +19,7 @@ from crucible_mcp.operations import (
 )
 from crucible_mcp.jobs import JobConflictError, JobNotFoundError
 from crucible_mcp.audit import AuditLogger
+from crucible_mcp.host import DEFAULT_HOST_BRIDGE_SOCKET, host_bridge_command
 from crucible_mcp.models import IndexedQueryStatus, Job, JobState, ResultStatus
 from crucible_mcp.policy import InputPolicy, rotate_token
 from crucible_mcp.server import (
@@ -50,6 +51,8 @@ class TestServer(unittest.TestCase):
             run_root=root / "runs",
         )
         server.ssh_identity_profiles = SSHIdentityProfiles(root / "ssh-profiles.json")
+        server.ssh_profile_import_root = root / "ssh-key-import"
+        server.ssh_profile_import_root.mkdir()
         server.max_request_bytes = 1024 * 1024
         self.server = server
         self.thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -190,6 +193,10 @@ class TestServer(unittest.TestCase):
             "object",
         )
         self.assertIn("import_ssh_identity_profile", tools)
+        self.assertIn(
+            "/var/lib/crucible/ssh-identities/import",
+            tools["import_ssh_identity_profile"]["description"],
+        )
         self.assertEqual(
             tools["import_ssh_identity_profile"]["inputSchema"]["required"],
             ["name", "key_file"],
@@ -796,12 +803,15 @@ class TestServer(unittest.TestCase):
         self.assertNotIn("fingerprint", json.dumps(payload))
         self.assertNotIn("socket", json.dumps(payload))
 
-    def test_import_ssh_identity_profile_uses_host_file_reference(self):
+    def test_import_ssh_identity_profile_uses_scoped_host_file_reference(self):
         key_path = Path(self.directory.name) / "id_ed25519"
         key_path.write_text("test key", encoding="utf-8")
         imported = {"name": "lab-admin", "version": 1}
         with (
-            patch("crucible_mcp.server._host_key_file_path", return_value=key_path),
+            patch(
+                "crucible_mcp.server._host_key_file_path",
+                return_value=key_path,
+            ) as resolve_key_path,
             patch.object(
                 self.server.ssh_identity_profiles,
                 "import_key",
@@ -816,7 +826,9 @@ class TestServer(unittest.TestCase):
                     "name": "import_ssh_identity_profile",
                     "arguments": {
                         "name": "lab-admin",
-                        "key_file": "/home/alice/.ssh/id_ed25519",
+                        "key_file": str(
+                            self.server.ssh_profile_import_root / "id_ed25519"
+                        ),
                     },
                 },
             })
@@ -824,13 +836,20 @@ class TestServer(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["result"]["structuredContent"], imported)
+        self.assertEqual(
+            resolve_key_path.call_args.args,
+            (
+                str(self.server.ssh_profile_import_root / "id_ed25519"),
+                self.server.ssh_profile_import_root,
+            ),
+        )
         import_key.assert_called_once_with("lab-admin", key_path, interactive=False)
 
     def test_noninteractive_key_import_returns_cli_fallback_for_encrypted_keys(self):
         with (
             patch(
                 "crucible_mcp.server._host_key_file_path",
-                return_value=Path("/hostfs/home/alice/.ssh/id_ed25519"),
+                return_value=self.server.ssh_profile_import_root / "id_ed25519",
             ),
             patch.object(
                 self.server.ssh_identity_profiles,
@@ -850,7 +869,9 @@ class TestServer(unittest.TestCase):
                     "name": "import_ssh_identity_profile",
                     "arguments": {
                         "name": "lab-admin",
-                        "key_file": "/home/alice/.ssh/id_ed25519",
+                        "key_file": str(
+                            self.server.ssh_profile_import_root / "id_ed25519"
+                        ),
                     },
                 },
             })
@@ -862,13 +883,13 @@ class TestServer(unittest.TestCase):
         self.assertIn("passphrase-protected", payload["error"]["message"])
         self.assertNotIn("/home/alice", payload["error"]["message"])
 
-    def test_host_key_file_reference_must_resolve_inside_host_root(self):
-        root = Path(self.directory.name) / "host"
-        key_file = root / "home" / "alice" / ".ssh" / "id_ed25519"
-        key_file.parent.mkdir(parents=True)
+    def test_mcp_key_file_reference_must_resolve_inside_import_root(self):
+        root = Path(self.directory.name) / "ssh-key-import"
+        root.mkdir(exist_ok=True)
+        key_file = root / "id_ed25519"
         key_file.write_text("key", encoding="utf-8")
         self.assertEqual(
-            _host_key_file_path("/home/alice/.ssh/id_ed25519", root),
+            _host_key_file_path(str(key_file), root),
             key_file,
         )
         with self.assertRaises(SSHIdentityError):
@@ -876,10 +897,14 @@ class TestServer(unittest.TestCase):
 
         outside = Path(self.directory.name) / "outside-key"
         outside.write_text("key", encoding="utf-8")
-        link = root / "home" / "alice" / ".ssh" / "outside"
+        link = root / "outside"
         link.symlink_to(outside)
         with self.assertRaises(SSHIdentityError):
-            _host_key_file_path("/home/alice/.ssh/outside", root)
+            _host_key_file_path(str(link), root)
+        with self.assertRaises(SSHIdentityError):
+            _host_key_file_path(str(outside), root)
+        with self.assertRaises(SSHIdentityError):
+            _host_key_file_path(str(root), root)
 
     def test_invalid_parameter_shapes_return_json_rpc_errors(self):
         body = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": []})
@@ -1202,18 +1227,11 @@ class TestServer(unittest.TestCase):
             _ensure_indexing_services(home, operations)
 
         run.assert_called_once_with(
-            [
-                "nsenter",
-                "--mount=/proc/1/ns/mnt",
-                "--cgroup=/proc/1/ns/cgroup",
-                "--net=/proc/1/ns/net",
-                "--root=/proc/1/root",
-                "--wdns=/",
-                "--",
-                str(home / "bin" / "crucible"),
-                "start",
-                "opensearch",
-            ],
+            host_bridge_command(
+                [str(home / "bin" / "crucible"), "start", "opensearch"],
+                DEFAULT_HOST_BRIDGE_SOCKET,
+                str(home),
+            ),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

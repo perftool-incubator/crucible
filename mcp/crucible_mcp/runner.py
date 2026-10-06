@@ -12,7 +12,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
-from .host import host_context_command, host_context_environment
+from .host import (
+    DEFAULT_HOST_BRIDGE_SOCKET,
+    host_bridge_command,
+    host_bridge_environment,
+)
 from .jobs import JobConflictError, JobStore, request_hash
 from .models import Job, JobState, ResultStatus
 from .operations import (
@@ -77,6 +81,7 @@ class RunManager:
         host_execution: bool = True,
         supervisor_image: str | None = None,
         ssh_identity_profiles: SSHIdentityProfiles | None = None,
+        host_bridge_socket: Path = DEFAULT_HOST_BRIDGE_SOCKET,
     ):
         self.store = store
         self.operations = operations
@@ -86,6 +91,7 @@ class RunManager:
         self.cdm_readiness_timeout = cdm_readiness_timeout
         self.host_execution = host_execution
         self.supervisor_image = supervisor_image
+        self.host_bridge_socket = Path(host_bridge_socket)
         self.ssh_identity_profiles = ssh_identity_profiles
         self.run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._threads: dict[str, threading.Thread] = {}
@@ -570,7 +576,11 @@ class RunManager:
         thread.start()
 
     def _supervisor_podman_command(self, arguments: Sequence[str]) -> list[str]:
-        return self._execution_context_command(["podman", *arguments])
+        if not self.host_execution:
+            return ["podman", *arguments]
+        return host_bridge_command(
+            ["podman", *arguments], self.host_bridge_socket
+        )
 
     def _inspect_supervisor_container(self, name: str) -> dict[str, Any] | None:
         last_error: Exception | None = None
@@ -589,7 +599,9 @@ class RunManager:
                     capture_output=True,
                     text=True,
                     timeout=5,
-                    env=host_context_environment(os.environ),
+                    env=host_bridge_environment(
+                        {}, self.operations.crucible_home
+                    ),
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 last_error = exc
@@ -719,7 +731,9 @@ class RunManager:
                 capture_output=True,
                 text=True,
                 timeout=30,
-                env=host_context_environment(os.environ),
+                env=host_bridge_environment(
+                    {}, self.operations.crucible_home
+                ),
             )
         except subprocess.TimeoutExpired as exc:
             self._recover_uncertain_supervisor_launch(
@@ -855,7 +869,9 @@ class RunManager:
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
-                        env=host_context_environment(os.environ),
+                        env=host_bridge_environment(
+                            {}, self.operations.crucible_home
+                        ),
                     )
                 except OSError:
                     process = None
@@ -1522,13 +1538,15 @@ class RunManager:
     ) -> list[str]:
         if not self.host_execution:
             return list(command)
-        return host_context_command(command, working_directory)
+        return host_bridge_command(
+            command, self.host_bridge_socket, working_directory
+        )
 
     def _launch_command(self, job_id: str, session_id: str, job_directory: Path, command: list[str]) -> None:
         environment = os.environ.copy()
         if self.host_execution:
-            environment = host_context_environment(
-                environment, preserve_mcp_session=True
+            environment = host_bridge_environment(
+                environment, self.operations.crucible_home
             )
         event_path = job_directory / "events.jsonl"
         environment["CRUCIBLE_MCP_SESSION_ID"] = session_id
@@ -1705,7 +1723,9 @@ class RunManager:
                 capture_output=True,
                 text=True,
                 timeout=2,
-                env=host_context_environment(os.environ)
+                env=host_bridge_environment(
+                    {}, self.operations.crucible_home
+                )
                 if self.host_execution
                 else None,
             )

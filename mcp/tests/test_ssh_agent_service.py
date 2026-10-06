@@ -8,6 +8,150 @@ from pathlib import Path
 class TestSSHAgentService(unittest.TestCase):
     repository = Path(__file__).resolve().parents[2]
 
+    def test_host_root_mount_is_scoped_to_run_file_execution(self):
+        base = (self.repository / "bin/base").read_text(encoding="utf-8")
+        common_start = base.index("container_common_args=()")
+        run_mount_start = base.index("container_run_file_args=", common_start)
+        shared_mounts = base[common_start:run_mount_start]
+        self.assertNotIn("destination=/hostfs", shared_mounts)
+        self.assertIn(
+            'container_run_file_args=("--mount=type=bind,source=/,destination=/hostfs")',
+            base,
+        )
+        listener_start = base.index("container_mcp_listener_args=()")
+        bridge_start = base.index("container_mcp_host_bridge_args=()", listener_start)
+        listener_args = base[listener_start:bridge_start]
+        self.assertNotIn("source=/root,destination=/root", listener_args)
+        self.assertNotIn("source=/home,destination=/home", listener_args)
+        self.assertNotIn('("--privileged")', listener_args)
+        self.assertNotIn('("--pid=host")', listener_args)
+        self.assertIn('"${container_mcp_listener_args[@]}"', base)
+        self.assertIn('"${container_mcp_host_bridge_args[@]}"', base)
+        self.assertIn('function start_mcp_host_bridge()', base)
+        self.assertIn('function stop_mcp_host_bridge()', base)
+        self.assertIn('container_mcp_host_bridge_args+=("-e PYTHONPATH=${CRUCIBLE_HOME}/mcp")', base)
+        self.assertIn('5) mcp_data_path=${mcp_archive_root}; mcp_data_readonly=true ;;', base)
+        self.assertIn(
+            'Writable MCP data paths cannot overlap the local archive directory',
+            base,
+        )
+        run_command = (self.repository / "bin/_main").read_text(encoding="utf-8")
+        self.assertIn('"${container_run_file_args[@]}"', run_command)
+        self.assertIn(
+            '"--mount=type=bind,source=${mcp_ssh_profile_import_root},'
+            'destination=${mcp_ssh_profile_import_root},readonly"',
+            base,
+        )
+        self.assertIn(
+            '"--mount=type=bind,source=${mcp_ssh_agent_dir},'
+            'destination=${mcp_ssh_agent_dir},readonly"',
+            base,
+        )
+
+    def test_listener_arguments_use_canonical_mount_paths(self):
+        base = (self.repository / "bin/base").read_text(encoding="utf-8")
+        command_position = base.index("mcp_cmd=(")
+        canonicalized_paths = (
+            'mcp_database=$(mcp_canonical_file_path "${mcp_database}")',
+            'mcp_audit_log=$(mcp_canonical_file_path "${mcp_audit_log}")',
+            'mcp_token_file=$(mcp_canonical_file_path "${mcp_token_file}")',
+            'mcp_log_db=$(mcp_canonical_file_path "${LOG_DB}")',
+            'mcp_input_root=$(mcp_canonical_directory_path "${mcp_input_root}")',
+        )
+        for assignment in canonicalized_paths:
+            self.assertLess(base.index(assignment), command_position)
+        for argument in (
+            '--database "${mcp_database}"',
+            '--input-root "${mcp_input_root}"',
+            '--audit-log "${mcp_audit_log}"',
+            '--log-db "${mcp_log_db}"',
+        ):
+            self.assertIn(argument, base)
+
+    def test_data_mount_policy_blocks_protected_subtrees_but_allows_crucible_data(self):
+        script = r'''
+set -eu
+TEST_ROOT=$(mktemp -d)
+trap 'rm -rf "$TEST_ROOT"' EXIT
+source <(awk '
+    /^function mcp_canonical_directory_path\(\)/ { capture=1 }
+    /^function mcp_logger_store_directory\(\)/ { capture=1 }
+    /^function mcp_data_mount_is_protected\(\)/ { capture=1 }
+    /^function stop_mcp_host_bridge\(\)/ { exit }
+    capture { print }
+' "$ROOT/bin/base")
+var_crucible=/var/lib/crucible
+mkdir -p "$TEST_ROOT/home/.crucible" "$TEST_ROOT/external"
+mkdir -p "$TEST_ROOT/physical/config" "$TEST_ROOT/physical/input"
+ln -s "$TEST_ROOT/physical" "$TEST_ROOT/alias"
+HOME="$TEST_ROOT/home"
+export HOME
+canonical_dir=$(mcp_canonical_directory_path "$TEST_ROOT/alias/input")
+canonical_file=$(mcp_canonical_file_path "$TEST_ROOT/alias/config/jobs.db")
+if [ "$canonical_dir" != "$TEST_ROOT/physical/input" ] || \
+   [ "$canonical_file" != "$TEST_ROOT/physical/config/jobs.db" ]; then
+    echo "configured paths were not canonicalized consistently" >&2
+    exit 1
+fi
+logger_store=$(mcp_logger_store_directory)
+if [ "$logger_store" != "$TEST_ROOT/home/.crucible" ]; then
+    echo "unexpected logger store directory: $logger_store" >&2
+    exit 1
+fi
+if mcp_data_mount_is_protected "$logger_store" true "$logger_store"; then
+    echo "expected the exact read-only logger store to be allowed" >&2
+    exit 1
+fi
+if ! mcp_data_mount_is_protected /root/.crucible false /root/.crucible; then
+    echo "expected a writable logger store mount to remain protected" >&2
+    exit 1
+fi
+if ! mcp_data_mount_is_protected /root true "$logger_store"; then
+    echo "expected the home directory itself to remain protected" >&2
+    exit 1
+fi
+if ! mcp_data_mount_is_protected /root/.crucible/child true /root/.crucible; then
+    echo "expected descendants of the logger store to remain protected" >&2
+    exit 1
+fi
+if mcp_data_mount_is_protected /root/.crucible true /root/.crucible; then
+    echo "expected the exact read-only root logger store to be allowed" >&2
+    exit 1
+fi
+if ! mcp_data_mount_is_protected /root/.crucible true /root/other; then
+    echo "expected only the validated logger store to receive the exception" >&2
+    exit 1
+fi
+mv "$TEST_ROOT/home/.crucible" "$TEST_ROOT/home/.crucible-original"
+ln -s "$TEST_ROOT/external" "$TEST_ROOT/home/.crucible"
+if mcp_logger_store_directory >/dev/null; then
+    echo "expected a symlinked logger store to be rejected" >&2
+    exit 1
+fi
+rm "$TEST_ROOT/home/.crucible"
+mv "$TEST_ROOT/home/.crucible-original" "$TEST_ROOT/home/.crucible"
+for path in /etc/ssh /root/.ssh /home/alice /usr/lib /opt/other /boot/efi /proc/1 /sys/kernel /dev/shm /var/log /var/lib/crucible; do
+    if ! mcp_data_mount_is_protected "$path"; then
+        echo "expected protected path: $path" >&2
+        exit 1
+    fi
+done
+for path in /var/lib/crucible/run /var/lib/crucible/archive /var/lib/crucible/mcp; do
+    if mcp_data_mount_is_protected "$path"; then
+        echo "expected allowed Crucible data path: $path" >&2
+        exit 1
+    fi
+done
+'''
+        result = subprocess.run(
+            ["bash", "-c", script],
+            env={**os.environ, "ROOT": str(self.repository)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     harness = r'''
 set -u
 unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD

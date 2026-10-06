@@ -45,7 +45,8 @@ function ssh_identity_command_requires_tty() {
 }
 
 function run_ssh_identity_command() {
-    local lock_owned=0 command_rc agent_dir
+    local lock_owned=0 command_rc agent_dir import_source import_parent
+    local import_staged_dir=""
     local agent_mount_args=()
 
     if [ "${1:-}" == "profiles" ]; then
@@ -66,19 +67,62 @@ function run_ssh_identity_command() {
             fi
             agent_dir=$(dirname "$(crucible_ssh_agent_socket)")
             agent_mount_args+=("--mount=type=bind,source=${agent_dir},destination=${agent_dir}")
+            if [ -n "${ssh_identity_import_source:-}" ]; then
+                import_source=$(readlink -e -- "${ssh_identity_import_source}")
+                if [ -z "${import_source}" ] || [ ! -f "${import_source}" ]; then
+                    echo "ERROR: SSH identity import source is not an available regular file"
+                    if [ ${lock_owned} -eq 1 ]; then
+                        mcp_lifecycle_lock_release
+                    fi
+                    return 1
+                fi
+                import_parent=$(dirname "${agent_dir}")
+                if [ -L "${import_parent}" ] || [ ! -d "${import_parent}" ] || \
+                    [ "$(stat -c '%u' "${import_parent}")" != "0" ]; then
+                    echo "ERROR: Crucible SSH-agent runtime directory is not secure"
+                    if [ ${lock_owned} -eq 1 ]; then
+                        mcp_lifecycle_lock_release
+                    fi
+                    return 1
+                fi
+                import_staged_dir=$(mktemp -d "${import_parent}/ssh-key-import.XXXXXX")
+                # Bind only the staged key directory, not the source file's host directory.
+                if [ -z "${import_staged_dir}" ] || ! chmod 700 "${import_staged_dir}" || \
+                    ! cp -- "${import_source}" "${import_staged_dir}/key" || \
+                    ! chmod 600 "${import_staged_dir}/key"; then
+                    if [ -n "${import_staged_dir}" ]; then
+                        rm -f -- "${import_staged_dir}/key"
+                        rmdir -- "${import_staged_dir}" 2>/dev/null || true
+                    fi
+                    echo "ERROR: Could not stage the SSH identity key for import"
+                    if [ ${lock_owned} -eq 1 ]; then
+                        mcp_lifecycle_lock_release
+                    fi
+                    return 1
+                fi
+                agent_mount_args+=("--mount=type=bind,source=${import_staged_dir},destination=${import_staged_dir},readonly")
+                ssh_identity_cli_args=(profiles import "${ssh_identity_import_profile}" "${import_staged_dir}/key")
+            fi
         fi
     fi
 
     if [ ${ssh_identity_interactive} -eq 1 ]; then
         ${podman_run_interactive} --name "crucible-ssh-profiles-${SESSION_ID}" --tty --interactive \
-            "${agent_mount_args[@]}" "${container_common_args[@]}" "${container_non_service_args[@]}" \
+            "${container_common_args[@]}" "${agent_mount_args[@]}" "${container_non_service_args[@]}" \
             "${CRUCIBLE_CONTROLLER_IMAGE}" "${ssh_identity_args[@]}" "${ssh_identity_cli_args[@]}"
     else
         ${podman_run} --name "crucible-ssh-profiles-${SESSION_ID}" \
-            "${agent_mount_args[@]}" "${container_common_args[@]}" "${container_non_service_args[@]}" \
+            "${container_common_args[@]}" "${agent_mount_args[@]}" "${container_non_service_args[@]}" \
             "${CRUCIBLE_CONTROLLER_IMAGE}" "${ssh_identity_args[@]}" "${ssh_identity_cli_args[@]}"
     fi
     command_rc=$?
+
+    if [ -n "${import_staged_dir}" ]; then
+        if ! rm -f -- "${import_staged_dir}/key" || ! rmdir -- "${import_staged_dir}"; then
+            echo "ERROR: Could not remove the temporary SSH identity key copy"
+            command_rc=1
+        fi
+    fi
 
     if [ ${lock_owned} -eq 1 ]; then
         if ! mcp_lifecycle_lock_release; then
@@ -125,6 +169,8 @@ if [ "${1:-}" == "ssh" ]; then
         --agent-socket "$(crucible_ssh_agent_socket)"
     )
     ssh_identity_cli_args=("$@")
+    ssh_identity_import_source=""
+    ssh_identity_import_profile=""
     ssh_identity_interactive=0
     if ssh_identity_command_requires_tty "${1:-}" "${2:-}" "$#"; then
         ssh_identity_interactive=1
@@ -144,11 +190,8 @@ if [ "${1:-}" == "ssh" ]; then
             echo "  Load a private key into Crucible's managed SSH agent and bind it to a profile"
             exit 0
         fi
-        case "${4}" in
-            /*) ssh_identity_key_path="/hostfs${4}" ;;
-            *) ssh_identity_key_path="/hostfs$(pwd -P)/${4}" ;;
-        esac
-        ssh_identity_cli_args=(profiles import "${3}" "${ssh_identity_key_path}")
+        ssh_identity_import_source="${4}"
+        ssh_identity_import_profile="${3}"
         ssh_identity_interactive=1
     fi
     run_ssh_identity_command "${1:-}" "${2:-}"

@@ -8,7 +8,10 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from crucible_mcp.jobs import JobStore
-from crucible_mcp.host import host_context_command
+from crucible_mcp.host import (
+    DEFAULT_HOST_BRIDGE_SOCKET,
+    host_bridge_command,
+)
 from crucible_mcp.models import JobState
 from crucible_mcp.operations import (
     MAX_METADATA_RESPONSE_BYTES,
@@ -70,7 +73,7 @@ class TestRunManager(unittest.TestCase):
         command = ["/opt/crucible/bin/crucible", "run", "/var/lib/crucible/run-file.json"]
         self.assertEqual(
             manager._execution_context_command(command, str(self.root)),
-            host_context_command(command, str(self.root)),
+            host_bridge_command(command, DEFAULT_HOST_BRIDGE_SOCKET, str(self.root)),
         )
 
     def test_runner_launch_preserves_job_correlation_in_host_context(self):
@@ -106,7 +109,11 @@ class TestRunManager(unittest.TestCase):
         environment = popen.call_args.kwargs["env"]
         self.assertEqual(
             launched_command,
-            host_context_command(command, str(self.manager.operations.crucible_home)),
+            host_bridge_command(
+                command,
+                DEFAULT_HOST_BRIDGE_SOCKET,
+                str(self.manager.operations.crucible_home),
+            ),
         )
         self.assertEqual(environment["CRUCIBLE_MCP_SESSION_ID"], "mcp-session-1")
         self.assertEqual(
@@ -114,7 +121,10 @@ class TestRunManager(unittest.TestCase):
             str(job_directory / "events.jsonl"),
         )
         self.assertNotIn("CONTAINER_HOST", environment)
-        self.assertNotIn("PYTHONPATH", environment)
+        self.assertEqual(
+            environment["PYTHONPATH"],
+            str(self.manager.operations.crucible_home / "mcp"),
+        )
         self.assertNotIn("SESSION_ID", environment)
         popen.call_args.kwargs["stdout"].close()
 
@@ -155,7 +165,9 @@ class TestRunManager(unittest.TestCase):
         launched_command = run.call_args.args[0]
         self.assertEqual(
             launched_command,
-            host_context_command(launched_command[7:], "/"),
+            host_bridge_command(
+                launched_command[8:], DEFAULT_HOST_BRIDGE_SOCKET, "/"
+            ),
         )
         self.assertIn("--detach", launched_command)
         self.assertIn("--rm", launched_command)

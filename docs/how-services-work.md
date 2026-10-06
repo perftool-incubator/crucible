@@ -93,10 +93,34 @@ require remote builder hosts.
 Crucible runs its managed OpenSSH agent as the host-Podman-managed
 `crucible-ssh-agent` controller container. Its socket is stored under
 `/run/crucible/ssh-agent/agent.sock`, separate from the persistent profile
-catalog and known-hosts files. Crucible explicitly mounts the socket into the
-MCP service and trusted profile setup/run-wrapper contexts; workload commands
-do not receive the unfiltered socket. No host-side SSH package or custom
-socket environment setting is required.
+catalog and known-hosts files. Crucible mounts the socket read-only into the
+MCP service and into trusted profile setup/run-wrapper contexts; workload
+commands do not receive the unfiltered socket. No host-side SSH package or
+custom socket environment setting is required.
+The host-root `/hostfs` bind is not part of the shared container arguments. It
+is added to the controller container that executes `crucible run`, where
+Rickshaw needs access to files referenced by a host-side run file. One-shot
+host-side MCP administration helpers mount only the configured token/database
+parent; they use a host-root view only for the unusual case where such a file
+is placed directly under `/`. The network-facing MCP listener receives only
+its configured data mounts, a read-only managed SSH-agent socket, and a
+read-only mount of the local archive root and
+`/var/lib/crucible/ssh-identities/import` for its key-import tool. Archive and
+unarchive mutations go through the host bridge. The profile catalog storage
+holds the agent lifecycle lock, so the agent socket directory stays read-only
+to the listener. It does not receive `/root` or `/home`, the host PID
+namespace, or privileged container mode.
+
+Host namespace operations are performed by a separate local-only
+`crucible-mcp-host-bridge` controller container. It has a private Unix socket
+and an allowlist limited to MCP supervisor lifecycle commands and the existing
+`crucible start opensearch` path. The bridge is not exposed on the network; the
+listener's socket mount is read-only, so it can request approved operations
+without replacing the bridge endpoint. Only this helper receives the
+privileges needed to enter host namespaces. Stop and restart `mcp-server`
+after upgrading so an already-running listener is recreated with the isolated
+profile; Crucible rejects an older listener profile rather than silently
+claiming it has the new boundary.
 
 Start and stop the service with `crucible start ssh-agent` and
 `crucible stop ssh-agent`. MCP startup ensures the agent is running first, and
@@ -229,18 +253,19 @@ The MCP process stores job state in SQLite, while each active job runs under a
 detached, host-Podman-managed supervisor container. This lets the job continue
 if the MCP service process restarts; on startup MCP reattaches to the
 supervisor or reconciles the durable outcome written in the job directory.
-The supervisor uses the configured controller image and mounts the job's
-supervision directory and Crucible checkout. It invokes the Crucible CLI in
-the host mount, network, and cgroup namespaces with the host root. This
+The host bridge starts and observes these supervisors through the host Podman
+engine. Each supervisor uses the configured controller image and mounts only
+the job's supervision directory and Crucible checkout. It invokes the Crucible
+CLI in the host mount, network, and cgroup namespaces with the host root. This
 includes `crucible run`, local post-processing and indexing, archive and
 unarchive, and indexed-result deletion. The CLI therefore sees the same
 Crucible checkout, configuration, filesystem, and Podman store as a host CLI
 invocation; the job supervisor does not create a nested Podman store.
 Dependencies are started by that host-side CLI process and use the normal
 readiness checks. Host service containers remain running after a job completes
-and can be stopped through normal host service management. Running MCP
-requires the privilege to enter the host namespaces used for these CLI jobs
-and to start the supervisor through the host Podman engine.
+and can be stopped through normal host service management. Only the separate
+host bridge and per-job supervisor containers require host namespace access;
+the MCP listener itself does not.
 
 #### MCP tools
 
@@ -253,7 +278,7 @@ through the standard `tools/list` request; the current interface is:
 | --- | --- |
 | `crucible_info` | Report the MCP contract version and supported capabilities. |
 | `list_ssh_identity_profiles` | List SSH profile names, versions, and availability without exposing fingerprints, private keys, agent details, or socket paths. |
-| `import_ssh_identity_profile` | Load a key already on the Crucible host from an absolute host-side file path into the managed agent and bind it to a profile; key bytes and passphrases are never tool arguments. Encrypted keys require the interactive CLI import. |
+| `import_ssh_identity_profile` | Load a key from `/var/lib/crucible/ssh-identities/import` into the managed agent and bind it to a profile; key bytes and passphrases are never tool arguments. Other host paths are rejected; encrypted keys require the interactive CLI import. |
 | `list_tools` | List installed Crucible tools and their credential-redacted metadata. |
 | `list_endpoints` | List installed endpoint types, schemas, and coarse capabilities; credential-like schema descriptions are redacted. It does not discover configured or reachable targets; callers supply target-specific endpoint configuration. |
 | `list_active_runs` | List active MCP jobs, including runs and maintenance operations, with cursor pagination; credential-like text in job metadata and errors is redacted. |

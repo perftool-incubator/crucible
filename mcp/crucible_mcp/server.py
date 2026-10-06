@@ -30,13 +30,18 @@ from .operations import (
     MAX_MCP_RESPONSE_BYTES,
     MAX_PLAN_RESPONSE_BYTES,
 )
-from .host import host_context_command, host_context_environment
+from .host import (
+    DEFAULT_HOST_BRIDGE_SOCKET,
+    host_bridge_command,
+    host_bridge_environment,
+)
 from .policy import InputPolicy, PolicyError, read_token, token_matches
 from .runner import MAX_IDEMPOTENCY_KEY_LENGTH, RunManager
 from .audit import AuditLogger
 from ssh_identity_profiles import (
     DEFAULT_AGENT_SOCKET,
     DEFAULT_CATALOG,
+    DEFAULT_IMPORT_ROOT,
     SSHIdentityError,
     SSHIdentityProfiles,
 )
@@ -107,11 +112,12 @@ TOOL_DEFINITIONS = (
     {
         "name": "import_ssh_identity_profile",
         "description": (
-            "Load a private key from an absolute path on the Crucible host into "
-            "the managed SSH agent and bind it to a profile. The MCP service "
-            "reads the host-side file; key bytes and passphrases are never sent "
-            "as tool arguments. This operation is non-interactive; use the CLI "
-            "from a terminal for passphrase-protected keys."
+            "Load a private key from the Crucible host's configured SSH identity "
+            "import directory into the managed SSH agent and bind it to a profile. "
+            "The key_file must be an absolute path beneath "
+            "/var/lib/crucible/ssh-identities/import; key bytes and passphrases "
+            "are never sent as tool arguments. This operation is non-interactive; "
+            "use the CLI from a terminal for passphrase-protected keys."
         ),
         "inputSchema": {
             "type": "object",
@@ -127,6 +133,10 @@ TOOL_DEFINITIONS = (
                     "minLength": 2,
                     "maxLength": 4096,
                     "pattern": "^/",
+                    "description": (
+                        "Absolute Crucible-host path beneath "
+                        "/var/lib/crucible/ssh-identities/import."
+                    ),
                 },
             },
             "required": ["name", "key_file"],
@@ -529,19 +539,26 @@ TOOL_DEFINITIONS = (
 _TOOL_SCHEMAS = {tool["name"]: tool["inputSchema"] for tool in TOOL_DEFINITIONS}
 
 
-def _host_key_file_path(value: str, host_root: Path = Path("/hostfs")) -> Path:
-    """Resolve an absolute host key path through the controller's host-root mount."""
+def _host_key_file_path(
+    value: str, import_root: Path = DEFAULT_IMPORT_ROOT
+) -> Path:
+    """Resolve a key file only when it remains inside the dedicated import root."""
 
     if not isinstance(value, str) or not value.startswith("/") or "\x00" in value:
-        raise SSHIdentityError("key_file must be an absolute path on the Crucible host")
+        raise SSHIdentityError(
+            "key_file must be an absolute path in the SSH identity import directory"
+        )
     try:
-        host_root = host_root.resolve(strict=True)
-        candidate = host_root / value.lstrip("/")
-        resolved = candidate.resolve(strict=True)
-        resolved.relative_to(host_root)
+        import_root = import_root.resolve(strict=True)
+        resolved = Path(value).resolve(strict=True)
+        if resolved == import_root:
+            raise ValueError("the import directory itself is not a key file")
+        resolved.relative_to(import_root)
         file_stat = resolved.stat()
     except (OSError, ValueError) as exc:
-        raise SSHIdentityError("the selected host key file is unavailable") from exc
+        raise SSHIdentityError(
+            "the selected key must be an available file beneath the SSH identity import directory"
+        ) from exc
     if not resolved.is_file():
         raise SSHIdentityError("the selected host key file is not a regular file")
     if file_stat.st_size > 1024 * 1024:
@@ -983,7 +1000,14 @@ class MCPHandler(BaseHTTPRequestHandler):
                 }
             elif name == "import_ssh_identity_profile":
                 try:
-                    key_path = _host_key_file_path(arguments["key_file"])
+                    key_path = _host_key_file_path(
+                        arguments["key_file"],
+                        getattr(
+                            self.server,
+                            "ssh_profile_import_root",
+                            DEFAULT_IMPORT_ROOT,
+                        ),
+                    )
                     value = self.server.ssh_identity_profiles.import_key(
                         arguments["name"], key_path, interactive=False
                     )
@@ -1325,7 +1349,11 @@ class MCPHandler(BaseHTTPRequestHandler):
         return
 
 
-def _ensure_indexing_services(crucible_home: Path, operations: CrucibleOperations) -> None:
+def _ensure_indexing_services(
+    crucible_home: Path,
+    operations: CrucibleOperations,
+    host_bridge_socket: Path = DEFAULT_HOST_BRIDGE_SOCKET,
+) -> None:
     """Use the host's service manager to ensure OpenSearch and CDM are ready."""
 
     home = Path(crucible_home).resolve()
@@ -1334,13 +1362,15 @@ def _ensure_indexing_services(crucible_home: Path, operations: CrucibleOperation
             # The service-manager invocation is a nested CLI session, not part
             # of an MCP job's logger session or lifecycle event stream.
             result = subprocess.run(
-                host_context_command(
-                    [str(home / "bin" / "crucible"), "start", "opensearch"]
+                host_bridge_command(
+                    [str(home / "bin" / "crucible"), "start", "opensearch"],
+                    host_bridge_socket,
+                    str(home),
                 ),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                env=host_context_environment(os.environ),
+                env=host_bridge_environment({}, home),
                 timeout=_RESULT_SERVICE_START_TIMEOUT,
                 check=False,
             )
@@ -1401,7 +1431,11 @@ def main() -> None:
     parser.add_argument("--audit-max-bytes", type=int, default=10 * 1024 * 1024)
     parser.add_argument("--audit-retained-files", type=int, default=5)
     parser.add_argument("--ssh-profile-catalog", type=Path, default=DEFAULT_CATALOG)
+    parser.add_argument("--ssh-profile-import-root", type=Path, default=DEFAULT_IMPORT_ROOT)
     parser.add_argument("--ssh-agent-socket", default=DEFAULT_AGENT_SOCKET)
+    parser.add_argument(
+        "--host-bridge-socket", type=Path, default=DEFAULT_HOST_BRIDGE_SOCKET
+    )
     args = parser.parse_args()
 
     if (args.tls_cert is None) != (args.tls_key is None):
@@ -1432,6 +1466,7 @@ def main() -> None:
         args.ssh_profile_catalog,
         args.ssh_agent_socket,
     )
+    server.ssh_profile_import_root = args.ssh_profile_import_root
     server.operations = CrucibleOperations(
         args.crucible_home,
         InputPolicy([args.input_root], args.max_run_file_bytes),
@@ -1440,7 +1475,9 @@ def main() -> None:
         log_db=args.log_db,
     )
     server.operations.set_result_services_ensurer(
-        lambda: _ensure_indexing_services(args.crucible_home, server.operations)
+        lambda: _ensure_indexing_services(
+            args.crucible_home, server.operations, args.host_bridge_socket
+        )
     )
     server.operations.run_policy = InputPolicy(
         [args.run_root, args.database.parent / "runs"]
@@ -1455,6 +1492,7 @@ def main() -> None:
         host_execution=True,
         supervisor_image=args.controller_image,
         ssh_identity_profiles=server.ssh_identity_profiles,
+        host_bridge_socket=args.host_bridge_socket,
     )
     server.audit = AuditLogger(args.audit_log, args.audit_max_bytes, args.audit_retained_files)
     server.run_manager.reconcile()

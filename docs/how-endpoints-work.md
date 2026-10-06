@@ -67,20 +67,34 @@ sudo crucible ssh profiles import lab-admin /path/to/id_ed25519
 sudo crucible ssh profiles list
 ```
 
-An MCP client can also import a key that is already present on the Crucible
-host by calling `import_ssh_identity_profile` with the profile name and the
-key's absolute host-side path. For example, use `/home/alice/.ssh/id_ed25519`
-as `key_file`; do not send the key contents or passphrase in an MCP request.
-The MCP service reads the referenced host file and loads it into the same
-managed agent. This import path is non-interactive. If the key requires a
-passphrase, use the CLI command above from a terminal, which can securely
-prompt for it. The path refers to the Crucible server, not the MCP client's
-filesystem, so the key must already be available there.
+The CLI accepts an ordinary host file path. It stages a short-lived, mode-0600
+copy under `/run/crucible` for the helper container, mounts only that temporary
+key directory read-only, and removes the copy after the import attempt.
 
-The import command reads the key file directly, prompts for its passphrase when
-needed, and loads the identity into Crucible's managed agent. Private-key bytes
-are not copied into the profile catalog or sent through MCP. The loaded key
-remains in agent memory until explicitly cleared with
+An MCP client can import a key by calling `import_ssh_identity_profile` with
+the profile name and an absolute `key_file` path beneath
+`/var/lib/crucible/ssh-identities/import`. For example, place a key in that
+directory on the Crucible host, then pass the corresponding host path. The
+service mounts this dedicated directory read-only; paths elsewhere on the host
+are rejected. Do not send key contents or passphrases in an MCP request. This
+import path is non-interactive. If the key requires a passphrase, use the CLI
+command above from a terminal, which can securely prompt for it. The path
+refers to the Crucible server, not the MCP client's filesystem. All clients
+authorized by the shared MCP bearer token can import keys from this directory;
+the current design does not assign different key permissions per client.
+
+Prepare the directory and copy a key into it on the Crucible host, for example:
+
+```bash
+sudo install -d -m 700 /var/lib/crucible/ssh-identities/import
+sudo install -m 600 "$HOME/.ssh/id_ed25519" \
+  /var/lib/crucible/ssh-identities/import/lab-admin
+```
+
+The CLI import prompts for a passphrase when needed and loads the identity into
+Crucible's managed agent. Its temporary `/run` copy is removed after the import
+attempt; private-key bytes are not stored in the profile catalog or sent
+through MCP. The loaded key remains in agent memory until explicitly cleared with
 `sudo crucible ssh agent clear` or the agent service is stopped; stopping or
 restarting the agent loses all loaded identities, so import them again after
 that. `sudo crucible start ssh-agent` and `sudo crucible stop ssh-agent` manage

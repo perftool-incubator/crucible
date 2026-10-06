@@ -35,6 +35,7 @@ from typing import Any
 
 DEFAULT_CATALOG = Path("/var/lib/crucible/ssh-identities/profiles.json")
 DEFAULT_KNOWN_HOSTS = Path("/var/lib/crucible/ssh-identities/known_hosts")
+DEFAULT_IMPORT_ROOT = Path("/var/lib/crucible/ssh-identities/import")
 DEFAULT_AGENT_SOCKET = "/run/crucible/ssh-agent/agent.sock"
 PROFILE_SOCKET_ROOT = Path("/run/crucible/ssh-profile-agents")
 PROFILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -219,13 +220,12 @@ class SSHIdentityProfiles:
 
         if not self.agent_socket:
             raise SSHIdentityError("Crucible's managed SSH agent is unavailable")
-        socket_path = Path(self.agent_socket)
-        lock_path = socket_path.with_name(socket_path.name + ".lifecycle.lock")
+        lock_path = self.catalog_path.with_name("agent.lifecycle.lock")
         flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
         lock_fd = -1
         try:
-            socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            os.chmod(socket_path.parent, 0o700)
+            lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(lock_path.parent, 0o700)
             lock_fd = os.open(lock_path, flags, 0o600)
             os.fchmod(lock_fd, 0o600)
             if not stat.S_ISREG(os.fstat(lock_fd).st_mode):

@@ -227,6 +227,18 @@ class TestSSHIdentityProfiles(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ["ssh-add", "-D"])
         self.assertEqual(run.call_args.kwargs["env"]["SSH_AUTH_SOCK"], self.manager.agent_socket)
 
+    def test_agent_lifecycle_lock_uses_catalog_storage_not_socket_directory(self):
+        socket_directory = Path(self.directory.name) / "read-only-agent"
+        manager = SSHIdentityProfiles(
+            self.catalog, str(socket_directory / "agent.sock")
+        )
+
+        with manager._agent_lifecycle_lock():
+            pass
+
+        self.assertFalse(socket_directory.exists())
+        self.assertTrue((self.catalog.parent / "agent.lifecycle.lock").is_file())
+
     def test_agent_clear_waits_for_import_catalog_commit(self):
         private_key = Path(self.directory.name) / "id_test"
         private_key.write_text("fixture", encoding="utf-8")
@@ -376,6 +388,84 @@ result=$?
             capture_output=True,
             check=False,
         )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_cli_key_import_mounts_only_a_temporary_readonly_key_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source_key = Path(temporary) / "source-key"
+            source_key.write_text("private-key-material", encoding="utf-8")
+            script = r'''
+source <(awk '
+    /^function run_ssh_identity_command\(\)/ { capture=1 }
+    capture { print }
+    capture && /^}/ { exit }
+' "$ROOT/bin/crucible")
+CRUCIBLE_MCP_LIFECYCLE_LOCK_FD=
+LOCK_RELEASES=0
+mcp_lifecycle_lock_acquire() { CRUCIBLE_MCP_LIFECYCLE_LOCK_FD=9; }
+mcp_lifecycle_lock_release() {
+    unset CRUCIBLE_MCP_LIFECYCLE_LOCK_FD
+    LOCK_RELEASES=$((LOCK_RELEASES + 1))
+}
+crucible_ssh_agent_socket() { printf '%s/run/crucible/ssh-agent/agent.sock' "$TEST_ROOT"; }
+start_ssh_agent() { mkdir -p "${TEST_ROOT}/run/crucible/ssh-agent"; }
+stat() {
+    if [ "${1:-}" = "-c" ] && [ "${2:-}" = "%u" ]; then
+        printf '0\n'
+    else
+        command stat "$@"
+    fi
+}
+fake_podman_run() {
+    IMPORT_MOUNT=
+    for argument in "$@"; do
+        case "$argument" in
+            --mount=type=bind,source=*/ssh-key-import.*,destination=*/ssh-key-import.*,readonly)
+                IMPORT_MOUNT="$argument"
+                ;;
+        esac
+    done
+    if [ -z "$IMPORT_MOUNT" ]; then return 31; fi
+    if [[ " $* " == *hostfs* ]]; then return 32; fi
+    IMPORT_SOURCE=${IMPORT_MOUNT#*source=}
+    IMPORT_SOURCE=${IMPORT_SOURCE%%,destination=*}
+    LAST_ARGUMENT=${@: -1}
+    [ "$LAST_ARGUMENT" = "${IMPORT_SOURCE}/key" ] || return 33
+    [ -f "$LAST_ARGUMENT" ] || return 34
+    [ "$(stat -c '%a' "$LAST_ARGUMENT")" = "600" ] || return 35
+    [ "$(cat "$LAST_ARGUMENT")" = "private-key-material" ] || return 36
+    return 0
+}
+podman_run=fake_podman_run
+podman_run_interactive=fake_podman_run
+ssh_identity_interactive=1
+ssh_identity_args=(python3 ssh_identity_profiles.py)
+ssh_identity_cli_args=(profiles import lab-admin)
+ssh_identity_import_source="$SOURCE_KEY"
+ssh_identity_import_profile=lab-admin
+container_common_args=()
+container_non_service_args=()
+CRUCIBLE_CONTROLLER_IMAGE=test-controller
+SESSION_ID=test-session
+run_ssh_identity_command profiles import || exit 10
+[ "$LOCK_RELEASES" -eq 1 ] || exit 11
+[ -z "$(find "${TEST_ROOT}/run/crucible" -maxdepth 1 -type d -name 'ssh-key-import.*' -print -quit)" ] || exit 12
+'''
+            repository = Path(__file__).resolve().parents[2]
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=repository,
+                env={
+                    **os.environ,
+                    "ROOT": str(repository),
+                    "TEST_ROOT": temporary,
+                    "SOURCE_KEY": str(source_key),
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
