@@ -258,6 +258,41 @@ configuration:
 }
 ```
 
+#### Remotehosts profiler placement
+
+Remotehosts also supports a `profiler` engine assignment. Unlike `client`
+and `server`, it has no user-supplied `ids`; Rickshaw generates profiler
+engine IDs for the tools selected on that remote. Rickshaw automatically
+provisions selected profiler engines on remotes with benchmark engines, so
+those remotes do not need an explicit profiler assignment. Add a remote with
+only a profiler assignment to collect data from a host that is part of the
+test but does not run benchmark engines:
+
+```json
+{
+    "engines": [
+        { "role": "profiler" }
+    ],
+    "config": {
+        "host": "storage.example.com"
+    }
+}
+```
+
+Add this remote object alongside the client/server remotes. For example, a
+benchmark can run its client and server engines on node A while adding a
+profiler-only remote for an NFS or SMB storage server on node B, a KVM host,
+or a load balancer. Tools then collect data on each remote where they are
+selected for deployment. Node B adds another collection target; it does not
+replace profiler engines automatically provisioned on eligible remotes such
+as node A.
+
+Tool placement can be controlled independently on each remote. The
+`disable-tools` setting skips all tool engines on that remote;
+`tool-opt-in-tags` and `tool-opt-out-tags` select individual opt-in and
+opt-out tools. These controls are optional and do not need to be paired with
+a profiler-only remote.
+
 ### Kubernetes endpoint
 
 ```json
@@ -319,7 +354,9 @@ top-level `settings` object.
 | `host-mounts` | Endpoint-specific mounts; see [Host-mount settings](#host-mount-settings) | Varies by endpoint |
 | `ssh-identity-profile` | Crucible-managed controller-to-management SSH identity profile | Ambient authentication |
 | `controller-ip-address` | IP for engines to reach the controller | Auto-detected |
-| `disable-tools` | Skip tool collection on this endpoint | `false` |
+| `disable-tools` | Disable tools on this remote; endpoint value is the default for remotes | `false` |
+| `tool-opt-in-tags` | Tags that enable opt-in tools on this remote host | `[]` |
+| `tool-opt-out-tags` | Tags that disable opt-out tools on this remote host | `[]` |
 
 ### Settings hierarchy
 

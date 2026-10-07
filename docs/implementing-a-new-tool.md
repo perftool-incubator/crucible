@@ -141,17 +141,18 @@ Collector types represent the roles a collection node can play:
 
 | Collector type | Endpoint | Description |
 |----------------|----------|-------------|
-| `profiler` | remotehosts, kube | Dedicated profiling node |
+| `profiler` | remotehosts, kube | Tool engine role; remotehosts generates IDs at runtime |
 | `compute` | osp | OpenStack compute node |
 | `master` | kube | Kubernetes master node |
 | `worker` | kube | Kubernetes worker node |
 | `client` | remotehosts, kube | Benchmark client engine (typically blocked for tools) |
 | `server` | remotehosts, kube | Benchmark server engine (typically blocked for tools) |
 
-Most tools block `client` and `server` because tool data collection
-should happen on the host/node level, not inside individual benchmark
-engine containers. The `profiler` type is the most common target for
-tools.
+Most tools target `profiler` to collect host/node-level data rather than
+running inside individual benchmark engine containers. For remotehosts,
+the profiler role can be assigned to a remote without client/server engines;
+Rickshaw generates the profiler IDs and runs the selected tool engines there.
+The role does not itself imply a separate physical host or resource isolation.
 
 ### Minimal example
 

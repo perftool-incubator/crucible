@@ -233,36 +233,55 @@ run).
 
 | Type | Endpoint | Description |
 |------|----------|-------------|
-| `profiler` | remotehosts, kube | Dedicated profiling node |
+| `profiler` | remotehosts, kube | Tool engine role; remotehosts generates IDs at runtime |
 | `compute` | osp | OpenStack compute node |
 | `worker` | kube | Kubernetes worker node |
 | `master` | kube | Kubernetes master node |
 | `client` | remotehosts, kube, osp | Benchmark client engine |
 | `server` | remotehosts, kube, osp | Benchmark server engine |
 
-### Why tools run on profiler nodes
+### Remotehosts profiler placement
 
 Most tools block `client` and `server` collector types and
 whitelist only `profiler` (and sometimes `compute` for OpenStack).
-This is by design:
+For remotehosts, Rickshaw creates profiler engines for each selected tool
+on each remote where tool collection is enabled and the tool's deployment
+policy permits it. A remote can declare `{"role": "profiler"}` without
+IDs as its only engine assignment. Rickshaw generates the IDs and places
+the profiler engines on that host, even when no client or server engine runs
+there. If a remote has client or server engines but no explicit profiler
+assignment, its automatically provisioned profiler engines are attached to
+that remote's engine configuration.
 
-- **Resource isolation**: Tool data collection on benchmark engine
-  nodes would compete for CPU, memory, and I/O with the workload
-  under test, distorting both the benchmark results and the tool
-  measurements.
-- **System-level perspective**: Tools like sysstat and procstat
-  measure host-level metrics (CPU utilization across all cores,
-  system-wide interrupt rates). Running them on a dedicated
-  profiler node gives an undistorted view of the system under test.
-- **Separation of concerns**: The profiler node observes the
-  system; the client and server nodes run the workload.
+This lets the run include collection on systems that participate in the
+test but do not host benchmark engines. For example, benchmark engines on
+node A might use storage mounted over NFS or SMB from node B; assigning a
+profiler role to node B collects that node's metrics. The same pattern can
+cover a KVM host running benchmark guests or a load balancer in the test
+path. Profiler tools run on and observe the host where their engines are
+provisioned; the role does not make one host observe another host remotely.
+
+The profiler role describes engine placement, not physical isolation. When
+profiler and benchmark engines share a physical host, their processes share
+that host's CPU, memory, and I/O resources. Placing profiler engines on a
+different remote keeps those collection processes off the benchmark host and
+collects metrics from the remote where they run. Adding that remote does not
+disable profiler engines on the benchmark host; suppress collection there
+separately if desired.
+
+Tool selection is independent of the profiler role. A remote's
+`disable-tools` setting disables all tool engines there. Tools using
+`opt-in` deployment require their `opt-tag` in that remote's
+`tool-opt-in-tags`; tools using `opt-out` deployment are skipped when their
+tag appears in `tool-opt-out-tags`. Other remotes retain their own placement
+and tool selection.
 
 ### Multi-instance tools
 
 A tool can be deployed multiple times with different parameters.
 Each instance gets a unique tool ID and runs as a separate
-collector. For example, you might run sysstat with a 1-second
-interval on one profiler and a 10-second interval on another.
+collector. On remotehosts, a selected tool can have a profiler engine on
+each eligible remote, with separate engine IDs and output for each host.
 
 ## Data flow and directory structure
 
