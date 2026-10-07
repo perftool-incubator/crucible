@@ -146,7 +146,7 @@ Follow existing code style conventions exactly — check surrounding code for pa
 
 ## Language Strategy
 - **New code**: Write new functionality in Python 3 by default
-- **Host-side exception**: Code in the crucible repo that runs outside the controller container (e.g., `bin/` scripts) should be Bash to minimize host OS dependencies
+- **Host-side exception**: Code in the crucible repo that runs outside the controller container (e.g., `bin/` scripts) should be Bash to minimize host OS dependencies. Python helpers and protocol implementations should run inside the controller container.
 - **Existing languages**: When extending an existing file, use that file's language. When adding new functionality to a subproject, prefer Python
 
 ## Configuration

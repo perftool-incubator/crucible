@@ -17,13 +17,13 @@ releases. It clones the crucible repository, installs all
 subprojects, pulls the controller container image, and
 configures the registry settings.
 
-The host system has minimal requirements — only podman, git,
-and jq are needed. All other software dependencies are
-satisfied by the controller container image.
+The host system has minimal requirements — podman, git, and jq.
+Python and other application dependencies are satisfied by the
+controller container image.
 
 ## Prerequisites
 
-The installer requires three tools on the host:
+The installer requires these tools on the host:
 
 - **podman** — container runtime for running all crucible
   operations

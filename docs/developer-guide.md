@@ -12,14 +12,14 @@ the subsystem guides it references.
 
 ### Prerequisites
 
-The host needs only three tools:
+The host needs only these tools:
 
 - **podman** — container runtime
 - **git** — for cloning and updating repositories
 - **jq** — for JSON manipulation
 
-All other dependencies (Python packages, Perl modules, build
-tools) live inside the controller container image.
+Python packages, Perl modules, and other application dependencies live inside
+the controller container image.
 
 ### Installing for development
 

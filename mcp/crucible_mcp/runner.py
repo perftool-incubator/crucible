@@ -12,7 +12,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
-from .host import host_context_command, host_context_environment
+from .host import (
+    DEFAULT_HOST_BRIDGE_SOCKET,
+    host_bridge_command,
+    host_bridge_environment,
+)
 from .jobs import JobConflictError, JobStore, request_hash
 from .models import Job, JobState, ResultStatus
 from .operations import (
@@ -22,6 +26,7 @@ from .operations import (
     OperationError,
 )
 from .policy import PolicyError
+from ssh_identity_profiles import SSHIdentityError, SSHIdentityProfiles, run_profile_names
 
 
 _MAINTENANCE_OPERATIONS = frozenset(
@@ -35,6 +40,8 @@ _MAINTENANCE_OPERATIONS = frozenset(
 )
 MAX_LOG_REDACTION_CONTEXT_BYTES = 1_048_576
 MAX_IDEMPOTENCY_KEY_LENGTH = 256
+SUPERVISOR_INSPECTION_ATTEMPTS = 3
+SUPERVISOR_INSPECTION_RETRY_DELAY = 0.1
 _LOG_EMPTY_RECORDS = re.compile(rb"[\r\n]+")
 
 
@@ -48,6 +55,10 @@ def _plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
         "runtime": plan.get("runtime", {}),
         "limits": plan.get("limits", {}),
     }
+
+
+class SupervisorInspectionError(RuntimeError):
+    """Podman could not reliably report a supervisor's state."""
 
 
 class RunManager:
@@ -68,6 +79,9 @@ class RunManager:
         max_inline_bytes: int = 1_048_576,
         cdm_readiness_timeout: int = 60,
         host_execution: bool = True,
+        supervisor_image: str | None = None,
+        ssh_identity_profiles: SSHIdentityProfiles | None = None,
+        host_bridge_socket: Path = DEFAULT_HOST_BRIDGE_SOCKET,
     ):
         self.store = store
         self.operations = operations
@@ -76,6 +90,9 @@ class RunManager:
         self.max_inline_bytes = max_inline_bytes
         self.cdm_readiness_timeout = cdm_readiness_timeout
         self.host_execution = host_execution
+        self.supervisor_image = supervisor_image
+        self.host_bridge_socket = Path(host_bridge_socket)
+        self.ssh_identity_profiles = ssh_identity_profiles
         self.run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._threads: dict[str, threading.Thread] = {}
 
@@ -117,7 +134,31 @@ class RunManager:
         if plan_digest is not None and (not isinstance(plan_digest, str) or not plan_digest):
             raise OperationError("user", "plan_digest is required", "invalid_plan")
 
+        profile_pins: dict[str, dict[str, Any]] = {}
+        requested_profiles = run_profile_names(canonical_document)
+        if requested_profiles and self.ssh_identity_profiles is None:
+            raise OperationError(
+                "user",
+                "SSH identity profiles are unavailable in this Crucible service",
+                "ssh_identity_unavailable",
+            )
+        if self.ssh_identity_profiles is not None:
+            try:
+                profile_pins = self.ssh_identity_profiles.snapshot(canonical_document)
+            except SSHIdentityError as exc:
+                raise OperationError("user", str(exc), "ssh_identity_unavailable") from exc
+
         request = {"run_document": canonical_document}
+        if profile_pins:
+            # Keep idempotency for pre-profile submissions stable, while
+            # making explicit identity-version changes a distinct request.
+            request["ssh_identity_profiles"] = {
+                name: {
+                    "version": pin["version"],
+                    "fingerprint": pin["fingerprint"],
+                }
+                for name, pin in profile_pins.items()
+            }
         if plan_digest is not None:
             request["plan_digest"] = plan_digest
         existing = self.store.get_by_idempotency_key(idempotency_key)
@@ -127,6 +168,12 @@ class RunManager:
                     "idempotency key was already used for a different request"
                 )
             return existing, False
+
+        if self.ssh_identity_profiles is not None:
+            try:
+                self.ssh_identity_profiles.validate_available(profile_pins)
+            except SSHIdentityError as exc:
+                raise OperationError("user", str(exc), "ssh_identity_unavailable") from exc
 
         if plan_digest is not None:
             if verified_plan is None:
@@ -162,6 +209,13 @@ class RunManager:
                 json.dumps(canonical_document, indent=2) + "\n", encoding="utf-8"
             )
             os.chmod(run_file, 0o600)
+            if profile_pins:
+                profile_lock_path = job_directory / "ssh-identities.lock.json"
+                profile_lock_path.write_text(
+                    json.dumps({"profiles": profile_pins}, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                os.chmod(profile_lock_path, 0o600)
         except OSError as exc:
             failed = self.store.transition(
                 job.mcp_job_id,
@@ -187,6 +241,59 @@ class RunManager:
 
         changed: list[Job] = []
         for job in self.store.list_active():
+            if job.supervisor_container_name:
+                try:
+                    container = self._inspect_supervisor_container(
+                        job.supervisor_container_name
+                    )
+                except SupervisorInspectionError:
+                    # An inspection failure is not evidence that the
+                    # supervisor is gone. Keep the job active and attach a
+                    # waiter that can observe its eventual durable outcome.
+                    self._reattach_supervisor(job)
+                    continue
+                if container is None:
+                    exit_code = self._read_supervisor_outcome(job)
+                    if exit_code is None:
+                        changed.append(
+                            self._fail_recovery_job(
+                                job,
+                                "host Podman supervisor was missing and had no outcome record",
+                            )
+                        )
+                    else:
+                        changed.append(
+                            self._finish_supervised_job(
+                                job.mcp_job_id,
+                                exit_code,
+                                Path(job.supervision_directory or self.run_root / job.mcp_job_id)
+                                / "events.jsonl",
+                            )
+                        )
+                    continue
+                if container["state"] in {"created", "running", "paused"}:
+                    self._reattach_supervisor(job)
+                    continue
+                if container["state"] in {"exited", "stopped"}:
+                    exit_code = self._read_supervisor_outcome(job)
+                    if exit_code is None:
+                        exit_code = container["exit_code"]
+                    changed.append(
+                        self._finish_supervised_job(
+                            job.mcp_job_id,
+                            exit_code,
+                            Path(job.supervision_directory or self.run_root / job.mcp_job_id)
+                            / "events.jsonl",
+                        )
+                    )
+                    continue
+                # Podman can report short-lived states such as configured or
+                # removing while a supervisor is being created or torn down.
+                # The waiter already treats unfamiliar states as uncertain;
+                # reconciliation must reattach rather than lose active work.
+                self._reattach_supervisor(job)
+                continue
+
             if job.state in {JobState.UNKNOWN_AFTER_CRASH, JobState.RECOVERY_REQUIRED}:
                 changed.append(self._fail_recovery_job(job, "job requires recovery after a previous restart"))
                 continue
@@ -207,7 +314,7 @@ class RunManager:
         if operation not in {"postprocess", "index"}:
             raise OperationError("user", "unsupported processing operation", "invalid_operation")
         try:
-            canonical = self.operations.run_policy.canonical_directory(run_directory)
+            canonical = self.operations.run_policy.canonical_child_directory(run_directory)
         except PolicyError as exc:
             raise OperationError("authorization", str(exc), "run_path_rejected") from exc
         request = {"operation": operation, "run_directory": str(canonical)}
@@ -396,6 +503,18 @@ class RunManager:
         return Path(supervision_directory) / "processing-complete"
 
     def _runner_identity_matches(self, job: Job) -> bool:
+        if job.supervisor_container_name:
+            container = self._inspect_supervisor_container(
+                job.supervisor_container_name
+            )
+            return bool(
+                container
+                and container["state"] in {"created", "running", "paused"}
+                and (
+                    job.supervisor_container_id is None
+                    or container["id"] == job.supervisor_container_id
+                )
+            )
         if job.runner_pid is None:
             return False
         if job.operation == "delete_indexed_result":
@@ -420,6 +539,9 @@ class RunManager:
     def _reattach(self, job: Job) -> None:
         if job.mcp_job_id in self._threads:
             return
+        if job.supervisor_container_name:
+            self._reattach_supervisor(job)
+            return
         supervision_directory = job.supervision_directory or str(self.run_root / job.mcp_job_id)
         event_path = Path(supervision_directory) / "events.jsonl"
         if event_path is None:
@@ -433,6 +555,474 @@ class RunManager:
         )
         self._threads[job.mcp_job_id] = thread
         thread.start()
+
+    def _reattach_supervisor(self, job: Job) -> None:
+        if job.mcp_job_id in self._threads:
+            return
+        supervision_directory = Path(
+            job.supervision_directory or self.run_root / job.mcp_job_id
+        )
+        thread = threading.Thread(
+            target=self._wait_for_supervisor,
+            args=(
+                job.mcp_job_id,
+                job.supervisor_container_name,
+                supervision_directory / "events.jsonl",
+            ),
+            daemon=True,
+            name=f"mcp-supervisor-{job.mcp_job_id}",
+        )
+        self._threads[job.mcp_job_id] = thread
+        thread.start()
+
+    def _supervisor_podman_command(self, arguments: Sequence[str]) -> list[str]:
+        if not self.host_execution:
+            return ["podman", *arguments]
+        return host_bridge_command(
+            ["podman", *arguments], self.host_bridge_socket
+        )
+
+    def _inspect_supervisor_container(self, name: str) -> dict[str, Any] | None:
+        last_error: Exception | None = None
+        for attempt in range(SUPERVISOR_INSPECTION_ATTEMPTS):
+            try:
+                result = subprocess.run(
+                    self._supervisor_podman_command(
+                        [
+                            "inspect",
+                            "--format",
+                            "{{.Id}}|{{.State.Status}}|{{.State.ExitCode}}|{{.State.Pid}}",
+                            name,
+                        ]
+                    ),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    env=host_bridge_environment(
+                        {}, self.operations.crucible_home
+                    ),
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                last_error = exc
+            else:
+                if result.returncode != 0:
+                    detail = result.stderr.strip() or result.stdout.strip()
+                    lowered = detail.lower()
+                    if any(
+                        marker in lowered
+                        for marker in (
+                            "no such object",
+                            "no such container",
+                            "container not found",
+                            "no container with name or id",
+                        )
+                    ):
+                        return None
+                    last_error = RuntimeError(
+                        detail or f"podman inspect exited with status {result.returncode}"
+                    )
+                else:
+                    fields = result.stdout.strip().split("|")
+                    if len(fields) == 4 and fields[0]:
+                        try:
+                            return {
+                                "id": fields[0],
+                                "state": fields[1],
+                                "exit_code": int(fields[2]),
+                                "pid": int(fields[3]),
+                            }
+                        except ValueError as exc:
+                            last_error = exc
+                    else:
+                        last_error = ValueError("podman inspect returned malformed state")
+
+            if attempt + 1 < SUPERVISOR_INSPECTION_ATTEMPTS:
+                time.sleep(SUPERVISOR_INSPECTION_RETRY_DELAY * (attempt + 1))
+
+        raise SupervisorInspectionError(
+            f"could not inspect host Podman supervisor '{name}'"
+        ) from last_error
+
+    @staticmethod
+    def _read_supervisor_outcome(job: Job) -> int | None:
+        supervision_directory = Path(
+            job.supervision_directory or Path(".") / job.mcp_job_id
+        )
+        try:
+            outcome = json.loads(
+                (supervision_directory / "supervisor-outcome.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        exit_code = outcome.get("exit_code") if isinstance(outcome, dict) else None
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            return None
+        if outcome.get("operation") != job.operation:
+            return None
+        return exit_code
+
+    def _launch_supervisor_container(
+        self,
+        job_id: str,
+        session_id: str,
+        job_directory: Path,
+        event_path: Path,
+        command: Sequence[str],
+    ) -> None:
+        if not self.supervisor_image:
+            raise RuntimeError("a controller image is required for host supervision")
+        job = self.store.get(job_id)
+        container_name = f"crucible-mcp-job-{job_id}"
+        job_directory = job_directory.resolve()
+        event_path = event_path.resolve()
+        home = self.operations.crucible_home.resolve()
+        if job.state != JobState.STARTING or job.supervisor_container_name != container_name:
+            job = self.store.transition(
+                job_id,
+                JobState.STARTING,
+                supervisor_container_name=container_name,
+                supervision_directory=str(job_directory),
+            )
+
+        podman_arguments = [
+            "run",
+            "--detach",
+            "--rm",
+            "--pull=never",
+            "--name",
+            container_name,
+            "--label",
+            f"io.crucible.mcp.job-id={job_id}",
+            "--label",
+            "io.crucible.mcp.supervisor=true",
+            "--privileged",
+            "--pid=host",
+            "--ipc=host",
+            "--net=host",
+            "--security-opt=label=disable",
+            f"--mount=type=bind,source={job_directory},destination=/job",
+            f"--mount=type=bind,source={home},destination={home}",
+            "--env",
+            f"PYTHONPATH={home / 'mcp'}",
+            "--env",
+            f"CRUCIBLE_MCP_SESSION_ID={session_id}",
+            "--env",
+            f"CRUCIBLE_MCP_EVENT_FILE={event_path}",
+            self.supervisor_image,
+            "python3",
+            "-m",
+            "crucible_mcp.supervisor",
+            "--operation",
+            job.operation,
+            "--job-directory",
+            "/job",
+            "--working-directory",
+            str(home),
+            "--",
+            *command,
+        ]
+        try:
+            result = subprocess.run(
+                self._supervisor_podman_command(podman_arguments),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=host_bridge_environment(
+                    {}, self.operations.crucible_home
+                ),
+            )
+        except subprocess.TimeoutExpired as exc:
+            self._recover_uncertain_supervisor_launch(
+                job_id,
+                container_name,
+                job_directory,
+                event_path,
+                f"podman run timed out: {exc}",
+            )
+            return
+        except OSError as exc:
+            self._fail_supervisor_launch(job_id, job_directory, str(exc))
+            return
+
+        container_id = result.stdout.strip().splitlines()
+        if result.returncode != 0 or not container_id:
+            detail = result.stderr.strip() or result.stdout.strip()
+            self._recover_uncertain_supervisor_launch(
+                job_id,
+                container_name,
+                job_directory,
+                event_path,
+                detail[-2048:] if detail else "host Podman did not confirm supervisor startup",
+            )
+            return
+
+        try:
+            info = self._inspect_supervisor_container(container_name)
+        except SupervisorInspectionError:
+            # Podman already returned a container ID; inspection is only
+            # needed to persist its PID, so a transient read failure must not
+            # turn a successfully launched supervisor into a failed job.
+            info = None
+        updates: dict[str, Any] = {
+            "supervisor_container_id": container_id[-1],
+        }
+        if info is not None and info["pid"] > 0:
+            updates["runner_pid"] = info["pid"]
+        self.store.transition(job_id, JobState.STARTING, **updates)
+        self._reattach_supervisor(self.store.get(job_id))
+
+    def _recover_uncertain_supervisor_launch(
+        self,
+        job_id: str,
+        container_name: str,
+        job_directory: Path,
+        event_path: Path,
+        launch_error: str,
+    ) -> None:
+        """Resolve a run result that timed out after Podman may have created it."""
+
+        try:
+            container = self._inspect_supervisor_container(container_name)
+        except SupervisorInspectionError:
+            container = None
+            inspection_uncertain = True
+        else:
+            inspection_uncertain = False
+
+        if container is None and not inspection_uncertain:
+            exit_code = self._read_supervisor_outcome(self.store.get(job_id))
+            if exit_code is not None:
+                self._finish_supervised_job(job_id, exit_code, event_path)
+                return
+            self._fail_supervisor_launch(job_id, job_directory, launch_error)
+            return
+
+        if container is not None:
+            updates: dict[str, Any] = {"supervisor_container_id": container["id"]}
+            if container["pid"] > 0:
+                updates["runner_pid"] = container["pid"]
+            self.store.transition(job_id, JobState.STARTING, **updates)
+            if container["state"] in {"exited", "stopped"}:
+                exit_code = self._read_supervisor_outcome(self.store.get(job_id))
+                if exit_code is None:
+                    exit_code = container["exit_code"]
+                self._finish_supervised_job(job_id, exit_code, event_path)
+                return
+
+        # A found container or an inconclusive inspection means work may be
+        # running. Reattach by its durable name instead of terminally failing
+        # the job while a detached supervisor is still executing.
+        try:
+            with (job_directory / "runner.log").open("ab") as log:
+                log.write(
+                    f"supervisor launch result was uncertain: {launch_error}\n".encode(
+                        "utf-8", errors="replace"
+                    )
+                )
+        except OSError:
+            pass
+        self._reattach_supervisor(self.store.get(job_id))
+
+    def _fail_supervisor_launch(
+        self, job_id: str, job_directory: Path, message: str
+    ) -> None:
+        try:
+            with (job_directory / "runner.log").open("ab") as log:
+                log.write(f"host Podman supervisor launch failed: {message}\n".encode("utf-8"))
+        except OSError:
+            pass
+        current = self.store.get(job_id)
+        if current.state not in {JobState.COMPLETED, JobState.FAILED}:
+            self.store.transition(
+                job_id,
+                JobState.FAILED,
+                result_status=ResultStatus.UNAVAILABLE.value,
+                error_category="infrastructure",
+                error_message="host Podman could not start the job supervisor",
+                exit_code=127,
+            )
+
+    def _wait_for_supervisor(
+        self, job_id: str, container_name: str | None, event_path: Path
+    ) -> None:
+        if not container_name:
+            return
+        current = self.store.get(job_id)
+        lifecycle_state = {
+            "postprocess": JobState.POSTPROCESSING,
+            "index": JobState.INDEXING,
+        }.get(current.operation, JobState.RUNNING)
+        if current.state == JobState.STARTING:
+            self.store.transition(job_id, lifecycle_state)
+
+        event_position = 0
+        try:
+            while True:
+                try:
+                    process = subprocess.Popen(
+                        self._supervisor_podman_command(["wait", container_name]),
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=host_bridge_environment(
+                            {}, self.operations.crucible_home
+                        ),
+                    )
+                except OSError:
+                    process = None
+
+                exit_code = None
+                if process is None:
+                    exit_code = self._read_supervisor_outcome(self.store.get(job_id))
+                else:
+                    while process.poll() is None:
+                        event_position = self._consume_events(
+                            job_id, event_path, event_position
+                        )
+                        time.sleep(0.1)
+                    stdout, _stderr = process.communicate()
+                    event_position = self._consume_events(
+                        job_id, event_path, event_position
+                    )
+                    # A nonzero podman-wait status describes the wait request,
+                    # not the supervised command. Only trust its output when
+                    # the wait itself succeeded. The durable child outcome is
+                    # authoritative because SystemExit wraps negative signal
+                    # statuses into the container's 0-255 exit-code range.
+                    exit_code = self._read_supervisor_outcome(
+                        self.store.get(job_id)
+                    )
+                    if exit_code is None and process.returncode == 0:
+                        try:
+                            exit_code = int(stdout.strip().splitlines()[-1])
+                        except (ValueError, IndexError):
+                            pass
+                    if exit_code is None:
+                        exit_code = self._read_supervisor_outcome(
+                            self.store.get(job_id)
+                        )
+
+                container = None
+                inspection_uncertain = False
+                if exit_code is None:
+                    try:
+                        container = self._inspect_supervisor_container(container_name)
+                    except SupervisorInspectionError:
+                        inspection_uncertain = True
+
+                if exit_code is None:
+                    if inspection_uncertain or (
+                        container is not None
+                        and container["state"] in {"created", "running", "paused"}
+                    ):
+                        # The supervisor may still be running. Reissue `wait`
+                        # instead of converting a transient host-Podman error
+                        # into a false failed-job result.
+                        event_position = self._consume_events(
+                            job_id, event_path, event_position
+                        )
+                        time.sleep(0.25)
+                        continue
+                    if container is not None and container["state"] in {
+                        "exited",
+                        "stopped",
+                    }:
+                        exit_code = self._read_supervisor_outcome(
+                            self.store.get(job_id)
+                        )
+                        if exit_code is None:
+                            exit_code = container["exit_code"]
+                    elif container is None:
+                        # Confirmed absence can race the atomic outcome write;
+                        # read once more before treating the job as lost.
+                        exit_code = self._read_supervisor_outcome(
+                            self.store.get(job_id)
+                        )
+                        if exit_code is None:
+                            self._fail_recovery_job(
+                                self.store.get(job_id),
+                                "host Podman supervisor was missing and had no outcome record",
+                            )
+                            return
+                    else:
+                        # An unfamiliar intermediate state is uncertain, so
+                        # continue observing rather than failing active work.
+                        time.sleep(0.25)
+                        continue
+
+                self._finish_supervised_job(job_id, exit_code, event_path)
+                return
+        finally:
+            self._threads.pop(job_id, None)
+
+    def _finish_supervised_job(
+        self, job_id: str, exit_code: int, event_path: Path
+    ) -> Job:
+        self._consume_events(job_id, event_path, 0)
+        self._backfill_identifiers(job_id)
+        current = self.store.get(job_id)
+        if current.state in {JobState.COMPLETED, JobState.FAILED}:
+            return current
+        if current.state == JobState.STARTING:
+            lifecycle_state = {
+                "postprocess": JobState.POSTPROCESSING,
+                "index": JobState.INDEXING,
+            }.get(current.operation, JobState.RUNNING)
+            current = self.store.transition(job_id, lifecycle_state)
+        if exit_code == 0:
+            if (
+                current.operation in _MAINTENANCE_OPERATIONS
+                and not self._processing_completion_marker(current).is_file()
+            ):
+                return self.store.transition(
+                    job_id,
+                    JobState.FAILED,
+                    result_status=ResultStatus.UNAVAILABLE.value,
+                    error_category="recovery",
+                    error_message="supervisor exited without recording processing completion",
+                    exit_code=exit_code,
+                )
+            result_status = current.result_status
+            if result_status == ResultStatus.NOT_AVAILABLE:
+                result_status = ResultStatus.PENDING
+            return self.store.transition(
+                job_id,
+                JobState.COMPLETED,
+                result_status=result_status.value,
+                exit_code=exit_code,
+            )
+        if current.state == JobState.INDEXING and current.operation == "run":
+            if self._wait_for_result_summary(current):
+                return self.store.transition(
+                    job_id,
+                    JobState.COMPLETED,
+                    result_status=ResultStatus.AVAILABLE.value,
+                    exit_code=exit_code,
+                )
+            return self.store.transition(
+                job_id,
+                JobState.COMPLETED,
+                result_status=ResultStatus.UNAVAILABLE.value,
+                exit_code=exit_code,
+                error_category="cdm",
+                error_message=(
+                    "CDM result summary was unavailable after the configured "
+                    "readiness timeout"
+                ),
+            )
+        return self.store.transition(
+            job_id,
+            JobState.FAILED,
+            result_status=ResultStatus.UNAVAILABLE.value,
+            exit_code=exit_code,
+            error_category="framework",
+            error_message=f"crucible run exited with status {exit_code}",
+        )
 
     def _wait_for_recovered_process(self, job: Job, event_path: Path) -> None:
         position = 0
@@ -948,21 +1538,36 @@ class RunManager:
     ) -> list[str]:
         if not self.host_execution:
             return list(command)
-        return host_context_command(command, working_directory)
+        return host_bridge_command(
+            command, self.host_bridge_socket, working_directory
+        )
 
     def _launch_command(self, job_id: str, session_id: str, job_directory: Path, command: list[str]) -> None:
-        log_path = job_directory / "runner.log"
-        log = log_path.open("ab")
         environment = os.environ.copy()
         if self.host_execution:
-            environment = host_context_environment(
-                environment, preserve_mcp_session=True
+            environment = host_bridge_environment(
+                environment, self.operations.crucible_home
             )
         event_path = job_directory / "events.jsonl"
         environment["CRUCIBLE_MCP_SESSION_ID"] = session_id
         environment["CRUCIBLE_MCP_EVENT_FILE"] = str(event_path)
         job = self.store.get(job_id)
         launch_command = [*self.crucible_command, *command]
+        if self.host_execution and self.supervisor_image:
+            try:
+                self._launch_supervisor_container(
+                    job_id,
+                    session_id,
+                    job_directory,
+                    event_path,
+                    launch_command,
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                self._fail_supervisor_launch(job_id, job_directory, str(exc))
+            return
+
+        log_path = job_directory / "runner.log"
+        log = log_path.open("ab")
         # The input and supervision paths are shared with the host, but path
         # visibility alone does not give this process the host Podman store or
         # cgroup view. Run the Crucible CLI in host context.
@@ -1118,7 +1723,9 @@ class RunManager:
                 capture_output=True,
                 text=True,
                 timeout=2,
-                env=host_context_environment(os.environ)
+                env=host_bridge_environment(
+                    {}, self.operations.crucible_home
+                )
                 if self.host_execution
                 else None,
             )

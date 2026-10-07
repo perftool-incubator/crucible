@@ -1,6 +1,8 @@
 """Helpers for running Crucible commands in the host execution context."""
 
 from collections.abc import Mapping, Sequence
+import sys
+from pathlib import Path
 
 
 _CONTAINER_RUNTIME_ENVIRONMENT = (
@@ -18,6 +20,9 @@ _CONTAINER_RUNTIME_ENVIRONMENT = (
 _MCP_SESSION_ENVIRONMENT = (
     "CRUCIBLE_MCP_SESSION_ID",
     "CRUCIBLE_MCP_EVENT_FILE",
+)
+DEFAULT_HOST_BRIDGE_SOCKET = Path(
+    "/var/lib/crucible/mcp/host-bridge/bridge.sock"
 )
 
 
@@ -49,4 +54,39 @@ def host_context_environment(
     if not preserve_mcp_session:
         for name in _MCP_SESSION_ENVIRONMENT:
             result.pop(name, None)
+    return result
+
+
+def host_bridge_command(
+    command: Sequence[str],
+    socket_path: str | Path = DEFAULT_HOST_BRIDGE_SOCKET,
+    working_directory: str = "/",
+) -> list[str]:
+    """Run an allowlisted host operation through the private host bridge."""
+
+    return [
+        sys.executable,
+        "-m",
+        "crucible_mcp.host_bridge_client",
+        "--socket",
+        str(socket_path),
+        "--working-directory",
+        working_directory,
+        "--",
+        *command,
+    ]
+
+
+def host_bridge_environment(
+    environment: Mapping[str, str], crucible_home: str | Path | None = None
+) -> dict[str, str]:
+    """Pass only MCP lifecycle correlation fields through the host bridge."""
+
+    result = {
+        name: environment[name]
+        for name in _MCP_SESSION_ENVIRONMENT
+        if name in environment
+    }
+    if crucible_home is not None:
+        result["PYTHONPATH"] = str(Path(crucible_home) / "mcp")
     return result

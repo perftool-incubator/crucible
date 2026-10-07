@@ -1,6 +1,12 @@
 import unittest
 
-from crucible_mcp.host import host_context_command, host_context_environment
+from crucible_mcp.host import (
+    DEFAULT_HOST_BRIDGE_SOCKET,
+    host_bridge_command,
+    host_bridge_environment,
+    host_context_command,
+    host_context_environment,
+)
 
 
 class TestHostContext(unittest.TestCase):
@@ -50,6 +56,48 @@ class TestHostContext(unittest.TestCase):
         )
         self.assertNotIn("CRUCIBLE_MCP_HOST_SERVICE_STARTS", result)
         self.assertEqual(result["PATH"], "/usr/bin:/bin")
+
+    def test_host_bridge_command_uses_the_private_socket_client(self):
+        command = host_bridge_command(
+            ["podman", "wait", "crucible-mcp-job-123"],
+            "/var/lib/crucible/mcp/bridge.sock",
+            "/",
+        )
+        self.assertEqual(
+            command,
+            [
+                __import__("sys").executable,
+                "-m",
+                "crucible_mcp.host_bridge_client",
+                "--socket",
+                "/var/lib/crucible/mcp/bridge.sock",
+                "--working-directory",
+                "/",
+                "--",
+                "podman",
+                "wait",
+                "crucible-mcp-job-123",
+            ],
+        )
+
+    def test_bridge_client_environment_contains_only_required_context(self):
+        environment = host_bridge_environment(
+            {
+                "PATH": "/usr/bin",
+                "CONTAINER_HOST": "unix:///container.sock",
+                "CRUCIBLE_MCP_SESSION_ID": "session-id",
+                "CRUCIBLE_MCP_EVENT_FILE": "/var/lib/crucible/events.jsonl",
+            },
+            "/opt/crucible",
+        )
+        self.assertEqual(
+            environment,
+            {
+                "CRUCIBLE_MCP_SESSION_ID": "session-id",
+                "CRUCIBLE_MCP_EVENT_FILE": "/var/lib/crucible/events.jsonl",
+                "PYTHONPATH": "/opt/crucible/mcp",
+            },
+        )
 
 
 if __name__ == "__main__":

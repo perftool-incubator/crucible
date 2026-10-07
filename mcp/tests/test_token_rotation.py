@@ -54,6 +54,7 @@ mcp_active_jobs() {
     fi
     return "${ACTIVE_RC:-0}"
 }
+mcp_validate_token_rotation_path_host() { return 0; }
 podman_ps() { :; }
 podman_ps=podman_ps
 stop_mcp_server_unlocked() {
@@ -70,21 +71,23 @@ start_mcp_server_unlocked() {
     fi
     return "${START_RC:-0}"
 }
-python3() {
+mcp_controller_tool() {
+    local operation="${1:-}"
+    shift || true
     if [ "${TEST_FAKE_ROTATION:-0}" = "1" ]; then
         ROTATION_CALLS=$((ROTATION_CALLS + 1))
-        if [ "${PREFLIGHT_FAIL:-0}" = "1" ] && [ ${ROTATION_CALLS} -eq 1 ]; then
+        if [ "${operation}" = "validate-token" ] && [ "${PREFLIGHT_FAIL:-0}" = "1" ]; then
             return 1
         fi
-        if [ "${ROTATION_FAIL:-0}" = "1" ] && [ ${ROTATION_CALLS} -gt 1 ]; then
+        if [ "${operation}" = "rotate-token" ] && [ "${ROTATION_FAIL:-0}" = "1" ]; then
             return 1
         fi
-        if [ ${ROTATION_CALLS} -gt 1 ]; then
+        if [ "${operation}" = "rotate-token" ]; then
             printf 'new-token\n' > "$TEST_TOKEN"
         fi
         return 0
     fi
-    command python3 "$@"
+    return 1
 }
 STOP_COUNT=0
 START_COUNT=0
@@ -275,6 +278,90 @@ esac
             job_lock_state, stop_lock_state = (directory / "report").read_text().split()
             self.assertEqual(job_lock_state, "locked")
             self.assertTrue(stop_lock_state.isdigit())
+
+    def test_host_tools_mount_only_the_configured_path_parent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            database = directory / "jobs.db"
+            capture = directory / "podman-args"
+            script = r'''
+source <(awk '
+    /^function mcp_controller_tool\(\)/ { capture=1 }
+    capture { print }
+    capture && /^}/ { exit }
+' "$ROOT/bin/base")
+podman_run=fake_podman_run
+fake_podman_run() { printf '%s\n' "$@" > "$CAPTURE_FILE"; }
+container_common_args=(--common)
+container_non_service_args=(--non-service)
+CRUCIBLE_HOME=/opt/crucible
+CRUCIBLE_CONTROLLER_IMAGE=test-controller
+SESSION_ID=test-session
+mcp_controller_tool active-jobs --database "$TEST_DATABASE"
+'''
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=self.repository,
+                env={
+                    **os.environ,
+                    "ROOT": str(self.repository),
+                    "TEST_DATABASE": str(database),
+                    "CAPTURE_FILE": str(capture),
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            arguments = capture.read_text(encoding="utf-8").splitlines()
+            self.assertIn(
+                f"--mount=type=bind,source={directory},destination={directory}",
+                arguments,
+            )
+            self.assertNotIn("--mount=type=bind,source=/,destination=/hostfs", arguments)
+
+    def test_host_token_preflight_rejects_symlinks_and_writable_parents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "safe").mkdir()
+            (directory / "writable").mkdir()
+            (directory / "target").mkdir()
+            (directory / "symlink-parent").symlink_to(directory / "target", target_is_directory=True)
+            (directory / "linked-token").symlink_to(directory / "safe" / "token")
+            script = r'''
+source <(awk '
+    /^function mcp_validate_token_rotation_path_host\(\)/ { capture=1 }
+    capture { print }
+    capture && /^}/ { exit }
+' "$ROOT/bin/base")
+stat() {
+    if [ "${1:-}" = "-c" ] && [ "${2:-}" = "%u" ]; then
+        printf '0\n'
+    elif [ "${1:-}" = "-c" ] && [ "${2:-}" = "%a" ]; then
+        if [ "${3:-}" = "${TEST_ROOT}/writable" ]; then
+            printf '777\n'
+        else
+            printf '700\n'
+        fi
+    else
+        command stat "$@"
+    fi
+}
+mcp_validate_token_rotation_path_host "${TEST_ROOT}/safe/token" || exit 10
+if mcp_validate_token_rotation_path_host "${TEST_ROOT}/symlink-parent/token"; then exit 11; fi
+if mcp_validate_token_rotation_path_host "${TEST_ROOT}/writable/token"; then exit 12; fi
+if mcp_validate_token_rotation_path_host "${TEST_ROOT}/linked-token"; then exit 13; fi
+'''
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=self.repository,
+                env={**os.environ, "ROOT": str(self.repository), "TEST_ROOT": temporary},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,112 @@ Each endpoint goes through these phases during a run:
    via roadblock
 4. **Cleanup** — tear down engines and associated resources
 
+## SSH identity profiles and host-key trust
+
+All endpoint types can optionally select a Crucible-managed SSH identity for
+the controller-to-management-host connection. Crucible supports this for
+`remotehosts`, `kube`, and `osp`; it does not replace credentials used by
+benchmark engines to connect to one another or to the test target. If the
+selector is omitted, the existing ambient SSH authentication behavior is used.
+
+Crucible manages a long-lived SSH agent as a service in the controller image.
+The agent socket is fixed at
+`/run/crucible/ssh-agent/agent.sock`; no host `ssh-agent` process or
+`/etc/sysconfig/crucible` socket setting is required. Starting `mcp-server`
+starts the agent first, and a CLI run that selects an SSH identity profile
+starts it on demand. The upstream socket is mounted only into trusted setup
+contexts; the Rickshaw workload receives run-scoped filtered profile proxies.
+
+Import a private key and bind it to a profile in one interactive CLI operation:
+
+```bash
+sudo crucible ssh profiles import lab-admin /path/to/id_ed25519
+sudo crucible ssh profiles list
+```
+
+The CLI accepts an ordinary host file path. It stages a short-lived, mode-0600
+copy under `/run/crucible` for the helper container, mounts only that temporary
+key directory read-only, and removes the copy after the import attempt.
+
+An MCP client can import a key by calling `import_ssh_identity_profile` with
+the profile name and an absolute `key_file` path beneath
+`/var/lib/crucible/ssh-identities/import`. For example, place a key in that
+directory on the Crucible host, then pass the corresponding host path. The
+service mounts this dedicated directory read-only; paths elsewhere on the host
+are rejected. Do not send key contents or passphrases in an MCP request. This
+import path is non-interactive. If the key requires a passphrase, use the CLI
+command above from a terminal, which can securely prompt for it. The path
+refers to the Crucible server, not the MCP client's filesystem. All clients
+authorized by the shared MCP bearer token can import keys from this directory;
+the current design does not assign different key permissions per client.
+
+Prepare the directory and copy a key into it on the Crucible host, for example:
+
+```bash
+sudo install -d -m 700 /var/lib/crucible/ssh-identities/import
+sudo install -m 600 "$HOME/.ssh/id_ed25519" \
+  /var/lib/crucible/ssh-identities/import/lab-admin
+```
+
+The CLI import prompts for a passphrase when needed and loads the identity into
+Crucible's managed agent. Its temporary `/run` copy is removed after the import
+attempt; private-key bytes are not stored in the profile catalog or sent
+through MCP. The loaded key remains in agent memory until explicitly cleared with
+`sudo crucible ssh agent clear` or the agent service is stopped; stopping or
+restarting the agent loses all loaded identities, so import them again after
+that. `sudo crucible start ssh-agent` and `sudo crucible stop ssh-agent` manage
+the service directly. Stopping `mcp-server` alone leaves the shared agent
+running; `crucible stop all` stops MCP before stopping the agent.
+During a profile-selected CLI run, Crucible reserves the agent from setup
+through the workload container's exit. Attempts to stop the agent or clear its
+identities are refused while the run is starting or active.
+
+For keys already loaded in the managed agent, `crucible ssh profiles agent-keys`
+lists fingerprints and `crucible ssh profiles add <name> <fingerprint>` binds
+one to a profile. This lower-level path is useful when a key is shared by
+multiple profiles.
+
+The catalog stores only profile names, monotonically increasing versions,
+public-key fingerprints, and revocation metadata. At run time Crucible
+creates a temporary filtered agent socket for each selected profile; it is
+removed when the run exits normally. A profile update creates a new version,
+so newly submitted runs use the new selection while already-submitted jobs
+remain pinned to their original version unless that profile is explicitly
+revoked. Revocation is immediate and can cause an active run's next SSH
+authentication to fail. Profile revocation and other low-level profile
+operations use the `crucible ssh` CLI; those Python-backed operations run in
+the controller container and need Podman plus the configured controller image.
+MCP exposes profile names, versions, and availability, and can import a key by
+server-side file reference without returning key material or fingerprints.
+
+Select a profile at the endpoint level:
+
+```json
+{
+  "type": "osp",
+  "ssh-identity-profile": "lab-admin"
+}
+```
+
+The same endpoint-level field is supported by `remotehosts` and `kube`. For
+`remotehosts`, an individual remote may override that default with
+`remotes[].config.ssh-identity-profile` when different management hosts need
+different keys. When omitted, Crucible retains the existing ambient
+authentication behavior.
+
+Crucible maintains a separate known-hosts file at
+`/var/lib/crucible/ssh-identities/known_hosts`. New host keys are accepted on
+first use and persisted; a changed key for a previously seen host fails closed
+until an operator checks the change and explicitly forgets the old pin:
+
+```bash
+sudo crucible ssh known-hosts list
+sudo crucible ssh known-hosts forget management.example.net
+```
+
+`sudo crucible ssh known-hosts reset` interactively clears all Crucible-managed
+host-key pins. These commands do not modify the user's normal `~/.ssh/known_hosts`.
+
 ## Validation phase
 
 Before deploying any engines, rickshaw validates each endpoint

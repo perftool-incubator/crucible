@@ -26,10 +26,11 @@ execution depends on:
 - **cdm-server** — CDM query API server for result analysis
 - **httpd** — Web UI for browsing results and logs
 - **image-sourcing** — Container image builder for engine images
+- **ssh-agent** — Crucible-managed SSH identity agent for endpoint profiles
 - **mcp-server** — Authenticated MCP interface for Crucible operations
 
 Services are managed via `crucible start <service>` and
-`crucible stop <service>`, and configured in
+`crucible stop <service>`; configurable service settings are in
 `config/services.json`. They run as long-lived detached
 containers that persist across multiple benchmark runs.
 
@@ -87,6 +88,54 @@ benchmark and tool engines. It runs per-architecture instances
 native architecture runs locally; non-native architectures
 require remote builder hosts.
 
+### SSH agent
+
+Crucible runs its managed OpenSSH agent as the host-Podman-managed
+`crucible-ssh-agent` controller container. Its socket is stored under
+`/run/crucible/ssh-agent/agent.sock`, separate from the persistent profile
+catalog and known-hosts files. Crucible mounts the socket read-only into the
+MCP service and into trusted profile setup/run-wrapper contexts; workload
+commands do not receive the unfiltered socket. No host-side SSH package or
+custom socket environment setting is required.
+The host-root `/hostfs` bind is not part of the shared container arguments. It
+is added to the controller container that executes `crucible run`, where
+Rickshaw needs access to files referenced by a host-side run file. One-shot
+host-side MCP administration helpers mount only the configured token/database
+parent; they use a host-root view only for the unusual case where such a file
+is placed directly under `/`. The network-facing MCP listener receives only
+its configured data mounts, a read-only managed SSH-agent socket, and a
+read-only mount of the local archive root and
+`/var/lib/crucible/ssh-identities/import` for its key-import tool. Archive and
+unarchive mutations go through the host bridge. The profile catalog storage
+holds the agent lifecycle lock, so the agent socket directory stays read-only
+to the listener. It does not receive `/root` or `/home`, the host PID
+namespace, or privileged container mode.
+
+Host namespace operations are performed by a separate local-only
+`crucible-mcp-host-bridge` controller container. It has a private Unix socket
+and an allowlist limited to MCP supervisor lifecycle commands and the existing
+`crucible start opensearch` path. The bridge is not exposed on the network; the
+listener's socket mount is read-only, so it can request approved operations
+without replacing the bridge endpoint. Only this helper receives the
+privileges needed to enter host namespaces. Stop and restart `mcp-server`
+after upgrading so an already-running listener is recreated with the isolated
+profile; Crucible rejects an older listener profile rather than silently
+claiming it has the new boundary.
+
+Start and stop the service with `crucible start ssh-agent` and
+`crucible stop ssh-agent`. MCP startup ensures the agent is running first, and
+profile-selected CLI runs start it on demand. Stopping MCP alone leaves the
+shared agent running; `crucible stop all` stops MCP before the agent. Loaded
+identities live only in agent memory and are lost when the agent stops. Clear
+them without stopping the service with `crucible ssh agent clear`.
+For direct CLI runs that select an SSH identity profile, Crucible reserves the
+agent during run setup and while the workload container uses it. Stopping the
+agent or clearing identities is refused while that run is starting or active.
+The run wrapper uses the upstream socket only to create run-scoped filtered
+proxies. Before Rickshaw starts, a private mount namespace hides both mounted
+paths to the upstream socket from the workload; the workload receives only the
+selected profile proxies.
+
 ### MCP server
 
 The MCP server provides an authenticated interface for discovery,
@@ -127,6 +176,20 @@ requests. The default implementation accepts localhost binding over HTTP.
 Remote binding requires the configured TLS certificate and key. The token file
 is root-owned with mode `0600`, and MCP job state is stored in SQLite at the
 configured database path.
+
+The MCP service depends on Crucible's managed `ssh-agent` service. Starting
+MCP ensures the agent is running first and passes its stable
+`/run/crucible/ssh-agent/agent.sock` socket to the server. There is no
+host-agent socket setting to configure, and starting the agent does not require
+installing SSH or Python packages on the host. A selected profile with an
+unavailable key fails rather than silently falling back; without an endpoint
+profile selector, existing ambient authentication behavior remains in effect.
+Keys imported into the agent remain in memory until explicitly cleared or the
+agent stops. Stopping `mcp-server` alone leaves the shared agent running;
+`crucible stop all` stops MCP before its agent dependency. Profile and
+known-host administration use the `crucible ssh` CLI and execute in the
+controller container as described in
+[how endpoints work](how-endpoints-work.md#ssh-identity-profiles-and-host-key-trust).
 
 #### MCP TLS certificates
 
@@ -186,17 +249,23 @@ MCP-owned jobs prevent service shutdown while they are queued, running,
 post-processing, indexing, or awaiting recovery. This protects jobs that are
 not represented by an active Rickshaw container.
 
-MCP supervises jobs in its service process, but executes every Crucible CLI
-job in the host mount, network, and cgroup namespaces with the host root. This
+The MCP process stores job state in SQLite, while each active job runs under a
+detached, host-Podman-managed supervisor container. This lets the job continue
+if the MCP service process restarts; on startup MCP reattaches to the
+supervisor or reconciles the durable outcome written in the job directory.
+The host bridge starts and observes these supervisors through the host Podman
+engine. Each supervisor uses the configured controller image and mounts only
+the job's supervision directory and Crucible checkout. It invokes the Crucible
+CLI in the host mount, network, and cgroup namespaces with the host root. This
 includes `crucible run`, local post-processing and indexing, archive and
 unarchive, and indexed-result deletion. The CLI therefore sees the same
 Crucible checkout, configuration, filesystem, and Podman store as a host CLI
-invocation; the MCP controller does not create a separate container store for
-these operations. Dependencies are started by the same host-side CLI process
-and use its normal readiness checks. Host service containers remain running
-after a job completes and can be stopped through normal host service
-management. Running MCP requires the privilege to enter the host namespaces
-used for these CLI jobs.
+invocation; the job supervisor does not create a nested Podman store.
+Dependencies are started by that host-side CLI process and use the normal
+readiness checks. Host service containers remain running after a job completes
+and can be stopped through normal host service management. Only the separate
+host bridge and per-job supervisor containers require host namespace access;
+the MCP listener itself does not.
 
 #### MCP tools
 
@@ -208,6 +277,8 @@ through the standard `tools/list` request; the current interface is:
 | Tool | Purpose |
 | --- | --- |
 | `crucible_info` | Report the MCP contract version and supported capabilities. |
+| `list_ssh_identity_profiles` | List SSH profile names, versions, and availability without exposing fingerprints, private keys, agent details, or socket paths. |
+| `import_ssh_identity_profile` | Load a key from `/var/lib/crucible/ssh-identities/import` into the managed agent and bind it to a profile; key bytes and passphrases are never tool arguments. Other host paths are rejected; encrypted keys require the interactive CLI import. |
 | `list_tools` | List installed Crucible tools and their credential-redacted metadata. |
 | `list_endpoints` | List installed endpoint types, schemas, and coarse capabilities; credential-like schema descriptions are redacted. It does not discover configured or reachable targets; callers supply target-specific endpoint configuration. |
 | `list_active_runs` | List active MCP jobs, including runs and maintenance operations, with cursor pagination; credential-like text in job metadata and errors is redacted. |
@@ -483,15 +554,18 @@ lifecycle for all services.
 Services have implicit dependencies that affect startup
 order:
 
-1. **Valkey** starts first — required by roadblock, which is
+1. **SSH agent** starts before MCP — required for explicitly selected endpoint
+   identity profiles; `mcp-server` also ensures this dependency when started
+   directly
+2. **Valkey** starts first — required by roadblock, which is
    needed before any engine coordination
-2. **Image-sourcing** starts next — needed to build engine
+3. **Image-sourcing** starts next — needed to build engine
    images before a run
-3. **OpenSearch** starts on demand — needed for result indexing
+4. **OpenSearch** starts on demand — needed for result indexing
    after a run completes
-4. **CDM server** auto-starts with OpenSearch — depends on
+5. **CDM server** auto-starts with OpenSearch — depends on
    OpenSearch being available
-5. **httpd** starts on demand — needed for result browsing
+6. **httpd** starts on demand — needed for result browsing
 
 During a benchmark run, `crucible run` automatically starts
 valkey and image-sourcing. OpenSearch, CDM server, and httpd
@@ -510,6 +584,8 @@ Some services require readiness verification after starting:
   30 seconds. This confirms the MCP HTTP process is serving requests;
   it does not check CDM readiness, endpoint connectivity, or engine-image
   availability.
+- **SSH agent**: The managed agent's Unix-domain socket must be present before
+  MCP starts accepting requests.
 
 An image-sourcing health check confirms that the builder is ready to accept
 requests, not that a particular benchmark image has already been built. Engine
@@ -537,6 +613,7 @@ All service containers follow the naming pattern
 - `crucible-cdm-server`
 - `crucible-image-sourcing-<arch>` (e.g.,
   `crucible-image-sourcing-x86_64`)
+- `crucible-ssh-agent`
 
 ### How they run
 
@@ -654,6 +731,7 @@ The `remote-archive` section configures remote storage backends:
 - **mcp-server.audit-log**: Credential-safe JSONL security audit log
 - **mcp-server.audit-max-bytes**: Active audit-log size limit
 - **mcp-server.audit-retained-files**: Number of rotated audit logs retained
+- **SSH identity profiles**: Keys are imported into Crucible's managed agent with `crucible ssh profiles import`; the agent socket is managed internally
 - **remote-archive.remotes**: Named map of remote storage
   backends
 - **remote-archive.default**: Default remote for `--remote

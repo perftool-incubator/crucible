@@ -91,7 +91,7 @@ class TestJobStore(unittest.TestCase):
         self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
         self.assertIsNotNone(updated.indexed_query_checked_at)
 
-    def test_v4_database_migrates_indexed_query_status_columns(self):
+    def test_v4_database_migrates_to_supervisor_job_fields(self):
         database_path = Path(self.directory.name) / "legacy-v4.db"
         connection = sqlite3.connect(database_path)
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
@@ -112,9 +112,52 @@ class TestJobStore(unittest.TestCase):
         finally:
             migrated.close()
 
-        self.assertEqual(version, 5)
+        self.assertEqual(version, 6)
         self.assertIn("indexed_query_status", columns)
         self.assertIn("indexed_query_checked_at", columns)
+        self.assertIn("supervisor_container_name", columns)
+        self.assertIn("supervisor_container_id", columns)
+
+    def test_v5_database_migrates_to_supervisor_job_fields(self):
+        database_path = Path(self.directory.name) / "legacy-v5.db"
+        connection = sqlite3.connect(database_path)
+        connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO schema_version(version) VALUES (5)")
+        connection.execute("CREATE TABLE jobs (cdm_run_id TEXT)")
+        connection.commit()
+        connection.close()
+
+        migrated = JobStore(database_path)
+        try:
+            version = migrated._connection.execute(
+                "SELECT version FROM schema_version"
+            ).fetchone()[0]
+            columns = {
+                row[1]
+                for row in migrated._connection.execute("PRAGMA table_info(jobs)")
+            }
+        finally:
+            migrated.close()
+
+        self.assertEqual(version, 6)
+        self.assertIn("supervisor_container_name", columns)
+        self.assertIn("supervisor_container_id", columns)
+
+    def test_supervisor_identifiers_are_internal_job_metadata(self):
+        job, _ = self.store.create_or_get("supervisor-internal", {"run": True})
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            supervisor_container_name="crucible-mcp-job-test",
+            supervisor_container_id="container-id",
+        )
+
+        restored = self.store.get(job.mcp_job_id)
+        public = restored.as_dict()
+        self.assertEqual(restored.supervisor_container_name, "crucible-mcp-job-test")
+        self.assertEqual(restored.supervisor_container_id, "container-id")
+        self.assertNotIn("supervisor_container_name", public)
+        self.assertNotIn("supervisor_container_id", public)
 
     def test_plan_summary_persists_across_store_reopen(self):
         summary = {

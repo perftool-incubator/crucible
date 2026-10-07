@@ -151,6 +151,8 @@ class JobStore:
                         run_directory TEXT,
                         runner_pid INTEGER,
                         runner_container_id TEXT,
+                        supervisor_container_name TEXT,
+                        supervisor_container_id TEXT,
                         exit_code INTEGER,
                         error_category TEXT,
                         error_message TEXT,
@@ -159,7 +161,7 @@ class JobStore:
                     )
                     """
                 )
-                connection.execute("UPDATE schema_version SET version = 5")
+                connection.execute("UPDATE schema_version SET version = 6")
             elif version[0] == 1:
                 connection.execute("ALTER TABLE jobs ADD COLUMN operation TEXT NOT NULL DEFAULT 'run'")
                 connection.execute("ALTER TABLE jobs ADD COLUMN supervision_directory TEXT")
@@ -185,8 +187,21 @@ class JobStore:
                 connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_status TEXT NOT NULL DEFAULT 'not_checked'")
                 connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_checked_at TEXT")
                 connection.execute("UPDATE schema_version SET version = 5")
-            elif version[0] != 5:
+            elif version[0] not in {5, 6}:
                 raise JobError(f"unsupported MCP job database schema: {version[0]}")
+            current_version = connection.execute(
+                "SELECT version FROM schema_version LIMIT 1"
+            ).fetchone()[0]
+            if current_version == 5:
+                connection.execute(
+                    "ALTER TABLE jobs ADD COLUMN supervisor_container_name TEXT"
+                )
+                connection.execute(
+                    "ALTER TABLE jobs ADD COLUMN supervisor_container_id TEXT"
+                )
+                connection.execute("UPDATE schema_version SET version = 6")
+            elif current_version != 6:
+                raise JobError(f"unsupported MCP job database schema: {current_version}")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS jobs_cdm_run_id_idx ON jobs(cdm_run_id)"
             )
@@ -320,6 +335,7 @@ class JobStore:
         allowed_columns = {
             "result_status", "logger_session_id", "rickshaw_run_id", "cdm_run_id",
             "run_directory", "runner_pid", "runner_container_id", "exit_code",
+            "supervisor_container_name", "supervisor_container_id",
             "error_category", "error_message", "supervision_directory",
             "plan_digest", "plan_summary",
         }
