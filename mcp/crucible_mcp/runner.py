@@ -314,7 +314,7 @@ class RunManager:
         if operation not in {"postprocess", "index"}:
             raise OperationError("user", "unsupported processing operation", "invalid_operation")
         try:
-            canonical = self.operations.run_policy.canonical_directory(run_directory)
+            canonical = self.operations.run_policy.canonical_child_directory(run_directory)
         except PolicyError as exc:
             raise OperationError("authorization", str(exc), "run_path_rejected") from exc
         request = {"operation": operation, "run_directory": str(canonical)}

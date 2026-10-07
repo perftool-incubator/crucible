@@ -131,6 +131,19 @@ class TestHostCommandPolicy(unittest.TestCase):
                 {"command": command, "working_directory": "/", "environment": {}}
             )
 
+    def test_rejects_processing_roots(self):
+        for operation in ("postprocess", "index"):
+            for root in (self.run_root, self.job_root):
+                command = [
+                    str(self.home / "bin" / "crucible"),
+                    operation,
+                    str(root),
+                ]
+                with self.subTest(operation=operation, root=root), self.assertRaises(
+                    BridgeRequestError
+                ):
+                    self.policy._validate_cli_operation(operation, command)
+
     def test_rejects_relative_operation_paths(self):
         with self.assertRaises(BridgeRequestError):
             self.policy._canonical_child("run-one", self.run_root, directory=True)

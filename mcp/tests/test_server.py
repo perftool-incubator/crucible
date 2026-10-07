@@ -3,6 +3,7 @@ import os
 import socket
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -1200,6 +1201,50 @@ class TestServer(unittest.TestCase):
         self.assertNotIn("error", payload)
         ensure_services.assert_not_called()
         self.server.run_manager.submit_processing.assert_called_once()
+
+    def test_processing_root_is_rejected_as_a_structured_error_before_queueing(self):
+        from crucible_mcp.runner import RunManager
+
+        root = Path(self.directory.name)
+        run_root = root / "runs"
+        job_root = root / "processing-jobs"
+        run_root.mkdir()
+        job_root.mkdir()
+        self.server.operations.run_policy = InputPolicy([run_root, job_root])
+        manager = RunManager(
+            self.server.jobs,
+            self.server.operations,
+            job_root,
+            [sys.executable, "-c", "pass"],
+            host_execution=False,
+        )
+        self.server.run_manager = manager
+
+        with patch.object(manager, "_launch_command") as launch:
+            for index, path in enumerate((run_root, job_root)):
+                idempotency_key = f"processing-root-{index}"
+                body = json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": 100 + index,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "index_local_run",
+                        "arguments": {
+                            "idempotency_key": idempotency_key,
+                            "run_path": str(path),
+                        },
+                    },
+                })
+
+                status, payload = self.request("POST", "/mcp", body, self.token)
+
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["error"]["code"], -32000)
+                error = json.loads(payload["error"]["message"])
+                self.assertEqual(error["code"], "run_path_rejected")
+                self.assertIsNone(self.server.jobs.get_by_idempotency_key(idempotency_key))
+
+        launch.assert_not_called()
 
     def test_indexing_service_bridge_starts_cli_and_refreshes_configured_port(self):
         home = Path(self.directory.name)

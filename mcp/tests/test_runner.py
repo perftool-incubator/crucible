@@ -1548,6 +1548,46 @@ class TestRunManager(unittest.TestCase):
         self.assertEqual(job.error_category, "infrastructure")
         self.assertIn("could not create processing supervision directory", job.error_message)
 
+    def test_processing_rejects_approved_roots_before_creating_jobs(self):
+        roots = (self.root / "run", self.root / "runs")
+        for root in roots:
+            root.mkdir(parents=True, exist_ok=True)
+
+        with patch.object(self.manager, "_launch_command") as launch:
+            for index, root in enumerate(roots):
+                idempotency_key = f"key-processing-root-{index}"
+                with self.subTest(root=root), self.assertRaises(OperationError) as raised:
+                    self.manager.submit_processing(idempotency_key, "index", root)
+
+                self.assertEqual(raised.exception.code, "run_path_rejected")
+                self.assertIsNone(self.store.get_by_idempotency_key(idempotency_key))
+
+        launch.assert_not_called()
+
+    def test_processing_accepts_children_under_each_approved_root(self):
+        roots = (self.root / "run", self.root / "runs")
+        targets = []
+        for index, root in enumerate(roots):
+            root.mkdir(parents=True, exist_ok=True)
+            target = root / f"processing-target-{index}"
+            target.mkdir()
+            targets.append(target)
+
+        with patch.object(self.manager, "_launch_command") as launch:
+            jobs = [
+                self.manager.submit_processing(
+                    f"key-processing-child-{index}", "index", target
+                )
+                for index, target in enumerate(targets)
+            ]
+
+        self.assertTrue(all(created for _job, created in jobs))
+        self.assertEqual(
+            [Path(job.run_directory) for job, _created in jobs],
+            [target.resolve() for target in targets],
+        )
+        self.assertEqual(launch.call_count, len(targets))
+
     def test_indexed_deletion_is_idempotent_and_uses_cli_arguments(self):
         manager = RunManager(
             self.store,
