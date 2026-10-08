@@ -263,10 +263,11 @@ configuration:
 Remotehosts also supports a `profiler` engine assignment. Unlike `client`
 and `server`, it has no user-supplied `ids`; Rickshaw generates profiler
 engine IDs for the tools selected on that remote. Rickshaw automatically
-provisions selected profiler engines on remotes with benchmark engines, so
-those remotes do not need an explicit profiler assignment. Add a remote with
-only a profiler assignment to collect data from a host that is part of the
-test but does not run benchmark engines:
+provisions selected profiler engines on configured remotes where tools are
+enabled and their deployment policies permit them, including remotes with
+client/server engines. Those remotes do not need an explicit profiler
+assignment. Add a remote with only a profiler assignment to collect data from
+a host that is part of the test but does not run benchmark engines:
 
 ```json
 {
@@ -287,11 +288,13 @@ selected for deployment. Node B adds another collection target; it does not
 replace profiler engines automatically provisioned on eligible remotes such
 as node A.
 
-Tool placement can be controlled independently on each remote. The
-`disable-tools` setting skips all tool engines on that remote;
+Tool selection is independent of the profiler role. The effective
+`disable-tools` setting skips all tool engines on a remote;
 `tool-opt-in-tags` and `tool-opt-out-tags` select individual opt-in and
 opt-out tools. These controls are optional and do not need to be paired with
-a profiler-only remote.
+a profiler-only remote. Endpoint-level settings provide defaults for all
+remotes, and a value under a remote's `config.settings` overrides that
+setting for that remote.
 
 ### Kubernetes endpoint
 
@@ -355,8 +358,8 @@ top-level `settings` object.
 | `ssh-identity-profile` | Crucible-managed controller-to-management SSH identity profile | Ambient authentication |
 | `controller-ip-address` | IP for engines to reach the controller | Auto-detected |
 | `disable-tools` | Disable tools on this remote; endpoint value is the default for remotes | `false` |
-| `tool-opt-in-tags` | Tags that enable opt-in tools on this remote host | `[]` |
-| `tool-opt-out-tags` | Tags that disable opt-out tools on this remote host | `[]` |
+| `tool-opt-in-tags` | Default tags that enable opt-in tools on all remotes; remote values override the default for that host | `[]` |
+| `tool-opt-out-tags` | Default tags that disable opt-out tools on all remotes; remote values override the default for that host | `[]` |
 
 ### Settings hierarchy
 
@@ -364,6 +367,48 @@ For `remotehosts`, settings can be specified at two levels:
 
 1. **Endpoint-level `settings`**: Defaults for all remotes
 2. **`remotes[*].config.settings`**: Override defaults for one remote host
+
+For a hostname listed once, it inherits the endpoint's list when its own
+`tool-opt-in-tags` or `tool-opt-out-tags` is omitted. If its entry supplies one
+of these settings, that list replaces the endpoint default for that host; an
+explicit empty list clears the endpoint default for that tag type.
+
+If the same hostname appears in multiple `remotes` entries, Rickshaw creates
+one effective list per tag type for that host. If any entry supplies that
+setting, the endpoint default is excluded and the explicitly supplied lists
+are combined. Otherwise, the host inherits the endpoint default. An explicit
+empty list therefore clears the default when no other entry for that host
+explicitly adds tags; explicitly supplied tags on another entry for the same
+host are retained in the combined list.
+
+For example, node A below replaces the opt-in list and clears the opt-out
+list; node B inherits both lists:
+
+```json
+{
+    "type": "remotehosts",
+    "settings": {
+        "tool-opt-in-tags": ["storage"],
+        "tool-opt-out-tags": ["noisy"]
+    },
+    "remotes": [
+        {
+            "engines": [{ "role": "server", "ids": [1] }],
+            "config": {
+                "host": "node-a.example.com",
+                "settings": {
+                    "tool-opt-in-tags": ["storage", "network"],
+                    "tool-opt-out-tags": []
+                }
+            }
+        },
+        {
+            "engines": [{ "role": "server", "ids": [2] }],
+            "config": { "host": "node-b.example.com" }
+        }
+    ]
+}
+```
 
 For `kube`, cluster-level settings such as `host-mounts` are top-level
 properties of the endpoint. Its `config` array applies settings to selected

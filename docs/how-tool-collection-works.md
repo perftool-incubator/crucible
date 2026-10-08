@@ -269,12 +269,18 @@ collects metrics from the remote where they run. Adding that remote does not
 disable profiler engines on the benchmark host; suppress collection there
 separately if desired.
 
-Tool selection is independent of the profiler role. A remote's
-`disable-tools` setting disables all tool engines there. Tools using
-`opt-in` deployment require their `opt-tag` in that remote's
-`tool-opt-in-tags`; tools using `opt-out` deployment are skipped when their
-tag appears in `tool-opt-out-tags`. Other remotes retain their own placement
-and tool selection.
+Tool selection is independent of the profiler role. A remote's effective
+`disable-tools` setting disables all tool engines there. For remotehosts,
+endpoint-level `tool-opt-in-tags` and `tool-opt-out-tags` provide defaults for
+all remotes; a value in one remote's `config.settings` replaces that list for
+that host, and an empty list clears the default for that tag type. If a
+hostname appears in multiple remote entries, explicitly supplied lists for
+that host are combined and the endpoint default is excluded; the default is
+used only when none of the entries for that host supplies the setting. Tools
+using `opt-in` deployment require their `opt-tag` in the effective
+`tool-opt-in-tags`; tools using `opt-out` deployment are skipped when their tag
+appears in the effective `tool-opt-out-tags`. Other remotes retain their own
+placement and effective tool selection.
 
 ### Multi-instance tools
 
