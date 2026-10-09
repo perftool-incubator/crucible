@@ -274,10 +274,13 @@ post-processor has access to the engine's environment context.
 
 ### Profiler engines
 
-For profiler engines (dedicated tool collection nodes), each
-engine runs exactly one tool. The engine's cs-label encodes
-which tool it runs (e.g., `profiler-kube-1-sysstat-1`), and
-the start logic only executes the matching tool.
+Each profiler engine runs exactly one tool. The engine's cs-label encodes
+which tool it runs (e.g., `profiler-kube-1-sysstat-1`), and the start logic
+only executes the matching tool. On remotehosts, Rickshaw provisions selected
+profiler engines on each configured remote where tools are enabled and their
+deployment policies permit them. A remote can receive the `profiler` role
+without client/server engines; this places tool engines on that host but does
+not require a dedicated physical collection node.
 
 ## CPU partitioning
 

@@ -199,6 +199,16 @@ architecture.
 The remotehosts endpoint deploys engines on remote Linux hosts
 via SSH. It supports two runtime modes:
 
+Tool placement is independent of benchmark-engine placement. A remote can
+use `{"role": "profiler"}` as its only engine assignment to collect data
+from a host that is part of the test but does not run client/server engines,
+such as a storage server, KVM host, or load balancer. The profiler role takes
+no user-supplied IDs; Rickshaw generates them for selected tools. Other
+tool-enabled remotes retain their own profiler placement unless independently
+disabled or filtered. See
+[Remotehosts profiler placement](how-run-files-work.md#remotehosts-profiler-placement)
+for a run-file example and the per-remote controls.
+
 **Podman mode** (default, `"osruntime": "podman"`):
 1. SSH to the remote host
 2. Pull the container image (`podman pull`)
