@@ -213,6 +213,11 @@ class TestServer(unittest.TestCase):
         self.assertIn("plan_digest", tools["start_run"]["inputSchema"]["properties"])
         self.assertIn("plan_handle", tools["start_run"]["inputSchema"]["properties"])
         self.assertIn("persist", tools["prepare_run"]["inputSchema"]["properties"])
+        self.assertIn("render_run", tools)
+        self.assertIn("cursor", tools["render_run"]["inputSchema"]["properties"])
+        self.assertEqual(
+            tools["render_run"]["inputSchema"]["required"], ["plan_handle"]
+        )
         self.assertIn(
             "does not discover configured or reachable deployment targets",
             tools["list_endpoints"]["description"],
@@ -225,7 +230,7 @@ class TestServer(unittest.TestCase):
             "list_run_artifacts", "get_run_artifact", "list_local_archives",
             "archive_local_run", "unarchive_local_run", "list_indexed_results", "get_indexed_result", "list_indexed_periods", "get_indexed_metric",
             "list_log_sessions", "get_log_info", "search_documentation",
-            "prepare_run", "estimate_run",
+            "prepare_run", "estimate_run", "render_run",
             "get_log_session",
             "search_logs",
             "list_local_run_tags", "add_local_run_tags", "remove_local_run_tags",
@@ -546,6 +551,50 @@ class TestServer(unittest.TestCase):
                 "SELECT COUNT(*) FROM plan_handles"
             ).fetchone()[0],
             1,
+        )
+
+    def test_render_run_dispatches_handle_and_caller_bound_input(self):
+        rendered = {
+            "input_digest": "digest",
+            "plan_fingerprint": "a" * 64,
+            "sections": [],
+            "limits": {"truncated": False},
+            "details": [],
+            "returned": 0,
+            "complete": True,
+            "next_cursor": None,
+        }
+        self.server.run_manager = Mock()
+        self.server.run_manager.render_run.return_value = rendered
+        document = {"benchmarks": []}
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 64,
+            "method": "tools/call",
+            "params": {
+                "name": "render_run",
+                "arguments": {
+                    "plan_handle": "opaque-handle",
+                    "document": document,
+                    "cursor": "opaque-cursor",
+                    "limit": 7,
+                    "max_response_bytes": 4096,
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["structuredContent"], rendered)
+        self.server.run_manager.render_run.assert_called_once_with(
+            plan_handle="opaque-handle",
+            caller_fingerprint=hashlib.sha256(self.token.encode("utf-8")).hexdigest(),
+            document=document,
+            cursor="opaque-cursor",
+            limit=7,
+            max_response_bytes=4096,
+            request_id=64,
         )
 
     def test_start_run_passes_plan_handle_and_authenticated_caller_fingerprint(self):

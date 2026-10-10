@@ -1446,6 +1446,196 @@ class TestRunManager(unittest.TestCase):
         handle, _ = self.store.create_or_get_plan_handle(**values)
         return handle, versions
 
+    @staticmethod
+    def _renderable_plan():
+        return {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{
+                "name": "example",
+                "occurrence": 0,
+                "parameter_sets": {
+                    "count": 2,
+                    "returned": 2,
+                    "items": [
+                        {"arg": "size", "val": "1G"},
+                        {"arg": "size", "val": "2G"},
+                    ],
+                    "truncated": False,
+                },
+            }],
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "limits": {"truncated": False, "warnings": []},
+        }
+
+    def test_render_run_verifies_handle_and_resumes_after_store_restart(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = self._renderable_plan()
+        handle, versions = self._persist_test_plan_handle(plan)
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", return_value=plan),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            first = self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                document=document,
+                limit=1,
+            )
+
+        self.assertEqual(first["details"][0]["item_index"], 0)
+        self.assertFalse(first["complete"])
+        self.assertIsNotNone(first["next_cursor"])
+        self.assertEqual(
+            self.store._connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
+            0,
+        )
+
+        database_path = self.store.database_path
+        self.store.close()
+        self.store = JobStore(database_path)
+        self.manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "runs",
+            [sys.executable, "-c", "pass"],
+            host_execution=False,
+        )
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", return_value=plan),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            second = self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                document=document,
+                cursor=first["next_cursor"],
+                limit=1,
+            )
+
+        self.assertEqual(second["details"][0]["item_index"], 1)
+        self.assertTrue(second["complete"])
+        self.assertIsNone(second["next_cursor"])
+        self.assertEqual(
+            self.store._connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
+            0,
+        )
+
+    def test_render_run_uses_saved_limits_and_reloads_an_approved_path(self):
+        input_root = self.root / "inputs"
+        input_root.mkdir()
+        run_file = input_root / "render-run.json"
+        document = {"benchmarks": [{"name": "example"}]}
+        run_file.write_text(json.dumps(document), encoding="utf-8")
+        run_file.chmod(0o600)
+        self.manager.operations.input_policy = InputPolicy([input_root])
+
+        plan = self._renderable_plan()
+        effective_limits = {
+            "max_parameter_sets": 7,
+            "max_engine_ids": 8,
+            "max_tool_entries": 9,
+            "max_response_bytes": 4096,
+        }
+        handle, versions = self._persist_test_plan_handle(
+            plan, effective_limits=effective_limits
+        )
+        planner = Mock(return_value=plan)
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", planner),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            page = self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                path=run_file,
+                max_response_bytes=8192,
+            )
+
+        self.assertTrue(page["complete"])
+        planner.assert_called_once_with(document, 7, 8, 9)
+
+    def test_render_run_rejects_foreign_expired_and_stale_handles(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = self._renderable_plan()
+        handle, versions = self._persist_test_plan_handle(plan)
+
+        with patch.object(self.manager.operations, "_build_run_plan") as planner:
+            with self.assertRaises(OperationError) as foreign:
+                self.manager.render_run(
+                    handle.handle,
+                    caller_fingerprint="z" * 64,
+                    document=document,
+                )
+        self.assertEqual(foreign.exception.code, "invalid_plan_handle")
+        planner.assert_not_called()
+
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", return_value=plan),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            changed = {**plan, "input_digest": "changed-input"}
+            with patch.object(
+                self.manager.operations, "_build_run_plan", return_value=changed
+            ):
+                with self.assertRaises(OperationError) as stale:
+                    self.manager.render_run(
+                        handle.handle,
+                        caller_fingerprint="a" * 64,
+                        document=document,
+                    )
+            self.assertEqual(stale.exception.code, "stale_plan_handle")
+
+            changed_plan = {
+                **plan,
+                "totals": {"global_iteration_count": 99},
+            }
+            with patch.object(
+                self.manager.operations, "_build_run_plan", return_value=changed_plan
+            ):
+                with self.assertRaises(OperationError) as changed_fingerprint:
+                    self.manager.render_run(
+                        handle.handle,
+                        caller_fingerprint="a" * 64,
+                        document=document,
+                    )
+            self.assertEqual(changed_fingerprint.exception.code, "stale_plan_handle")
+
+            with patch.object(
+                self.manager.operations,
+                "plan_component_versions",
+                return_value={**versions, "crucible": "changed-revision"},
+            ):
+                with self.assertRaises(OperationError) as changed_version:
+                    self.manager.render_run(
+                        handle.handle,
+                        caller_fingerprint="a" * 64,
+                        document=document,
+                    )
+            self.assertEqual(changed_version.exception.code, "stale_plan_handle")
+
+        self.store._connection.execute(
+            "UPDATE plan_handles SET expires_at = ? WHERE handle = ?",
+            ("2000-01-01T00:00:00+00:00", handle.handle),
+        )
+        self.store._connection.commit()
+        with self.assertRaises(OperationError) as expired:
+            self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                document=document,
+            )
+        self.assertEqual(expired.exception.code, "expired_plan_handle")
+
     def test_submission_verifies_owned_plan_handle_before_launch(self):
         document = {"benchmarks": [{"name": "example"}]}
         plan = {

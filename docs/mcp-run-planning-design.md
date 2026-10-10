@@ -215,7 +215,7 @@ running that rebuild when it is needed.
 
 ### 4. Public MCP operations
 
-The stable public adapter exposes two operations:
+The stable public adapter exposes three operations:
 
 #### `prepare_run`
 
@@ -224,9 +224,10 @@ deployment command. It validates the input and returns a bounded normalized
 plan plus safe structural details. It must not create a runnable directory,
 generate credentials, start containers, contact an endpoint, or reserve
 resources. `persist: true` optionally stores only bounded handle metadata so
-the same plan can be verified by a later `start_run` call; the default remains
-non-persistent. A handle is created only when plan validation succeeds;
-invalid plans return their bounded validation result without a handle.
+the same plan can be verified by later `render_run` or `start_run` calls; the
+default remains non-persistent. A handle is created only when plan validation
+succeeds; invalid plans return their bounded validation result without a
+handle.
 
 Its purpose is to let an agent inspect exactly what it is about to submit. The
 name should not imply that execution resources have been prepared.
@@ -240,7 +241,23 @@ The initial result should clearly say that runtime is unavailable unless a
 trusted static source exists. It should not fabricate a duration from a
 benchmark name or from a generic default.
 
-Both tools should accept explicit limits such as maximum expanded iterations,
+#### `render_run`
+
+`render_run` requires a persisted `prepare_run` handle and the same inline
+document or approved path on every call. It re-plans under the handle's saved
+planning limits, verifies ownership, expiry, input digest, planner contract,
+component versions, effective limits, and the bounded plan fingerprint, then
+returns a deterministic cursor page of redacted structural details. Entries
+identify benchmark occurrence, detail section, and item index. Section metadata
+reports exact cardinalities when available, available item counts, planner
+truncation, and whether the original prepare response omitted detail prefixes.
+The page has independent item and serialized-response limits. Cursors bind to
+the handle, verified plan fingerprint, and traversal position. Rendering is
+read-only, stores no plan payload, and does not queue or execute a run. Handle
+ownership, expiry, or plan mismatches retain the `invalid_plan_handle`,
+`expired_plan_handle`, and `stale_plan_handle` errors.
+
+Planning tools should accept explicit limits such as maximum expanded iterations,
 maximum parameter summaries, and maximum response bytes. The server must cap
 them to safe configured ceilings; client-supplied larger limits must not turn
 planning into an unbounded expansion operation. The Crucible adapter currently
@@ -249,20 +266,17 @@ per-occurrence parameter-set ceiling would permit more than 100,000 aggregate
 expansions or 1,000,000 aggregate parameter entries. Crucible intentionally
 follows the configured Rickshaw and Multiplex revisions (currently their
 primary `master` branches) rather than pinning planner commits in
-`config/repos.json`. The planner APIs must therefore be available in those
-configured revisions before these tools are enabled; the tools must not
-silently depend on incompatible versions installed on a host.
+`config/repos.json`. The planner APIs must be available in those configured
+revisions; the tools must not silently depend on incompatible versions
+installed on a host.
 
 The tools are registered in `crucible_info`, `tools/list`, and the MCP interface
 table. `validate_run` remains useful for a quick schema-only check; planning is
 the optional next step when a client needs bounded expansion and topology
-details before submission.
-
-A separate `render_run` operation is deliberately deferred. If clients need
-paginated parameter-level inspection later, it should read an immutable plan
-and return redacted structural data—not shell commands, generated credentials,
-or a runnable directory. For the first version, that inspection belongs in the
-bounded `prepare_run` response.
+details before submission. If `prepare_run` omits details to fit its response,
+clients can traverse the materialized detail lists with `render_run`. The
+plan's existing truncation metadata continues to show details beyond planning
+limits that were never materialized.
 
 ## Relationship to `start_run`
 

@@ -294,6 +294,7 @@ through the standard `tools/list` request; the current interface is:
 | `describe_benchmark` | Return credential-redacted metadata for one installed benchmark, including accepted parameter validation rules from `multiplex.json` when available. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
 | `prepare_run` | Build a bounded, side-effect-free plan showing benchmark expansion, samples, tools, and static topology; optionally persist an expiring plan handle. |
+| `render_run` | Render pages of redacted structural details omitted from a persisted `prepare_run` response, after revalidating its handle and the supplied input. |
 | `estimate_run` | Return derived run counts and runtime-confidence information without executing the run. |
 | `start_run` | Submit an asynchronous, idempotent Crucible run; optionally verify a `prepare_run` digest or durable plan handle. |
 | `postprocess_local_run` | Post-process an approved local run directory asynchronously. |
@@ -409,6 +410,21 @@ versions, effective planning limits, and a fresh fingerprint of the bounded
 plan. A changed plan returns `stale_plan_handle`, an expired owned handle
 returns `expired_plan_handle`, and unknown or foreign handles return the same
 `invalid_plan_handle` error.
+
+When `prepare_run` omits detail prefixes to fit its response-byte limit, use
+`render_run` with that handle and the same document or approved path to inspect
+the remaining details materialized under the saved planning limits. Pass each
+page's `next_cursor` back with the same input and handle until `complete` is
+true. The response reports each section's exact cardinality when available,
+available-item count, planner truncation, and whether the section was omitted
+from the original prepare response. Planner truncation remains visible when
+more items exist beyond the saved parameter-set, engine-ID, or tool-entry
+limits. Page item count and response bytes have separate bounds; a section
+summary or one detail item that cannot fit returns `result_too_large`.
+Rendering re-plans and revalidates ownership, expiry, input digest, planner
+contract, installed component versions, effective limits, and plan fingerprint
+on every page. It is read-only and does not queue or execute a run. Handles and
+cursors remain usable across a service restart while the handle is live.
 
 Handles expire one hour after creation, remain reusable until then, and
 identical persisted preparations by the same caller reuse their live handle.

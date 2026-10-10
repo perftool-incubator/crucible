@@ -1,5 +1,7 @@
 """Typed, non-execution Crucible operations for the MCP contract."""
 
+import base64
+import binascii
 import copy
 import hashlib
 from contextlib import contextmanager
@@ -45,6 +47,9 @@ MAX_ARTIFACT_RESPONSE_BYTES = 1_048_576
 MAX_METADATA_RESPONSE_BYTES = 1_048_576
 MAX_MCP_RESPONSE_BYTES = 1_048_576
 MAX_PLAN_RESPONSE_BYTES = 1_048_576
+MAX_RENDER_RUN_PAGE_ITEMS = 1000
+DEFAULT_RENDER_RUN_PAGE_ITEMS = 100
+MAX_RENDER_RUN_CURSOR_CHARS = 2048
 MAX_LOG_SESSION_COMMAND_CHARS = 4096
 MAX_PLAN_BENCHMARKS = 100
 MAX_PLAN_PARAMETER_WORK = 100_000
@@ -550,6 +555,7 @@ class CrucibleOperations:
                 "search_logs",
                 "validate_run",
                 "prepare_run",
+                "render_run",
                 "estimate_run",
                 "start_run",
                 "get_run_status",
@@ -4815,6 +4821,314 @@ class CrucibleOperations:
                 "framework", "run plan exceeds the response-byte limit", "result_too_large"
             )
         return self._bound_plan_response(plan, response_budget, request_id)
+
+    def render_run_page(
+        self,
+        plan: dict[str, Any],
+        prepared_plan: dict[str, Any],
+        document: Any,
+        plan_handle: str,
+        plan_fingerprint: str,
+        *,
+        cursor: str | None = None,
+        limit: int = DEFAULT_RENDER_RUN_PAGE_ITEMS,
+        max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Render a bounded page of redacted details from a verified run plan."""
+
+        self._validate_plan_response_limit(max_response_bytes)
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or limit < 1
+            or limit > MAX_RENDER_RUN_PAGE_ITEMS
+        ):
+            raise OperationError(
+                "user",
+                f"limit must be an integer between 1 and {MAX_RENDER_RUN_PAGE_ITEMS}",
+                "invalid_limit",
+            )
+
+        sections = self._run_detail_sections(plan, prepared_plan, document)
+        total_available = sum(len(items) for _, items in sections)
+        position = self._decode_run_detail_cursor(
+            cursor, plan_handle, plan_fingerprint, total_available
+        )
+        remaining = total_available - position
+        candidate_count = min(limit, remaining)
+        candidates: list[dict[str, Any]] = []
+        absolute_index = 0
+        for metadata, items in sections:
+            occurrence = metadata["benchmark_occurrence"]
+            section_name = metadata["section"]
+            for item_index, item in enumerate(items):
+                if absolute_index >= position and len(candidates) < candidate_count:
+                    candidates.append(
+                        {
+                            "benchmark_occurrence": occurrence,
+                            "section": section_name,
+                            "item_index": item_index,
+                            "item": self._redact_metadata(item),
+                        }
+                    )
+                absolute_index += 1
+                if len(candidates) >= candidate_count and candidate_count:
+                    break
+            if len(candidates) >= candidate_count and candidate_count:
+                break
+
+        section_metadata = [metadata for metadata, _ in sections]
+        limits_metadata = prepared_plan.get("limits", {})
+        if not isinstance(limits_metadata, dict):
+            limits_metadata = {}
+
+        def make_page(selected: list[dict[str, Any]], complete: bool) -> dict[str, Any]:
+            next_position = position + len(selected)
+            return {
+                "input_digest": plan.get("input_digest"),
+                "plan_fingerprint": plan_fingerprint,
+                "sections": section_metadata,
+                "limits": limits_metadata,
+                "details": selected,
+                "returned": len(selected),
+                "complete": complete,
+                "next_cursor": (
+                    None
+                    if complete
+                    else self._encode_run_detail_cursor(
+                        plan_handle, plan_fingerprint, next_position
+                    )
+                ),
+            }
+
+        if not candidates:
+            page = make_page([], True)
+            if self._mcp_response_size(page, request_id) > max_response_bytes:
+                raise OperationError(
+                    "framework",
+                    "run detail response envelope exceeds the response-byte limit",
+                    "result_too_large",
+                )
+            return page
+
+        complete = position + len(candidates) == total_available
+        page = make_page(candidates, complete)
+        if self._mcp_response_size(page, request_id) <= max_response_bytes:
+            return page
+
+        # The summary is repeated on each page so exact cardinalities and both
+        # planner and prepare-response truncation remain visible throughout a
+        # traversal. Fail explicitly if that metadata alone cannot fit.
+        empty_page = make_page([], False)
+        if self._mcp_response_size(empty_page, request_id) > max_response_bytes:
+            raise OperationError(
+                "framework",
+                "run detail response envelope exceeds the response-byte limit",
+                "result_too_large",
+            )
+
+        # A final page omits its cursor and may be smaller than an incomplete
+        # page. The complete candidate above was checked first; all prefixes
+        # below it have the stable incomplete-page envelope for binary search.
+        low, high = 0, len(candidates) - 1
+        best = 0
+        while low <= high:
+            middle = (low + high) // 2
+            selected = candidates[:middle]
+            if (
+                self._mcp_response_size(make_page(selected, False), request_id)
+                <= max_response_bytes
+            ):
+                best = middle
+                low = middle + 1
+            else:
+                high = middle - 1
+
+        if best == 0:
+            raise OperationError(
+                "framework",
+                "a run detail item exceeds the response-byte limit",
+                "result_too_large",
+            )
+        selected = candidates[:best]
+        return make_page(selected, False)
+
+    def _run_detail_sections(
+        self,
+        plan: dict[str, Any],
+        prepared_plan: dict[str, Any],
+        document: Any,
+    ) -> list[tuple[dict[str, Any], list[Any]]]:
+        sections: list[tuple[dict[str, Any], list[Any]]] = []
+        prepared_benchmarks = prepared_plan.get("benchmarks", [])
+        if not isinstance(prepared_benchmarks, list):
+            prepared_benchmarks = []
+
+        for benchmark_index, benchmark in enumerate(plan.get("benchmarks", [])):
+            if not isinstance(benchmark, dict):
+                continue
+            occurrence = benchmark.get("occurrence", benchmark_index)
+            if isinstance(occurrence, bool) or not isinstance(occurrence, int):
+                occurrence = benchmark_index
+            prepared_benchmark = (
+                prepared_benchmarks[benchmark_index]
+                if benchmark_index < len(prepared_benchmarks)
+                and isinstance(prepared_benchmarks[benchmark_index], dict)
+                else {}
+            )
+            for section_name in ("parameter_sets", "engine_ids"):
+                source = benchmark.get(section_name)
+                if not isinstance(source, dict):
+                    continue
+                items = source.get("items")
+                if not isinstance(items, list):
+                    items = []
+                exact_count = source.get("count")
+                if isinstance(exact_count, bool) or not isinstance(exact_count, int):
+                    exact_count = None
+                prepared_source = prepared_benchmark.get(section_name)
+                prepared_items = (
+                    prepared_source.get("items")
+                    if isinstance(prepared_source, dict)
+                    else None
+                )
+                if not isinstance(prepared_items, list):
+                    prepared_items = []
+                metadata = {
+                    "benchmark_occurrence": occurrence,
+                    "section": section_name,
+                    "exact_count": exact_count,
+                    "exact_count_known": exact_count is not None,
+                    "available_item_count": len(items),
+                    "returned": source.get("returned", len(items)),
+                    "truncated": bool(source.get("truncated", False)),
+                    "prepare_response_truncated": len(prepared_items) < len(items),
+                }
+                sections.append((metadata, items))
+
+        source_tools = plan.get("tools")
+        if isinstance(source_tools, dict):
+            items = source_tools.get("entries")
+            if not isinstance(items, list):
+                items = []
+            exact_count = self._exact_tool_entry_count(document, source_tools, items)
+            prepared_tools = prepared_plan.get("tools")
+            prepared_items = (
+                prepared_tools.get("entries")
+                if isinstance(prepared_tools, dict)
+                else None
+            )
+            if not isinstance(prepared_items, list):
+                prepared_items = []
+            metadata = {
+                "benchmark_occurrence": None,
+                "section": "tool_entries",
+                "exact_count": exact_count,
+                "exact_count_known": exact_count is not None,
+                "available_item_count": len(items),
+                "returned": len(items),
+                "truncated": bool(source_tools.get("truncated", False)),
+                "prepare_response_truncated": len(prepared_items) < len(items),
+            }
+            sections.append((metadata, items))
+        return sections
+
+    def _exact_tool_entry_count(
+        self, document: Any, tool_plan: dict[str, Any], available_items: list[Any]
+    ) -> int | None:
+        if isinstance(document, dict) and "tool-params" in document:
+            entries = document.get("tool-params")
+            return len(entries) if isinstance(entries, list) else None
+        if tool_plan.get("mode") != "default":
+            if not tool_plan.get("truncated", False):
+                return len(available_items)
+            return None
+        default_tools_path = (
+            self.crucible_home
+            / "subprojects"
+            / "core"
+            / "rickshaw"
+            / "config"
+            / "tool-params.json"
+        )
+        try:
+            default_tools = json.loads(default_tools_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if isinstance(default_tools, list):
+            return len(default_tools)
+        return None
+
+    @staticmethod
+    def _encode_run_detail_cursor(
+        plan_handle: str, plan_fingerprint: str, position: int
+    ) -> str:
+        payload = json.dumps(
+            {
+                "v": 1,
+                "handle": plan_handle,
+                "fingerprint": plan_fingerprint,
+                "position": position,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+    @staticmethod
+    def _decode_run_detail_cursor(
+        cursor: str | None,
+        plan_handle: str,
+        plan_fingerprint: str,
+        total_available: int,
+    ) -> int:
+        if cursor is None:
+            return 0
+        if (
+            not isinstance(cursor, str)
+            or not cursor
+            or len(cursor) > MAX_RENDER_RUN_CURSOR_CHARS
+        ):
+            raise OperationError("user", "run detail cursor is invalid", "invalid_cursor")
+        try:
+            encoded = cursor.encode("ascii")
+            if any(
+                character
+                not in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+                for character in encoded
+            ):
+                raise ValueError("invalid cursor alphabet")
+            payload = base64.urlsafe_b64decode(encoded + b"=" * (-len(encoded) % 4))
+            value = json.loads(payload.decode("utf-8"))
+        except (
+            binascii.Error,
+            UnicodeEncodeError,
+            ValueError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+        ):
+            raise OperationError(
+                "user", "run detail cursor is invalid", "invalid_cursor"
+            ) from None
+        position = value.get("position") if isinstance(value, dict) else None
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"v", "handle", "fingerprint", "position"}
+            or value.get("v") != 1
+            or value.get("handle") != plan_handle
+            or value.get("fingerprint") != plan_fingerprint
+            or isinstance(position, bool)
+            or not isinstance(position, int)
+            or position < 1
+            or position >= total_available
+        ):
+            raise OperationError(
+                "user",
+                "run detail cursor does not match this verified plan",
+                "invalid_cursor",
+            )
+        return position
 
     def plan_component_versions(
         self, document: Any, plan: dict[str, Any] | None = None

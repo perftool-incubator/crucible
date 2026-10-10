@@ -149,11 +149,43 @@ if not plan["validation"]["valid"]:
     stop and report plan["validation"]["errors"]
 
 if plan["limits"]["truncated"]:
-    report that parameter or engine details are a bounded prefix
+    report that the plan carries truncation metadata
 
 counts = call_tool("estimate_run", {"document": run_document})
 report(counts["totals"], counts["runtime"])
 ```
+
+If `prepare_run` says detail prefixes were omitted to fit its response limit,
+page through those details before submission. Send the same input and persisted
+handle on every call, then pass each returned cursor to the next call:
+
+```text
+cursor = null
+while true:
+    arguments = {
+        "plan_handle": plan["plan_handle"],
+        "document": run_document,
+        "limit": 100
+    }
+    if cursor is not null:
+        arguments["cursor"] = cursor
+    page = call_tool("render_run", arguments)
+    inspect(page["details"], page["sections"], page["limits"])
+    if page["complete"]:
+        break
+    cursor = page["next_cursor"]
+```
+
+Each detail entry identifies its benchmark occurrence, section, and item index.
+Section metadata reports exact counts when available, available item counts,
+planner truncation, and whether the original prepare response omitted details.
+`complete` means every item materialized under the saved planning limits has
+been paged through. Section-level `truncated` reports planner truncation, and
+`prepare_response_truncated` identifies detail prefixes omitted only to fit the
+original response. Rendering re-plans on every call, requires
+the original document or approved path, and returns `stale_plan_handle`,
+`expired_plan_handle`, or `invalid_plan_handle` if handle verification fails.
+It is read-only and does not queue a run. Handles expire after one hour.
 
 `prepare_run` and `estimate_run` do not deploy endpoints, start containers,
 create run directories or credentials, write CDM data, or predict benchmark

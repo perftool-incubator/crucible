@@ -33,9 +33,12 @@ from .models import IndexedQueryStatus, Job, JobState
 from .operations import (
     CrucibleOperations,
     OperationError,
+    DEFAULT_RENDER_RUN_PAGE_ITEMS,
     MAX_LOG_RESPONSE_BYTES,
     MAX_MCP_RESPONSE_BYTES,
     MAX_PLAN_RESPONSE_BYTES,
+    MAX_RENDER_RUN_CURSOR_CHARS,
+    MAX_RENDER_RUN_PAGE_ITEMS,
 )
 from .host import (
     DEFAULT_HOST_BRIDGE_SOCKET,
@@ -87,6 +90,7 @@ TOOL_NAMES = (
     "list_endpoints",
     "validate_run",
     "prepare_run",
+    "render_run",
     "estimate_run",
     "start_run",
     "get_run_status",
@@ -415,6 +419,41 @@ TOOL_DEFINITIONS = (
                 "max_tool_entries": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "max_response_bytes": {"type": "integer", "minimum": 1024, "maximum": MAX_PLAN_RESPONSE_BYTES},
             },
+            "additionalProperties": False,
+            "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
+        },
+    },
+    {
+        "name": "render_run",
+        "description": (
+            "Render a deterministic page of credential-redacted structural details from a persisted prepare_run plan. "
+            "Supply the same document or approved path and plan_handle on every call; use next_cursor until complete. "
+            "The plan is revalidated on every page, and no plan payload is stored."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "plan_handle": {"type": "string", "minLength": 1, "maxLength": 128},
+                "document": {"type": "object"},
+                "path": {"type": "string", "minLength": 1},
+                "cursor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_RENDER_RUN_CURSOR_CHARS,
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_RENDER_RUN_PAGE_ITEMS,
+                    "default": DEFAULT_RENDER_RUN_PAGE_ITEMS,
+                },
+                "max_response_bytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "maximum": MAX_PLAN_RESPONSE_BYTES,
+                },
+            },
+            "required": ["plan_handle"],
             "additionalProperties": False,
             "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
         },
@@ -1161,6 +1200,36 @@ class MCPHandler(BaseHTTPRequestHandler):
                     value = self.server.operations.validate_run_file(Path(arguments["path"]))
                 else:
                     return self._error(request_id, -32602, "validate_run requires document or path")
+            elif name == "render_run":
+                if "document" in arguments and "path" in arguments:
+                    return self._error(request_id, -32602, "provide exactly one of document or path")
+                authenticated_token = getattr(self, "_authenticated_token", None)
+                if not isinstance(authenticated_token, str):
+                    raise OperationError(
+                        "authorization",
+                        "authenticated caller identity is unavailable",
+                        "invalid_plan_handle",
+                    )
+                render_options = {
+                    "plan_handle": arguments["plan_handle"],
+                    "caller_fingerprint": fingerprint_token(authenticated_token),
+                    "cursor": arguments.get("cursor"),
+                    "limit": arguments.get("limit", DEFAULT_RENDER_RUN_PAGE_ITEMS),
+                    "max_response_bytes": arguments.get(
+                        "max_response_bytes", MAX_PLAN_RESPONSE_BYTES
+                    ),
+                    "request_id": request_id,
+                }
+                if "document" in arguments:
+                    value = self.server.run_manager.render_run(
+                        document=arguments["document"], **render_options
+                    )
+                elif "path" in arguments:
+                    value = self.server.run_manager.render_run(
+                        path=Path(arguments["path"]), **render_options
+                    )
+                else:
+                    return self._error(request_id, -32602, "render_run requires document or path")
             elif name in {"prepare_run", "estimate_run"}:
                 if "document" in arguments and "path" in arguments:
                     return self._error(request_id, -32602, "provide exactly one of document or path")
