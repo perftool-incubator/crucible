@@ -43,6 +43,12 @@ def token_matches(presented: str, expected: str) -> bool:
     return hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
 
 
+def fingerprint_token(token: str) -> str:
+    """Return a one-way owner fingerprint without retaining the bearer token."""
+
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def validate_token_rotation_path(token_path: Path) -> None:
     """Validate the privileged token destination before replacing it."""
 

@@ -141,22 +141,58 @@ For a valid document, inspect the static execution plan before submission when
 the workload is large or parameter expansion is significant:
 
 ```text
-plan = call_tool("prepare_run", {"document": run_document})
+plan = call_tool("prepare_run", {
+    "document": run_document,
+    "persist": true
+})
 if not plan["validation"]["valid"]:
     stop and report plan["validation"]["errors"]
 
 if plan["limits"]["truncated"]:
-    report that parameter or engine details are a bounded prefix
+    report that the plan carries truncation metadata
 
 counts = call_tool("estimate_run", {"document": run_document})
 report(counts["totals"], counts["runtime"])
 ```
 
-`prepare_run` and `estimate_run` are read-only and side-effect-free. They reuse
-Rickshaw's installed expansion rules, but they do not deploy endpoints, start
-containers, create run directories or credentials, write CDM data, or predict
-benchmark duration. A runtime confidence of `unavailable` is expected unless a
-future trusted static source is configured.
+If `prepare_run` says detail prefixes were omitted to fit its response limit,
+page through those details before submission. Send the same input and persisted
+handle on every call, then pass each returned cursor to the next call:
+
+```text
+cursor = null
+while true:
+    arguments = {
+        "plan_handle": plan["plan_handle"],
+        "document": run_document,
+        "limit": 100
+    }
+    if cursor is not null:
+        arguments["cursor"] = cursor
+    page = call_tool("render_run", arguments)
+    inspect(page["details"], page["sections"], page["limits"])
+    if page["complete"]:
+        break
+    cursor = page["next_cursor"]
+```
+
+Each detail entry identifies its benchmark occurrence, section, and item index.
+Section metadata reports exact counts when available, available item counts,
+planner truncation, and whether the original prepare response omitted details.
+`complete` means every item materialized under the saved planning limits has
+been paged through. Section-level `truncated` reports planner truncation, and
+`prepare_response_truncated` identifies detail prefixes omitted only to fit the
+original response. Rendering re-plans on every call, requires
+the original document or approved path, and returns `stale_plan_handle`,
+`expired_plan_handle`, or `invalid_plan_handle` if handle verification fails.
+It is read-only and does not queue a run. Handles expire after one hour.
+
+`prepare_run` and `estimate_run` do not deploy endpoints, start containers,
+create run directories or credentials, write CDM data, or predict benchmark
+duration. Ordinary planning calls are read-only. `persist: true` makes
+`prepare_run` save only bounded fingerprints and metadata for one hour; the run
+document and plan payload are not stored. A runtime confidence of `unavailable`
+is expected unless a future trusted static source is configured.
 
 ## 4. Submit an idempotent run
 
@@ -168,7 +204,8 @@ idempotency_key = ticket_id + ":benchmark:" + attempt_number
 
 submission = call_tool("start_run", {
     "idempotency_key": idempotency_key,
-    "document": run_document
+    "document": run_document,
+    "plan_handle": plan["plan_handle"]
 })
 
 mcp_job_id = submission["job"]["mcp_job_id"]
@@ -179,18 +216,28 @@ persist_to_ticket({
 })
 ```
 
-The job ID is the MCP handle. Crucible's logger session ID, Rickshaw run ID,
-CDM run ID, and local run directory are separate identifiers and may not be
-available immediately. Preserve every identifier returned by status polling;
-do not treat one as an alias for another.
+The `mcp_job_id` identifies the submitted job. It is separate from the optional
+`plan_handle` returned by a persisted preparation, as well as Crucible's logger
+session ID, Rickshaw run ID, CDM run ID, and local run directory. Some of those
+identifiers may not be available immediately. Preserve every identifier
+returned by status polling; do not treat one as an alias for another.
 
-When a run was inspected with `prepare_run`, pass its `input_digest` as
-`plan_digest`. Crucible re-plans the submitted input immediately before
-launching it and rejects the request with `stale_plan` if the document or
-planner contract no longer matches. The response includes the verified digest,
-derived counts, runtime confidence, and planning limits under `plan`. If no
-plan was prepared, omit `plan_digest`; submission retains the normal validation
-and execution behavior without the extra planning gate.
+When a run was inspected with `prepare_run` using `persist: true`, submit its
+`plan_handle` along with the same document or approved path. Handles are bound
+to the authenticated bearer token, expire after one hour, and can be reused
+until expiry. Crucible creates handles only for valid plans. It re-plans before
+launch and rejects a changed input, planner contract, installed component
+version, or bounded plan with `stale_plan_handle`. An expired owned handle
+returns `expired_plan_handle`;
+unknown and foreign handles share `invalid_plan_handle`. The response includes
+the verified digest, derived counts, runtime confidence, and planning limits
+under `plan`. The store retains an owner-and-expiry tombstone for 24 hours after
+cleanup; an older handle is treated like an unknown handle.
+
+Existing clients can continue to pass `input_digest` as `plan_digest` without
+persisting a handle. The digest flow still re-plans and returns `stale_plan` on
+a mismatch. Do not provide both identifiers. If no plan was prepared, omit both
+and submission retains the normal validation and execution behavior.
 
 If the request is lost and submitted again with the same key and equivalent
 document, Crucible returns the original job with `created: false`. Reusing the
