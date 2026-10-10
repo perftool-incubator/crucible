@@ -40,6 +40,16 @@ CoreMark's native score already combines the contexts within one process.
 Its validation modes and minimum measurement duration must remain intact.
 Those facts are more useful than copying a wrapper's command line unchanged.
 
+Combining related workloads into one subproject does not establish that they
+use the same native implementation. Zathras's STREAM wrapper contains an OpenMP
+STREAM source, while its NUMA STREAM wrapper launches AMD STREAM Dynamic and
+installs jemalloc. Installing an allocator does not establish its use: this
+wrapper omits the AMD build script's jemalloc flag, which defaults to disabled.
+Inspect the actual compile/link command and preload environment before recording
+the effective allocator. Inspect both launch paths before choosing a shared
+adapter. Preserve material differences through explicit workload identity and
+documented parameters rather than assuming NUMA placement is the only difference.
+
 ## 2. Keep build inputs and benchmark parameters separate
 
 Workshop and userenvs supply the software environment. Multiplex and the
@@ -65,6 +75,17 @@ files among relevant integrity inputs. CoreMark's pinned upstream integrity
 check had a stale header digest: record such a failure honestly and explain any
 independent verification rather than claiming the upstream check passed.
 
+Check actual binary storage before rejecting prepared variants as too large.
+During STREAM design review, two OpenMP builds with array lengths 1,048,576 and
+67,108,864 produced identical 22,160-byte executable sizes: their different array
+allocations were in a `NOBITS` BSS section. This does not reduce runtime memory
+needs. Evaluate image size, build cost and runtime allocation separately, and
+keep the native workload identity intact when choosing a variant strategy.
+Compile each declared size: in the reviewed x86_64 GCC build, a 1 GiB-per-array
+variant failed to link under the default code model, while a 2 GiB-per-array
+variant linked with `-mcmodel=medium`. Keep such target-specific build flags in
+Workshop provenance and verify other architectures independently.
+
 ## 3. Verify defaults through the real tools
 
 In CoreMark's first adapter, Multiplex `essentials` replaced explicit requested
@@ -82,6 +103,15 @@ Exercise the installed Multiplex CLI with:
 Compare the expansion, launched command, selected binary and effective manifest.
 Keep fallback defaults consistent where the adapter supplies omitted arguments.
 Bound native work counts as well as wall-clock deadlines.
+
+Inspect `presets.defaults` as well as `essentials`; fio demonstrates their
+different purposes. In the Multiplex implementation inspected for STREAM,
+`override_presets()` applies `defaults` only to an entirely empty parameter set,
+not to each missing field of a partial set. Start-script defaults therefore
+matter when a user supplies only some parameters. Match the intended defaults
+in both interfaces, and verify partial requests through the CLI and adapter.
+Do not use `essentials` to fill ordinary optional values when that would
+replace an explicit user selection.
 
 Endpoint settings and benchmark parameters are different interfaces. For
 example, disabling tool execution did not prevent default tool image selection
@@ -107,6 +137,13 @@ provenance together. Require native correctness checks before emitting a valid
 performance metric. A zero process exit status alone may not establish native
 benchmark validity.
 
+Bind postprocessing to the iteration arguments as well as the retained output
+and manifest. STREAM review found that a hook ignored iteration arguments and
+could accept a valid Triad artifact for a Copy request. Internal
+agreement between two files cannot detect a valid artifact from the wrong
+iteration. Compare effective parameters, including start-script fallbacks,
+before publishing a score.
+
 For CoreMark this means checking both standard seed modes, expected CRCs and
 context counts, iteration/score consistency, and the native minimum duration.
 Only the performance mode supplies its throughput metric.
@@ -115,6 +152,12 @@ Record calibration and validation separately from measured work. When native
 output provides duration but no absolute timestamps, document any reconstructed
 measurement endpoints as estimates, explain the anchoring method and its
 uncertainty, and check that they fit within the recorded process bounds.
+
+If a process envelope is represented by nanoseconds but the metric interface
+requires integer milliseconds, round its start down and completion up. Flooring
+both endpoints can trim up to a millisecond from the completion bound. State
+this quantization explicitly; an outward-rounded process envelope still does
+not identify the native kernel's measured interval.
 
 Test invalid output, manifest/raw-output disagreement, timeouts and interrupted
 execution. A failed run must not produce a valid-looking performance score.
@@ -178,6 +221,35 @@ establish live partitioned support.
 Do not enable partitioning or turn it into a readiness requirement by default.
 When it is required, prepare and verify system tuning before testing it; an
 endpoint option alone does not create isolated CPUs.
+
+NUMA topology discovery and workload placement are separate interfaces.
+Uperf's `cpu-pin=numa` locates the NIC's NUMA node and applies CPU affinity;
+it does not bind memory. Toolbox's sysfs topology helpers describe CPUs and
+nodes, but do not establish what a container is permitted to use. Verify
+effective CPU affinity and allowed memory nodes before selecting CPU and memory
+policies. Inspect allocation and first-touch behavior in the actual native
+workload before describing a placement mode as local or remote memory.
+
+Check inherited runtime environment variables as well as the process mask.
+During STREAM review, a small GNU OpenMP helper showed that inherited
+`OMP_PLACES={1}` caused two threads to use CPU 1 despite `GOMP_CPU_AFFINITY=0,1`;
+clearing `OMP_PLACES` restored the requested split across CPUs 0 and 1.
+Normalize or explicitly account for conflicting OpenMP placement controls, and
+verify effective worker placement rather than inferring it from the launch
+command alone. This helper check does not establish live STREAM placement.
+
+Verify each topology helper's return contract. Toolbox's
+`get_thread_siblings(cpu)` excludes the requested CPU itself. STREAM's first
+grouping attempt lost SMT relationships and could select duplicate CPUs on
+wider SMT systems. Form the group from the CPU plus its siblings, intersect
+with permitted CPUs, and assert that the selected CPU list is unique. Use a
+fixture matching the actual helper rather than an assumed inclusive API.
+
+Memory availability also depends on cgroup hierarchy. A leaf with an unlimited
+`memory.max` can still be constrained by a finite parent. Walk visible cgroup
+ancestors and account for their current usage and applicable limits, along
+with host availability and explicit node placement. Fixture validation of a
+finite parent limit is separate from a live constrained-container check.
 
 ## 8. Validate a development installation before publication
 
