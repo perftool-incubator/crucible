@@ -5,6 +5,10 @@ performance testing framework. A benchmark is a standalone git
 repository that integrates with rickshaw (the orchestrator) via a set
 of JSON configuration files and executable scripts.
 
+Also read [Benchmark integration lessons](benchmark-integration-lessons.md)
+for practical checks on defaults, Workshop dependencies, metric aggregation,
+development validation and publication order.
+
 ## Repository naming
 
 Benchmark repos follow the naming convention `bench-<name>` (e.g.,

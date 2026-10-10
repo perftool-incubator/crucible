@@ -78,6 +78,7 @@ The `docs/` directory contains detailed guides for how each crucible subsystem o
 When creating new benchmarks or tools, consult these before writing any code:
 
 - **`docs/implementing-a-new-benchmark.md`** — Required files, rickshaw.json schema, client-server messaging, post-processing, multiplex.json, and reference implementations.
+- **`docs/benchmark-integration-lessons.md`** — Living lessons from benchmark integrations: verify role/parameter defaults, separate Workshop inputs, validate native/CDM semantics, and publish subprojects before catalog integration. Read before adding a benchmark and extend it with verified lessons from each integration.
 - **`docs/implementing-a-new-tool.md`** — Required files, collector whitelist/blacklist, tool parameters, and reference implementations.
 - **`docs/implementing-a-new-endpoint.md`** — Directory structure, validation protocol, base module, engine deployment, roadblock integration, and reference implementations.
 - **`docs/developer-guide.md`** — Development environment, repository structure, testing, cross-repo coordination, PR workflow, code conventions, and debugging.
