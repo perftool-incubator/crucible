@@ -166,6 +166,16 @@ Distinguish an adapter signal test from a full Crucible abort test.
 
 ## 6. Define CDM aggregation before debugging CDM
 
+Validate generated metric descriptors against stock CDM `indexDefs`, including
+`metric_desc.names`. `CDMMetrics` accepts a names dictionary, but arbitrary keys
+are not necessarily indexable: STREAM completed 16 native samples and document
+generation before indexing rejected its unknown `result-variant` field. The
+supported `desc` name can carry the `STREAM-derived` annotation. Require
+successful indexing and ordinary period-scoped queries before claiming
+integration acceptance. Valid native samples can be reprocessed for a
+postprocessor-only correction; record the original native adapter and revised
+postprocessor identities separately.
+
 CoreMark initially declared throughput with `default-aggregation=avg`. That
 decision led us to patch CDM before adequately comparing existing benchmark
 contracts. The correct default for total throughput across independent clients
@@ -184,6 +194,21 @@ Choose the default aggregation for the metric's meaning across breakout
 dimensions. Do not choose `avg` merely because the native metric is a rate or
 because repeated benchmark results should be averaged. Inspect existing metrics
 with matching semantics, not only matching units or output shape.
+
+Inspect the generated period bounds before predicting a concurrent-client
+summary. In the Rickshaw revision inspected for STREAM, same-name client
+periods are combined using their intersection, not their union. Derive the
+expected value from the actual query window and stock CDM weighting, including
+its inclusive millisecond bounds and treatment of partially overlapping data.
+Source inspection and synthetic endpoint-weighting checks do not establish
+live concurrency acceptance. Summing native best-rate summaries also does not
+establish instantaneous combined bandwidth when the kernels execute at
+different times within their process envelopes.
+
+Check single-sample summary semantics too. The inspected stock summary uses
+sample standard deviation, which is undefined for one observation and appears
+as JSON `null`. Do not replace that with zero in an independent acceptance
+calculation; compare mean/min/max and require the expected undefined dispersion.
 
 The investigation also exposed a genuine CDM defect: period-scoped `avg`
 queries can count descriptors belonging to other samples in their denominator.
@@ -270,6 +295,14 @@ Record the framework revisions, benchmark revision or staged tree, run file,
 expanded parameters, image identity, raw logs and queries used for acceptance.
 A staged tree identifies contents and modes but is not a published commit.
 
+Verify that every Workshop file input survives source-image-service bundling.
+STREAM's first full trial failed before native execution because its required
+`NOTICE.md` existed in the local checkout but was omitted from the image
+request. The inspected client and service exclude `.md` files, along with
+documentation directories. Keep build-required notices in an included format
+and location, and check the materialized bundle as well as the local recipe.
+A direct cached-image build with local mounts does not exercise this transfer.
+
 A useful progression is:
 
 1. Local source build, native validation and adapter checks.
@@ -283,6 +316,16 @@ State which checks actually ran. A fresh benchmark requirements stage on a
 cached base does not prove cold acquisition of all userenv dependencies.
 Parser fixtures do not replace native execution. One tested userenv does not
 establish support for every userenv named in a future CI plan.
+
+Verify CI selection in the generator and reusable workflow, not just the
+schema or scenario. At the Rickshaw revision inspected for STREAM, the schema
+permits a per-benchmark userenv allowlist, but the job generator does not apply
+it. The reusable workflow selects a global userenv matrix, and run-file
+creation overwrites an explicit scenario userenv. Its Rickshaw checkout also
+uses `master`; a benchmark development branch alone cannot supply a new CI
+benchmark enum and scenario. Coordinate those dependencies or use an explicit
+development workflow to test them. Treat unqualified matrix lanes as coverage
+work to complete, and back support claims with actual builds and runs.
 
 Check the first failing lifecycle phase before editing code. For example,
 CoreMark execution passed while a missing executable bit broke postprocessing;
