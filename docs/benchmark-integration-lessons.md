@@ -251,6 +251,13 @@ ancestors and account for their current usage and applicable limits, along
 with host availability and explicit node placement. Fixture validation of a
 finite parent limit is separate from a live constrained-container check.
 
+For restricted allowed memory nodes, host-wide `MemAvailable` can include
+memory the workload cannot allocate. STREAM review reproduced this gap with
+ample global memory and insufficient free memory on the permitted node.
+Account for observable permitted-node capacity, and fail clearly if the
+topology needed for that check is incomplete. This remains a snapshot guard;
+inherited memory policies and concurrent allocations need separate evidence.
+
 ## 8. Validate a development installation before publication
 
 Use a local benchmark repository and unofficial registration first. Keep it
