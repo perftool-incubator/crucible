@@ -510,6 +510,25 @@ class TestCrucibleOperations(unittest.TestCase):
             "contract_version", "input_digest", "validation", "totals", "runtime", "limits"
         })
 
+    def test_prepare_run_response_reserve_keeps_room_for_handle_metadata(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{"parameter_sets": {"items": ["detail" * 20]}}],
+            "totals": {"global_iteration_count": 1},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False, "warnings": []},
+        }
+        with patch.object(self.operations, "_build_run_plan", return_value=plan):
+            prepared = self.operations.prepare_run(
+                {}, max_response_bytes=1500, _response_reserve_bytes=300
+            )
+
+        self.assertLessEqual(
+            self.operations._mcp_response_size(prepared), 1200
+        )
+
     def test_list_tools_returns_installed_tool_metadata(self):
         tool_repository = self.root / "repos" / "git@github.com:perftool-incubator/tool-sysstat.git"
         tool_repository.mkdir(parents=True)

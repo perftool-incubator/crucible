@@ -1,6 +1,7 @@
 """Typed, non-execution Crucible operations for the MCP contract."""
 
 import copy
+import hashlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 import errno
@@ -11,6 +12,7 @@ import os
 import re
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -56,6 +58,8 @@ MAX_BENCHMARK_VALIDATION_PATTERN_CHARS = 512
 MAX_PLAN_MATERIALIZED_BYTES = 8 * MAX_PLAN_RESPONSE_BYTES
 MAX_PLAN_ENGINE_ID_TOKEN_CHARS = 256
 MAX_PLAN_ENGINE_ID_BYTES = 8 * MAX_PLAN_RESPONSE_BYTES
+MAX_COMPONENT_FINGERPRINT_FILES = 100_000
+MAX_COMPONENT_FINGERPRINT_BYTES = 256 * 1_048_576
 MAX_LOCAL_RUN_OFFSET = 1_000_000
 # XZ preset 9 uses a 64 MiB dictionary and needs additional decoder memory;
 # keep the decompressed-output bound separate so valid high-preset metadata is
@@ -4656,6 +4660,20 @@ class CrucibleOperations:
         return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
 
     @classmethod
+    def plan_handle_response_reserve_bytes(cls) -> int:
+        """Measure the wire-size cost of the fixed-length handle metadata."""
+
+        # JobStore uses token_urlsafe(32) and an ISO UTC expiry at second
+        # precision, so these placeholders match the serialized field sizes.
+        baseline = {"probe": None}
+        with_handle = {
+            **baseline,
+            "plan_handle": "x" * 43,
+            "expires_at": "9999-12-31T23:59:59+00:00",
+        }
+        return cls._mcp_response_size(with_handle) - cls._mcp_response_size(baseline)
+
+    @classmethod
     def _ensure_mcp_response_size(
         cls, value: dict[str, Any], request_id: Any, description: str
     ) -> None:
@@ -4783,6 +4801,7 @@ class CrucibleOperations:
         max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
         *,
         request_id: Any = None,
+        _response_reserve_bytes: int = 0,
     ) -> dict[str, Any]:
         """Return a bounded, side-effect-free plan for an inline run document."""
 
@@ -4790,7 +4809,209 @@ class CrucibleOperations:
         plan = self._build_run_plan(
             document, max_parameter_sets, max_engine_ids, max_tool_entries
         )
-        return self._bound_plan_response(plan, max_response_bytes, request_id)
+        response_budget = max_response_bytes - _response_reserve_bytes
+        if response_budget < 1:
+            raise OperationError(
+                "framework", "run plan exceeds the response-byte limit", "result_too_large"
+            )
+        return self._bound_plan_response(plan, response_budget, request_id)
+
+    def plan_component_versions(
+        self, document: Any, plan: dict[str, Any] | None = None
+    ) -> dict[str, str]:
+        """Fingerprint the installed planner and run components used by a plan."""
+
+        revision_cache: dict[str, str] = {}
+
+        def revision(path: Path) -> str:
+            resolved = str(Path(path).resolve())
+            if resolved not in revision_cache:
+                revision_cache[resolved] = self._repository_revision(Path(resolved))
+            return revision_cache[resolved]
+
+        versions: dict[str, str] = {
+            "crucible": revision(self.crucible_home),
+            "rickshaw": revision(
+                self.crucible_home / "subprojects" / "core" / "rickshaw"
+            ),
+            "multiplex": revision(
+                self.crucible_home / "subprojects" / "core" / "multiplex"
+            ),
+        }
+        run_components: dict[str, str] = {}
+        if isinstance(document, dict):
+            benchmarks = document.get("benchmarks", [])
+            if isinstance(benchmarks, list):
+                for item in benchmarks:
+                    name = item.get("name") if isinstance(item, dict) else None
+                    directory = self._benchmark_directory(name) if isinstance(name, str) else None
+                    if directory is not None:
+                        run_components[f"benchmark:{name}"] = revision(directory)
+
+            tools = document.get("tool-params")
+            if not isinstance(tools, list) and isinstance(plan, dict):
+                tool_plan = plan.get("tools")
+                tools = tool_plan.get("entries") if isinstance(tool_plan, dict) else []
+            if isinstance(tools, list):
+                for item in tools:
+                    if not isinstance(item, dict) or item.get("enabled") == "no":
+                        continue
+                    name = item.get("tool")
+                    directory = self._tool_directory(name) if isinstance(name, str) else None
+                    if directory is not None:
+                        run_components[f"tool:{name}"] = revision(directory)
+
+        versions["run_components"] = hashlib.sha256(
+            json.dumps(
+                run_components, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8")
+        ).hexdigest()
+        return versions
+
+    @staticmethod
+    def _repository_revision(path: Path) -> str:
+        """Fingerprint a checkout's commit, file modes, and working-tree state."""
+
+        unavailable = OperationError(
+            "framework",
+            "an installed component version could not be identified",
+            "component_version_unavailable",
+        )
+        try:
+            resolved = Path(path).resolve()
+            git_command = ["git", "-C", str(resolved)]
+            completed = subprocess.run(
+                [*git_command, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            working_tree = subprocess.run(
+                [*git_command, "diff", "--raw", "--abbrev=64", "-z", "HEAD"],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            untracked = subprocess.run(
+                [
+                    *git_command,
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                ],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            tracked = subprocess.run(
+                [*git_command, "ls-files", "-z"],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            # A path-only fallback cannot distinguish different installed code.
+            raise unavailable from None
+        revision = completed.stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+            raise unavailable
+
+        untracked_paths = [name for name in untracked.stdout.split(b"\0") if name]
+        tracked_paths = [name for name in tracked.stdout.split(b"\0") if name]
+        if (
+            len(untracked_paths) > MAX_COMPONENT_FINGERPRINT_FILES
+            or len(tracked_paths) > MAX_COMPONENT_FINGERPRINT_FILES
+        ):
+            raise unavailable
+
+        fingerprint = hashlib.sha256()
+        fingerprint.update(b"head\0")
+        fingerprint.update(revision.encode("ascii"))
+        # The raw diff includes full object IDs and paths for staged and
+        # unstaged changes, without copying changed source into the record.
+        fingerprint.update(b"\0tracked-worktree\0")
+        fingerprint.update(working_tree.stdout)
+
+        # Inspect modes directly because core.filemode=false can hide changes
+        # to executable bits from Git's diff output.
+        for relative_name in sorted(set(tracked_paths)):
+            source = resolved / os.fsdecode(relative_name)
+            try:
+                metadata = source.lstat()
+            except FileNotFoundError:
+                metadata = None
+            except OSError:
+                raise unavailable from None
+            fingerprint.update(b"\0tracked-mode\0")
+            fingerprint.update(relative_name)
+            fingerprint.update(b"\0")
+            if metadata is None:
+                fingerprint.update(b"missing")
+            else:
+                fingerprint.update(str(stat.S_IFMT(metadata.st_mode)).encode("ascii"))
+                fingerprint.update(b":")
+                fingerprint.update(str(stat.S_IMODE(metadata.st_mode)).encode("ascii"))
+
+        total_untracked_bytes = 0
+        for relative_name in sorted(set(untracked_paths)):
+            source = resolved / os.fsdecode(relative_name)
+            try:
+                metadata = source.lstat()
+                fingerprint.update(b"\0untracked\0")
+                fingerprint.update(relative_name)
+                fingerprint.update(b"\0")
+                fingerprint.update(str(stat.S_IFMT(metadata.st_mode)).encode("ascii"))
+                fingerprint.update(b":")
+                fingerprint.update(str(stat.S_IMODE(metadata.st_mode)).encode("ascii"))
+                fingerprint.update(b"\0")
+
+                if stat.S_ISREG(metadata.st_mode):
+                    if (
+                        total_untracked_bytes + metadata.st_size
+                        > MAX_COMPONENT_FINGERPRINT_BYTES
+                    ):
+                        raise unavailable
+                    fingerprint.update(metadata.st_size.to_bytes(8, "big"))
+                    file_bytes = 0
+                    with source.open("rb") as component_file:
+                        opened = os.fstat(component_file.fileno())
+                        if (opened.st_dev, opened.st_ino) != (
+                            metadata.st_dev,
+                            metadata.st_ino,
+                        ):
+                            raise unavailable
+                        while chunk := component_file.read(1_048_576):
+                            file_bytes += len(chunk)
+                            if (
+                                total_untracked_bytes + file_bytes
+                                > MAX_COMPONENT_FINGERPRINT_BYTES
+                            ):
+                                raise unavailable
+                            fingerprint.update(chunk)
+                    latest = source.lstat()
+                    if (
+                        file_bytes != metadata.st_size
+                        or (latest.st_dev, latest.st_ino, latest.st_size, latest.st_mtime_ns)
+                        != (
+                            metadata.st_dev,
+                            metadata.st_ino,
+                            metadata.st_size,
+                            metadata.st_mtime_ns,
+                        )
+                    ):
+                        raise unavailable
+                    total_untracked_bytes += file_bytes
+                elif stat.S_ISLNK(metadata.st_mode):
+                    fingerprint.update(os.fsencode(os.readlink(source)))
+                else:
+                    # Special files do not have a stable source fingerprint.
+                    raise unavailable
+            except OSError:
+                raise unavailable from None
+
+        return fingerprint.hexdigest()
 
     def _build_run_plan(
         self,
@@ -5450,6 +5671,7 @@ class CrucibleOperations:
         max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
         *,
         request_id: Any = None,
+        _response_reserve_bytes: int = 0,
     ) -> dict[str, Any]:
         """Read an approved run file and return its bounded static plan."""
 
@@ -5460,6 +5682,7 @@ class CrucibleOperations:
             max_tool_entries,
             max_response_bytes,
             request_id=request_id,
+            _response_reserve_bytes=_response_reserve_bytes,
         )
 
     def estimate_run_file(

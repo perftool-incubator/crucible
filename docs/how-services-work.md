@@ -293,9 +293,9 @@ through the standard `tools/list` request; the current interface is:
 | `unarchive_local_run` | Restore a local run archive into the approved run root. |
 | `describe_benchmark` | Return credential-redacted metadata for one installed benchmark, including accepted parameter validation rules from `multiplex.json` when available. |
 | `validate_run` | Validate an inline run document or an approved run-file path. |
-| `prepare_run` | Build a bounded, side-effect-free plan showing benchmark expansion, samples, tools, and static topology. |
+| `prepare_run` | Build a bounded, side-effect-free plan showing benchmark expansion, samples, tools, and static topology; optionally persist an expiring plan handle. |
 | `estimate_run` | Return derived run counts and runtime-confidence information without executing the run. |
-| `start_run` | Submit an asynchronous, idempotent Crucible run; optionally verify a `prepare_run` digest. |
+| `start_run` | Submit an asynchronous, idempotent Crucible run; optionally verify a `prepare_run` digest or durable plan handle. |
 | `postprocess_local_run` | Post-process an approved local run directory asynchronously. |
 | `index_local_run` | Generate CDM documents and index an approved local run directory asynchronously. |
 | `delete_indexed_result` | Delete one indexed CDM result without deleting its local run artifacts. |
@@ -373,7 +373,7 @@ Local run and archive discovery omits entries when a recognized credential-like
 value appears in their names or paths; credential-shaped run IDs are omitted
 from local run listings as well.
 
-`prepare_run` and `estimate_run` are read-only planning operations. They reuse
+By default, `prepare_run` and `estimate_run` are read-only planning operations. They reuse
 Rickshaw's canonical parameter-expansion rules through the installed planning
 library, return bounded parameter prefixes with exact cardinalities, and honor
 client-supplied ceilings for parameter sets, engine IDs, tool entries, and
@@ -396,8 +396,31 @@ After inspecting a run with `prepare_run`, a client can pass the returned
 `input_digest` as `plan_digest` to `start_run`. Crucible re-plans the submitted
 input immediately before launch, rejects a changed document with `stale_plan`,
 and stores the verified digest and bounded plan summary on the asynchronous job
-for later status polling. Omitting `plan_digest` preserves the normal
-validation and execution path.
+for later status polling. Existing digest-only clients remain supported.
+
+For a durable plan reference, call `prepare_run` with `persist: true`. Crucible
+returns an opaque `plan_handle` and `expires_at`; the default `persist: false`
+does not write plan metadata. The client must still provide the same document
+or an approved path to `start_run`. A handle is created only when validation
+succeeds; invalid plans return their bounded validation result without a
+handle. Before queuing, Crucible checks the authenticated caller fingerprint,
+expiration, canonical input digest, planner contract, installed component
+versions, effective planning limits, and a fresh fingerprint of the bounded
+plan. A changed plan returns `stale_plan_handle`, an expired owned handle
+returns `expired_plan_handle`, and unknown or foreign handles return the same
+`invalid_plan_handle` error.
+
+Handles expire one hour after creation, remain reusable until then, and
+identical persisted preparations by the same caller reuse their live handle.
+The SQLite job database retains at most 1,000 live handles globally; handle
+operations clean up expired rows and do not evict live rows. Handle records
+contain fingerprints and bounded metadata only, never a run document or plan
+payload. After cleanup, an owner-and-expiry tombstone is retained for 24 hours
+so an expired handle continues to return `expired_plan_handle`; older handles
+are treated like unknown handles. Token rotation changes the caller fingerprint
+and invalidates access to previous handles. `plan_digest` and `plan_handle`
+cannot be supplied together; `start_run`'s idempotency key still governs
+duplicate submissions.
 
 #### MCP documentation resources
 

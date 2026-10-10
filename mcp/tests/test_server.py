@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import socket
 import sqlite3
@@ -210,6 +211,8 @@ class TestServer(unittest.TestCase):
             256,
         )
         self.assertIn("plan_digest", tools["start_run"]["inputSchema"]["properties"])
+        self.assertIn("plan_handle", tools["start_run"]["inputSchema"]["properties"])
+        self.assertIn("persist", tools["prepare_run"]["inputSchema"]["properties"])
         self.assertIn(
             "does not discover configured or reachable deployment targets",
             tools["list_endpoints"]["description"],
@@ -496,6 +499,113 @@ class TestServer(unittest.TestCase):
             document={"benchmarks": []},
             plan_digest="old",
         )
+
+    def test_prepare_run_persist_returns_a_reused_handle_within_response_bound(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "a" * 64,
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False},
+        }
+        versions = {"crucible": "revision", "run_components": "b" * 64}
+        request_body = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "prepare_run",
+                "arguments": {
+                    "document": {"benchmarks": []},
+                    "persist": True,
+                    "max_response_bytes": 2048,
+                },
+            },
+        }
+        with (
+            patch.object(self.server.operations, "prepare_run", side_effect=lambda *args, **kwargs: dict(plan)),
+            patch.object(self.server.operations, "plan_component_versions", return_value=versions),
+        ):
+            responses = []
+            for request_id in (60, 61):
+                request = {**request_body, "id": request_id}
+                status, payload = self.request(
+                    "POST", "/mcp", json.dumps(request), self.token
+                )
+                self.assertEqual(status, 200)
+                responses.append(payload["result"]["structuredContent"])
+
+        first, second = responses
+        self.assertEqual(first["plan_handle"], second["plan_handle"])
+        self.assertEqual(first["expires_at"], second["expires_at"])
+        self.assertLessEqual(
+            self.server.operations._mcp_response_size(first, 60), 2048
+        )
+        self.assertEqual(
+            self.server.jobs._connection.execute(
+                "SELECT COUNT(*) FROM plan_handles"
+            ).fetchone()[0],
+            1,
+        )
+
+    def test_start_run_passes_plan_handle_and_authenticated_caller_fingerprint(self):
+        job = Job(
+            mcp_job_id="handled-job",
+            idempotency_key="handled-key",
+            request_hash="hash",
+            state=JobState.QUEUED,
+            result_status=ResultStatus.NOT_AVAILABLE,
+        )
+        self.server.run_manager = Mock()
+        self.server.run_manager.submit.return_value = (job, True)
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 62,
+            "method": "tools/call",
+            "params": {
+                "name": "start_run",
+                "arguments": {
+                    "idempotency_key": "handled-key",
+                    "document": {"benchmarks": []},
+                    "plan_handle": "opaque-handle",
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["structuredContent"]["job"]["mcp_job_id"], "handled-job")
+        self.server.run_manager.submit.assert_called_once_with(
+            "handled-key",
+            document={"benchmarks": []},
+            plan_handle="opaque-handle",
+            caller_fingerprint=hashlib.sha256(self.token.encode("utf-8")).hexdigest(),
+        )
+
+    def test_start_run_rejects_both_plan_identifiers(self):
+        self.server.run_manager = Mock()
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 63,
+            "method": "tools/call",
+            "params": {
+                "name": "start_run",
+                "arguments": {
+                    "idempotency_key": "both-plans",
+                    "document": {"benchmarks": []},
+                    "plan_digest": "digest",
+                    "plan_handle": "handle",
+                },
+            },
+        })
+
+        status, payload = self.request("POST", "/mcp", body, self.token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32602)
+        self.assertIn("at most one", payload["error"]["message"])
+        self.server.run_manager.submit.assert_not_called()
 
     def test_metadata_response_bound_includes_wire_request_id(self):
         run_directory = self.server.operations.local_run_root / "wire-metadata"
