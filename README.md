@@ -98,6 +98,7 @@ oslat | Latency measurement tool that simulates a continuously polling applicati
 osnoise | Operating system noise measurement | https://github.com/perftool-incubator/bench-osnoise
 pytorch | PyTorch ML benchmark automation | https://github.com/perftool-incubator/bench-pytorch
 sleep | Minimal benchmark for CI and testing | https://github.com/perftool-incubator/bench-sleep
+stream | STREAM memory bandwidth benchmark | https://github.com/perftool-incubator/bench-stream
 timerlat | Operating system timer latency measurement | https://github.com/perftool-incubator/bench-timerlat
 tracer | Framework for Linux kernel latency tracer/workload tools | https://github.com/perftool-incubator/bench-tracer
 trafficgen | TRex based high speed packet forwarding throughput and loss analysis using binary search logic | https://github.com/perftool-incubator/bench-trafficgen

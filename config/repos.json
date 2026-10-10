@@ -121,6 +121,16 @@
             }
         },
         {
+            "name": "stream",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-stream",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "oslat",
             "type": "benchmark",
             "repository": "https://github.com/perftool-incubator/bench-oslat",
