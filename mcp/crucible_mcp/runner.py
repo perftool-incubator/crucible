@@ -1,5 +1,6 @@
 """Asynchronous supervision for MCP-launched Crucible runs."""
 
+import hashlib
 import json
 import lzma
 import os
@@ -9,6 +10,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -17,11 +19,18 @@ from .host import (
     host_bridge_command,
     host_bridge_environment,
 )
-from .jobs import JobConflictError, JobStore, request_hash
+from .jobs import (
+    JobConflictError,
+    JobError,
+    JobStore,
+    PlanHandleExpiredError,
+    request_hash,
+)
 from .models import Job, JobState, ResultStatus
 from .operations import (
     MAX_LOG_REDACTION_LINES,
     MAX_METADATA_RESPONSE_BYTES,
+    MAX_PLAN_RESPONSE_BYTES,
     CrucibleOperations,
     OperationError,
 )
@@ -55,6 +64,15 @@ def _plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
         "runtime": plan.get("runtime", {}),
         "limits": plan.get("limits", {}),
     }
+
+
+def _bounded_plan_fingerprint(plan: dict[str, Any]) -> str:
+    """Fingerprint the exact bounded plan without storing its payload."""
+
+    encoded = json.dumps(
+        plan, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class SupervisorInspectionError(RuntimeError):
@@ -96,6 +114,178 @@ class RunManager:
         self.run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._threads: dict[str, threading.Thread] = {}
 
+    @staticmethod
+    def _validated_plan_handle_limits(handle_record) -> dict[str, int]:
+        limits = handle_record.effective_limits
+        required_limits = {
+            "max_parameter_sets",
+            "max_engine_ids",
+            "max_tool_entries",
+            "max_response_bytes",
+        }
+        if set(limits) != required_limits or any(
+            isinstance(limits[key], bool)
+            or not isinstance(limits[key], int)
+            or limits[key] < 1
+            for key in required_limits
+        ) or any(
+            limits[key] > 1000
+            for key in (
+                "max_parameter_sets",
+                "max_engine_ids",
+                "max_tool_entries",
+            )
+        ) or not 1024 <= limits["max_response_bytes"] <= MAX_PLAN_RESPONSE_BYTES:
+            raise OperationError(
+                "framework", "stored plan handle is invalid", "invalid_plan_handle"
+            )
+        return limits
+
+    def render_run(
+        self,
+        plan_handle: str,
+        *,
+        caller_fingerprint: str | None,
+        document: Any | None = None,
+        path: Path | None = None,
+        cursor: str | None = None,
+        limit: int = 100,
+        max_response_bytes: int = MAX_PLAN_RESPONSE_BYTES,
+        request_id: Any = None,
+    ) -> dict[str, Any]:
+        """Verify a durable plan handle and render one read-only detail page."""
+
+        if (document is None) == (path is None):
+            raise OperationError(
+                "user", "provide exactly one of document or path", "invalid_input"
+            )
+        if not isinstance(caller_fingerprint, str) or len(caller_fingerprint) != 64:
+            raise OperationError(
+                "authorization", "plan handle is unavailable", "invalid_plan_handle"
+            )
+        try:
+            handle_record = self.store.get_plan_handle(plan_handle, caller_fingerprint)
+        except PlanHandleExpiredError as exc:
+            raise OperationError(
+                "user", "plan handle has expired", "expired_plan_handle"
+            ) from exc
+        except JobError as exc:
+            raise OperationError(
+                "framework", "stored plan handle is invalid", "invalid_plan_handle"
+            ) from exc
+        if handle_record is None:
+            raise OperationError(
+                "authorization",
+                "plan handle is invalid or unavailable",
+                "invalid_plan_handle",
+            )
+
+        limits = self._validated_plan_handle_limits(handle_record)
+        if document is not None:
+            try:
+                encoded_document = json.dumps(
+                    document, separators=(",", ":"), ensure_ascii=True
+                )
+            except (TypeError, ValueError) as exc:
+                raise OperationError(
+                    "user", "run document is not valid JSON", "invalid_json"
+                ) from exc
+            if len(encoded_document.encode("utf-8")) > self.max_inline_bytes:
+                raise OperationError(
+                    "user", "inline document exceeds size limit", "too_large"
+                )
+            canonical_document = document
+        else:
+            assert path is not None
+            canonical_document = self.operations.read_run_document(path)
+
+        try:
+            full_plan = self.operations._build_run_plan(
+                canonical_document,
+                limits["max_parameter_sets"],
+                limits["max_engine_ids"],
+                limits["max_tool_entries"],
+            )
+            self.operations._validate_plan_response_limit(limits["max_response_bytes"])
+            response_budget = (
+                limits["max_response_bytes"]
+                - self.operations.plan_handle_response_reserve_bytes()
+            )
+            if response_budget < 1:
+                raise OperationError(
+                    "framework",
+                    "run plan exceeds the response-byte limit",
+                    "result_too_large",
+                )
+            prepared_plan = self.operations._bound_plan_response(
+                full_plan, response_budget, None
+            )
+        except OperationError as exc:
+            if exc.category == "user" or exc.code == "result_too_large":
+                raise OperationError(
+                    "user",
+                    "plan handle no longer matches the submitted run or installed planner",
+                    "stale_plan_handle",
+                ) from exc
+            raise
+
+        current_versions = self.operations.plan_component_versions(
+            canonical_document, prepared_plan
+        )
+        current_fingerprint = _bounded_plan_fingerprint(prepared_plan)
+        if (
+            prepared_plan.get("input_digest") != handle_record.input_digest
+            or prepared_plan.get("contract_version") != handle_record.planner_contract
+            or current_versions != handle_record.component_versions
+            or current_fingerprint != handle_record.plan_fingerprint
+            or not full_plan.get("validation", {}).get("valid", False)
+        ):
+            raise OperationError(
+                "user",
+                "plan handle no longer matches the submitted run or installed planner",
+                "stale_plan_handle",
+            )
+
+        try:
+            latest_handle = self.store.get_plan_handle(plan_handle, caller_fingerprint)
+        except PlanHandleExpiredError as exc:
+            raise OperationError(
+                "user", "plan handle has expired", "expired_plan_handle"
+            ) from exc
+        except JobError as exc:
+            raise OperationError(
+                "framework", "stored plan handle is invalid", "invalid_plan_handle"
+            ) from exc
+        if latest_handle is None:
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            if now >= handle_record.expires_at:
+                raise OperationError(
+                    "user", "plan handle has expired", "expired_plan_handle"
+                )
+            raise OperationError(
+                "authorization",
+                "plan handle is invalid or unavailable",
+                "invalid_plan_handle",
+            )
+        if latest_handle != handle_record:
+            raise OperationError(
+                "user",
+                "plan handle no longer matches the submitted run or installed planner",
+                "stale_plan_handle",
+            )
+
+        return self.operations.render_run_page(
+            full_plan,
+            prepared_plan,
+            canonical_document,
+            plan_handle,
+            handle_record.plan_fingerprint,
+            cursor=cursor,
+            limit=limit,
+            max_response_bytes=max_response_bytes,
+            request_id=request_id,
+        )
+
     def submit(
         self,
         idempotency_key: str,
@@ -103,6 +293,8 @@ class RunManager:
         document: Any | None = None,
         path: Path | None = None,
         plan_digest: str | None = None,
+        plan_handle: str | None = None,
+        caller_fingerprint: str | None = None,
         verified_plan: dict[str, Any] | None = None,
     ) -> tuple[Job, bool]:
         self._validate_idempotency_key(idempotency_key)
@@ -133,6 +325,23 @@ class RunManager:
 
         if plan_digest is not None and (not isinstance(plan_digest, str) or not plan_digest):
             raise OperationError("user", "plan_digest is required", "invalid_plan")
+        if plan_handle is not None and (
+            not isinstance(plan_handle, str) or not plan_handle
+        ):
+            raise OperationError("user", "plan_handle is required", "invalid_plan")
+        if plan_digest is not None and plan_handle is not None:
+            raise OperationError(
+                "user",
+                "provide at most one of plan_digest or plan_handle",
+                "invalid_plan",
+            )
+        if plan_handle is not None and (
+            not isinstance(caller_fingerprint, str)
+            or len(caller_fingerprint) != 64
+        ):
+            raise OperationError(
+                "authorization", "plan handle is unavailable", "invalid_plan_handle"
+            )
 
         profile_pins: dict[str, dict[str, Any]] = {}
         requested_profiles = run_profile_names(canonical_document)
@@ -161,6 +370,12 @@ class RunManager:
             }
         if plan_digest is not None:
             request["plan_digest"] = plan_digest
+        if plan_handle is not None:
+            request["plan_handle"] = plan_handle
+            # A token rotation creates a new owner fingerprint. Including that
+            # one-way value in the idempotency hash keeps a rotated caller from
+            # replaying a prior handle-backed submission.
+            request["plan_handle_caller_fingerprint"] = caller_fingerprint
         existing = self.store.get_by_idempotency_key(idempotency_key)
         if existing is not None:
             if existing.request_hash != request_hash(request):
@@ -187,6 +402,88 @@ class RunManager:
                     "user",
                     "plan digest does not match the submitted run",
                     "stale_plan",
+                )
+
+        if plan_handle is not None:
+            try:
+                handle_record = self.store.get_plan_handle(
+                    plan_handle, caller_fingerprint
+                )
+            except PlanHandleExpiredError as exc:
+                raise OperationError(
+                    "user", "plan handle has expired", "expired_plan_handle"
+                ) from exc
+            if handle_record is None:
+                raise OperationError(
+                    "authorization",
+                    "plan handle is invalid or unavailable",
+                    "invalid_plan_handle",
+                )
+
+            limits = self._validated_plan_handle_limits(handle_record)
+
+            try:
+                verified_plan = self.operations.prepare_run(
+                    canonical_document,
+                    max_parameter_sets=limits["max_parameter_sets"],
+                    max_engine_ids=limits["max_engine_ids"],
+                    max_tool_entries=limits["max_tool_entries"],
+                    max_response_bytes=limits["max_response_bytes"],
+                    request_id=None,
+                    _response_reserve_bytes=(
+                        self.operations.plan_handle_response_reserve_bytes()
+                    ),
+                )
+            except OperationError as exc:
+                if exc.category == "user" or exc.code == "result_too_large":
+                    raise OperationError(
+                        "user",
+                        "plan handle no longer matches the submitted run or installed planner",
+                        "stale_plan_handle",
+                    ) from exc
+                raise
+            current_versions = self.operations.plan_component_versions(
+                canonical_document, verified_plan
+            )
+            current_fingerprint = _bounded_plan_fingerprint(verified_plan)
+            if (
+                verified_plan.get("input_digest") != handle_record.input_digest
+                or verified_plan.get("contract_version") != handle_record.planner_contract
+                or current_versions != handle_record.component_versions
+                or current_fingerprint != handle_record.plan_fingerprint
+            ):
+                raise OperationError(
+                    "user",
+                    "plan handle no longer matches the submitted run or installed planner",
+                    "stale_plan_handle",
+                )
+            if not verified_plan.get("validation", {}).get("valid", False):
+                raise OperationError("user", json.dumps(verified_plan), "invalid_run")
+
+            try:
+                latest_handle = self.store.get_plan_handle(
+                    plan_handle, caller_fingerprint
+                )
+            except PlanHandleExpiredError as exc:
+                raise OperationError(
+                    "user", "plan handle has expired", "expired_plan_handle"
+                ) from exc
+            if latest_handle is None:
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                if now >= handle_record.expires_at:
+                    raise OperationError(
+                        "user", "plan handle has expired", "expired_plan_handle"
+                    )
+                raise OperationError(
+                    "authorization",
+                    "plan handle is invalid or unavailable",
+                    "invalid_plan_handle",
+                )
+            if latest_handle != handle_record:
+                raise OperationError(
+                    "user",
+                    "plan handle no longer matches the submitted run or installed planner",
+                    "stale_plan_handle",
                 )
 
         plan_summary = _plan_summary(verified_plan) if verified_plan else None

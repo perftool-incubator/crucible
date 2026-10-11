@@ -215,7 +215,7 @@ running that rebuild when it is needed.
 
 ### 4. Public MCP operations
 
-The stable public adapter exposes two operations:
+The stable public adapter exposes three operations:
 
 #### `prepare_run`
 
@@ -223,7 +223,11 @@ The stable public adapter exposes two operations:
 deployment command. It validates the input and returns a bounded normalized
 plan plus safe structural details. It must not create a runnable directory,
 generate credentials, start containers, contact an endpoint, or reserve
-resources.
+resources. `persist: true` optionally stores only bounded handle metadata so
+the same plan can be verified by later `render_run` or `start_run` calls; the
+default remains non-persistent. A handle is created only when plan validation
+succeeds; invalid plans return their bounded validation result without a
+handle.
 
 Its purpose is to let an agent inspect exactly what it is about to submit. The
 name should not imply that execution resources have been prepared.
@@ -231,15 +235,29 @@ name should not imply that execution resources have been prepared.
 #### `estimate_run`
 
 `estimate_run` consumes the same input and returns the plan's derived counts and
-runtime information. A later version may accept an opaque, immutable plan
-handle returned by `prepare_run`, but that persistence model should not be
-introduced until its retention, authorization, idempotency, and stale-plan
-semantics are specified.
+runtime information. It remains transient; durable handles are created only by
+`prepare_run`.
 The initial result should clearly say that runtime is unavailable unless a
 trusted static source exists. It should not fabricate a duration from a
 benchmark name or from a generic default.
 
-Both tools should accept explicit limits such as maximum expanded iterations,
+#### `render_run`
+
+`render_run` requires a persisted `prepare_run` handle and the same inline
+document or approved path on every call. It re-plans under the handle's saved
+planning limits, verifies ownership, expiry, input digest, planner contract,
+component versions, effective limits, and the bounded plan fingerprint, then
+returns a deterministic cursor page of redacted structural details. Entries
+identify benchmark occurrence, detail section, and item index. Section metadata
+reports exact cardinalities when available, available item counts, planner
+truncation, and whether the original prepare response omitted detail prefixes.
+The page has independent item and serialized-response limits. Cursors bind to
+the handle, verified plan fingerprint, and traversal position. Rendering is
+read-only, stores no plan payload, and does not queue or execute a run. Handle
+ownership, expiry, or plan mismatches retain the `invalid_plan_handle`,
+`expired_plan_handle`, and `stale_plan_handle` errors.
+
+Planning tools should accept explicit limits such as maximum expanded iterations,
 maximum parameter summaries, and maximum response bytes. The server must cap
 them to safe configured ceilings; client-supplied larger limits must not turn
 planning into an unbounded expansion operation. The Crucible adapter currently
@@ -248,42 +266,48 @@ per-occurrence parameter-set ceiling would permit more than 100,000 aggregate
 expansions or 1,000,000 aggregate parameter entries. Crucible intentionally
 follows the configured Rickshaw and Multiplex revisions (currently their
 primary `master` branches) rather than pinning planner commits in
-`config/repos.json`. The planner APIs must therefore be available in those
-configured revisions before these tools are enabled; the tools must not
-silently depend on incompatible versions installed on a host.
+`config/repos.json`. The planner APIs must be available in those configured
+revisions; the tools must not silently depend on incompatible versions
+installed on a host.
 
 The tools are registered in `crucible_info`, `tools/list`, and the MCP interface
 table. `validate_run` remains useful for a quick schema-only check; planning is
 the optional next step when a client needs bounded expansion and topology
-details before submission.
-
-A separate `render_run` operation is deliberately deferred. If clients need
-paginated parameter-level inspection later, it should read an immutable plan
-and return redacted structural data—not shell commands, generated credentials,
-or a runnable directory. For the first version, that inspection belongs in the
-bounded `prepare_run` response.
+details before submission. If `prepare_run` omits details to fit its response,
+clients can traverse the materialized detail lists with `render_run`. The
+plan's existing truncation metadata continues to show details beyond planning
+limits that were never materialized.
 
 ## Relationship to `start_run`
 
-`start_run` remains the authoritative execution path. Clients that call
-`prepare_run` can pass its `input_digest` as `plan_digest`; `start_run` then
+`start_run` remains the authoritative execution path. Clients can continue to
+pass a `prepare_run` result's `input_digest` as `plan_digest`; Crucible
 re-plans the submitted input immediately before launch and rejects a stale
-digest rather than executing a document that no longer matches the inspected
-plan. The submission response includes the verified digest, derived counts,
-runtime confidence, and planning limits alongside the MCP job.
+digest. For clients that need the inspected bounded plan itself to remain
+stable across requests or service restarts, `prepare_run` accepts
+`persist: true` and returns an opaque `plan_handle` plus `expires_at`. The
+caller must still submit the document or an approved path to `start_run` with
+that handle. Crucible verifies ownership, expiry, canonical input digest,
+planner contract, installed component versions, effective limits, and a fresh
+fingerprint of the bounded plan before creating a job. A mismatch returns
+`stale_plan_handle`; an expired owned handle returns `expired_plan_handle`.
+Unknown and foreign handles share the same `invalid_plan_handle` response.
+
+Handles contain only bounded fingerprints and metadata, never the run document
+or plan payload. They are bound to a one-way fingerprint of the authenticated
+bearer token, expire one hour after creation, and can be reused until expiry.
+Identical persisted preparations by the same caller reuse their live handle.
+The service retains at most 1,000 live handles globally; new handles fail with
+`plan_handle_capacity` while full, and handle operations remove expired
+records. Owner-and-expiry tombstones are retained for 24 hours after cleanup so
+expired handles keep their distinct error status during that window; older
+handles are treated like unknown handles. `start_run`'s idempotency key still
+governs duplicate submissions.
 
 This is an integrity check, not a promise that remote capacity or mutable
 deployment state has remained unchanged. Clients that omit `plan_digest` retain
 the normal validation and execution behavior without the additional planning
-gate.
-
-The first implementation should not persist plan documents as durable jobs.
-Plans are cheap, deterministic views of input; persistence would add lifecycle,
-retention, and authorization questions without helping execution recovery. If a
-future `prepare_run` creates a plan handle for `start_run`, it must be immutable,
-service-owned, bounded, expiring, idempotent, and fingerprinted against the
-input plus the relevant installed component versions. `start_run` must
-revalidate that fingerprint before execution.
+gate. Requests must not provide both `plan_digest` and `plan_handle`.
 
 ## Security and resource bounds
 

@@ -333,6 +333,193 @@ class TestCrucibleOperations(unittest.TestCase):
             self.operations._mcp_response_size(bounded, "request"), 1024
         )
 
+    def test_render_run_pages_all_materialized_details_with_stable_cursors(self):
+        document = {
+            "tool-params": [
+                {"tool": "sysstat", "password": "render-secret"},
+                {"tool": "procstat"},
+            ]
+        }
+        plan = {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{
+                "name": "fio",
+                "occurrence": 0,
+                "parameter_sets": {
+                    "count": 4,
+                    "returned": 2,
+                    "items": [
+                        {"arg": "size", "val": "1G" + ("a" * 1000)},
+                        {"arg": "size", "val": "2G" + ("b" * 1000)},
+                    ],
+                    "truncated": True,
+                },
+                "engine_ids": {
+                    "count": 3,
+                    "items": ["1", "2"],
+                    "truncated": True,
+                },
+            }],
+            "tools": {
+                "mode": "explicit",
+                "entries": [
+                    {"tool": "sysstat", "password": "render-secret"},
+                    {"tool": "procstat"},
+                ],
+                "truncated": False,
+            },
+            "limits": {
+                "max_parameter_sets": 2,
+                "max_engine_ids": 2,
+                "max_tool_entries": 2,
+                "truncated": True,
+                "warnings": ["detail prefixes omitted to stay within the response-byte limit"],
+            },
+        }
+        prepared = self.operations._bound_plan_response(plan, 4096, "prepare")
+        self.assertEqual(prepared["benchmarks"][0]["parameter_sets"]["items"], [])
+        self.assertEqual(prepared["tools"]["entries"], [])
+
+        rendered = []
+        cursor = None
+        first_cursor = None
+        while True:
+            page = self.operations.render_run_page(
+                plan,
+                prepared,
+                document,
+                "handle-one",
+                "a" * 64,
+                cursor=cursor,
+                limit=2,
+                max_response_bytes=8192,
+                request_id="render-request",
+            )
+            self.assertLessEqual(
+                self.operations._mcp_response_size(page, "render-request"), 8192
+            )
+            if cursor is None:
+                first_cursor = page["next_cursor"]
+                self.assertEqual(
+                    self.operations.render_run_page(
+                        plan,
+                        prepared,
+                        document,
+                        "handle-one",
+                        "a" * 64,
+                        limit=2,
+                        max_response_bytes=8192,
+                        request_id="render-request",
+                    ),
+                    page,
+                )
+            rendered.extend(page["details"])
+            if page["complete"]:
+                self.assertIsNone(page["next_cursor"])
+                break
+            cursor = page["next_cursor"]
+            self.assertIsNotNone(cursor)
+
+        self.assertEqual(len(rendered), 6)
+        self.assertEqual(
+            [(item["benchmark_occurrence"], item["section"], item["item_index"])
+             for item in rendered],
+            [
+                (0, "parameter_sets", 0),
+                (0, "parameter_sets", 1),
+                (0, "engine_ids", 0),
+                (0, "engine_ids", 1),
+                (None, "tool_entries", 0),
+                (None, "tool_entries", 1),
+            ],
+        )
+        sections = page["sections"]
+        self.assertEqual(
+            [section["exact_count"] for section in sections], [4, 3, 2]
+        )
+        self.assertEqual(
+            [section["available_item_count"] for section in sections], [2, 2, 2]
+        )
+        self.assertTrue(sections[0]["truncated"])
+        self.assertTrue(sections[1]["truncated"])
+        self.assertFalse(sections[2]["truncated"])
+        self.assertTrue(all(section["prepare_response_truncated"] for section in sections))
+        self.assertTrue(page["limits"]["truncated"])
+        self.assertNotIn("render-secret", json.dumps(rendered))
+        self.assertIsNotNone(first_cursor)
+        with self.assertRaises(OperationError) as context:
+            self.operations.render_run_page(
+                plan,
+                prepared,
+                document,
+                "different-handle",
+                "a" * 64,
+                cursor=first_cursor,
+                limit=2,
+                max_response_bytes=8192,
+            )
+        self.assertEqual(context.exception.code, "invalid_cursor")
+
+    def test_render_run_reduces_page_to_response_limit_and_rejects_oversized_item(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{
+                "occurrence": 0,
+                "parameter_sets": {
+                    "count": 2,
+                    "returned": 2,
+                    "items": [
+                        {"arg": "payload", "val": "x" * 1000},
+                        {"arg": "payload", "val": "y" * 1000},
+                    ],
+                    "truncated": False,
+                },
+            }],
+            "limits": {"truncated": False, "warnings": []},
+        }
+        prepared = self.operations._bound_plan_detail_skeleton(plan)
+        page = self.operations.render_run_page(
+            plan,
+            prepared,
+            {},
+            "handle",
+            "b" * 64,
+            limit=2,
+            max_response_bytes=4096,
+        )
+        self.assertLess(len(page["details"]), 2)
+        self.assertFalse(page["complete"])
+        self.assertIsNotNone(page["next_cursor"])
+        self.assertLessEqual(self.operations._mcp_response_size(page), 4096)
+
+        oversized = {
+            **plan,
+            "benchmarks": [{
+                "occurrence": 0,
+                "parameter_sets": {
+                    "count": 1,
+                    "returned": 1,
+                    "items": [{"arg": "payload", "val": "z" * 10000}],
+                    "truncated": False,
+                },
+            }],
+        }
+        oversized_prepared = self.operations._bound_plan_detail_skeleton(oversized)
+        with self.assertRaises(OperationError) as context:
+            self.operations.render_run_page(
+                oversized,
+                oversized_prepared,
+                {},
+                "handle",
+                "c" * 64,
+                max_response_bytes=1024,
+            )
+        self.assertEqual(context.exception.code, "result_too_large")
+
     def test_plan_response_bound_does_not_serialize_oversized_detail_expansion(self):
         large_value = "x" * 250_000
         plan = {
@@ -509,6 +696,25 @@ class TestCrucibleOperations(unittest.TestCase):
         self.assertEqual(set(estimate), {
             "contract_version", "input_digest", "validation", "totals", "runtime", "limits"
         })
+
+    def test_prepare_run_response_reserve_keeps_room_for_handle_metadata(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{"parameter_sets": {"items": ["detail" * 20]}}],
+            "totals": {"global_iteration_count": 1},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False, "warnings": []},
+        }
+        with patch.object(self.operations, "_build_run_plan", return_value=plan):
+            prepared = self.operations.prepare_run(
+                {}, max_response_bytes=1500, _response_reserve_bytes=300
+            )
+
+        self.assertLessEqual(
+            self.operations._mcp_response_size(prepared), 1200
+        )
 
     def test_list_tools_returns_installed_tool_metadata(self):
         tool_repository = self.root / "repos" / "git@github.com:perftool-incubator/tool-sysstat.git"

@@ -24,6 +24,7 @@ from crucible_mcp.runner import (
     MAX_LOG_REDACTION_LINES,
     RunManager,
     SupervisorInspectionError,
+    _bounded_plan_fingerprint,
 )
 
 
@@ -1425,6 +1426,416 @@ class TestRunManager(unittest.TestCase):
                 )
 
         self.assertEqual(raised.exception.code, "stale_plan")
+
+    def _persist_test_plan_handle(self, plan, *, caller_fingerprint="a" * 64, **updates):
+        versions = {"crucible": "revision-1", "run_components": "c" * 64}
+        values = {
+            "caller_fingerprint": caller_fingerprint,
+            "input_digest": plan["input_digest"],
+            "planner_contract": plan["contract_version"],
+            "component_versions": versions,
+            "plan_fingerprint": _bounded_plan_fingerprint(plan),
+            "effective_limits": {
+                "max_parameter_sets": 1000,
+                "max_engine_ids": 1000,
+                "max_tool_entries": 1000,
+                "max_response_bytes": 1_048_576,
+            },
+        }
+        values.update(updates)
+        handle, _ = self.store.create_or_get_plan_handle(**values)
+        return handle, versions
+
+    @staticmethod
+    def _renderable_plan():
+        return {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "benchmarks": [{
+                "name": "example",
+                "occurrence": 0,
+                "parameter_sets": {
+                    "count": 2,
+                    "returned": 2,
+                    "items": [
+                        {"arg": "size", "val": "1G"},
+                        {"arg": "size", "val": "2G"},
+                    ],
+                    "truncated": False,
+                },
+            }],
+            "tools": {"mode": "explicit", "entries": [], "truncated": False},
+            "limits": {"truncated": False, "warnings": []},
+        }
+
+    def test_render_run_verifies_handle_and_resumes_after_store_restart(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = self._renderable_plan()
+        handle, versions = self._persist_test_plan_handle(plan)
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", return_value=plan),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            first = self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                document=document,
+                limit=1,
+            )
+
+        self.assertEqual(first["details"][0]["item_index"], 0)
+        self.assertFalse(first["complete"])
+        self.assertIsNotNone(first["next_cursor"])
+        self.assertEqual(
+            self.store._connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
+            0,
+        )
+
+        database_path = self.store.database_path
+        self.store.close()
+        self.store = JobStore(database_path)
+        self.manager = RunManager(
+            self.store,
+            self.manager.operations,
+            self.root / "runs",
+            [sys.executable, "-c", "pass"],
+            host_execution=False,
+        )
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", return_value=plan),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            second = self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                document=document,
+                cursor=first["next_cursor"],
+                limit=1,
+            )
+
+        self.assertEqual(second["details"][0]["item_index"], 1)
+        self.assertTrue(second["complete"])
+        self.assertIsNone(second["next_cursor"])
+        self.assertEqual(
+            self.store._connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
+            0,
+        )
+
+    def test_render_run_uses_saved_limits_and_reloads_an_approved_path(self):
+        input_root = self.root / "inputs"
+        input_root.mkdir()
+        run_file = input_root / "render-run.json"
+        document = {"benchmarks": [{"name": "example"}]}
+        run_file.write_text(json.dumps(document), encoding="utf-8")
+        run_file.chmod(0o600)
+        self.manager.operations.input_policy = InputPolicy([input_root])
+
+        plan = self._renderable_plan()
+        effective_limits = {
+            "max_parameter_sets": 7,
+            "max_engine_ids": 8,
+            "max_tool_entries": 9,
+            "max_response_bytes": 4096,
+        }
+        handle, versions = self._persist_test_plan_handle(
+            plan, effective_limits=effective_limits
+        )
+        planner = Mock(return_value=plan)
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", planner),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            page = self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                path=run_file,
+                max_response_bytes=8192,
+            )
+
+        self.assertTrue(page["complete"])
+        planner.assert_called_once_with(document, 7, 8, 9)
+
+    def test_render_run_rejects_foreign_expired_and_stale_handles(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = self._renderable_plan()
+        handle, versions = self._persist_test_plan_handle(plan)
+
+        with patch.object(self.manager.operations, "_build_run_plan") as planner:
+            with self.assertRaises(OperationError) as foreign:
+                self.manager.render_run(
+                    handle.handle,
+                    caller_fingerprint="z" * 64,
+                    document=document,
+                )
+        self.assertEqual(foreign.exception.code, "invalid_plan_handle")
+        planner.assert_not_called()
+
+        with (
+            patch.object(self.manager.operations, "_build_run_plan", return_value=plan),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            changed = {**plan, "input_digest": "changed-input"}
+            with patch.object(
+                self.manager.operations, "_build_run_plan", return_value=changed
+            ):
+                with self.assertRaises(OperationError) as stale:
+                    self.manager.render_run(
+                        handle.handle,
+                        caller_fingerprint="a" * 64,
+                        document=document,
+                    )
+            self.assertEqual(stale.exception.code, "stale_plan_handle")
+
+            changed_plan = {
+                **plan,
+                "totals": {"global_iteration_count": 99},
+            }
+            with patch.object(
+                self.manager.operations, "_build_run_plan", return_value=changed_plan
+            ):
+                with self.assertRaises(OperationError) as changed_fingerprint:
+                    self.manager.render_run(
+                        handle.handle,
+                        caller_fingerprint="a" * 64,
+                        document=document,
+                    )
+            self.assertEqual(changed_fingerprint.exception.code, "stale_plan_handle")
+
+            with patch.object(
+                self.manager.operations,
+                "plan_component_versions",
+                return_value={**versions, "crucible": "changed-revision"},
+            ):
+                with self.assertRaises(OperationError) as changed_version:
+                    self.manager.render_run(
+                        handle.handle,
+                        caller_fingerprint="a" * 64,
+                        document=document,
+                    )
+            self.assertEqual(changed_version.exception.code, "stale_plan_handle")
+
+        self.store._connection.execute(
+            "UPDATE plan_handles SET expires_at = ? WHERE handle = ?",
+            ("2000-01-01T00:00:00+00:00", handle.handle),
+        )
+        self.store._connection.commit()
+        with self.assertRaises(OperationError) as expired:
+            self.manager.render_run(
+                handle.handle,
+                caller_fingerprint="a" * 64,
+                document=document,
+            )
+        self.assertEqual(expired.exception.code, "expired_plan_handle")
+
+    def test_submission_verifies_owned_plan_handle_before_launch(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True},
+            "totals": {"global_iteration_count": 1},
+        }
+        caller = "a" * 64
+        handle, versions = self._persist_test_plan_handle(plan)
+        with (
+            patch.object(self.manager.operations, "prepare_run", return_value=plan) as planner,
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            job, created = self.manager.submit(
+                "key-handle",
+                document=document,
+                plan_handle=handle.handle,
+                caller_fingerprint=caller,
+            )
+
+        self.assertTrue(created)
+        self.assertEqual(planner.call_args.kwargs["request_id"], None)
+        self.assertEqual(planner.call_args.kwargs["max_parameter_sets"], 1000)
+        self.assertEqual(
+            planner.call_args.kwargs["_response_reserve_bytes"],
+            self.manager.operations.plan_handle_response_reserve_bytes(),
+        )
+        self.assertEqual(job.plan_digest, None)
+        self.manager._threads[job.mcp_job_id].join(timeout=5)
+
+    def test_submission_rejects_unknown_expired_and_foreign_plan_handles(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True},
+        }
+        handle, _ = self._persist_test_plan_handle(plan)
+
+        with self.assertRaises(OperationError) as foreign:
+            self.manager.submit(
+                "key-foreign-handle",
+                document=document,
+                plan_handle=handle.handle,
+                caller_fingerprint="z" * 64,
+            )
+        self.assertEqual(foreign.exception.code, "invalid_plan_handle")
+
+        self.store._connection.execute(
+            "UPDATE plan_handles SET expires_at = ? WHERE handle = ?",
+            ("2000-01-01T00:00:00+00:00", handle.handle),
+        )
+        self.store._connection.commit()
+        with self.assertRaises(OperationError) as expired:
+            self.manager.submit(
+                "key-expired-handle",
+                document=document,
+                plan_handle=handle.handle,
+                caller_fingerprint="a" * 64,
+            )
+        self.assertEqual(expired.exception.code, "expired_plan_handle")
+
+    def test_submission_rejects_stale_plan_handle_before_queueing(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        inspected = {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True},
+            "totals": {"global_iteration_count": 1},
+        }
+        changed = {**inspected, "totals": {"global_iteration_count": 2}}
+        handle, versions = self._persist_test_plan_handle(inspected)
+        with (
+            patch.object(self.manager.operations, "prepare_run", return_value=changed),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            with self.assertRaises(OperationError) as raised:
+                self.manager.submit(
+                    "key-stale-handle",
+                    document=document,
+                    plan_handle=handle.handle,
+                    caller_fingerprint="a" * 64,
+                )
+
+        self.assertEqual(raised.exception.code, "stale_plan_handle")
+        self.assertIsNone(self.store.get_by_idempotency_key("key-stale-handle"))
+
+    def test_submission_rejects_changed_input_and_installed_versions(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        inspected = {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True},
+        }
+        handle, versions = self._persist_test_plan_handle(inspected)
+        cases = (
+            ("changed-input", {**inspected, "input_digest": "new-input"}, versions),
+            (
+                "changed-version",
+                inspected,
+                {**versions, "crucible": "revision-2"},
+            ),
+        )
+        for suffix, fresh_plan, fresh_versions in cases:
+            with (
+                patch.object(self.manager.operations, "prepare_run", return_value=fresh_plan),
+                patch.object(
+                    self.manager.operations,
+                    "plan_component_versions",
+                    return_value=fresh_versions,
+                ),
+            ):
+                with self.assertRaises(OperationError) as raised:
+                    self.manager.submit(
+                        f"key-{suffix}",
+                        document=document,
+                        plan_handle=handle.handle,
+                        caller_fingerprint="a" * 64,
+                    )
+            self.assertEqual(raised.exception.code, "stale_plan_handle")
+            self.assertIsNone(self.store.get_by_idempotency_key(f"key-{suffix}"))
+
+    def test_plan_handle_is_reusable_and_submission_retry_is_idempotent(self):
+        document = {"benchmarks": [{"name": "example"}]}
+        plan = {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True},
+        }
+        handle, versions = self._persist_test_plan_handle(plan)
+        with (
+            patch.object(self.manager.operations, "prepare_run", return_value=plan) as planner,
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            first, created = self.manager.submit(
+                "key-handle-retry",
+                document=document,
+                plan_handle=handle.handle,
+                caller_fingerprint="a" * 64,
+            )
+            duplicate, duplicate_created = self.manager.submit(
+                "key-handle-retry",
+                document=document,
+                plan_handle=handle.handle,
+                caller_fingerprint="a" * 64,
+            )
+
+        self.assertTrue(created)
+        self.assertFalse(duplicate_created)
+        self.assertEqual(first.mcp_job_id, duplicate.mcp_job_id)
+        self.assertEqual(planner.call_count, 1)
+        self.assertIsNotNone(self.store.get_plan_handle(handle.handle, "a" * 64))
+        self.manager._threads[first.mcp_job_id].join(timeout=5)
+
+    def test_plan_handle_submission_supports_approved_path(self):
+        input_root = self.root / "mcp" / "inputs"
+        input_root.mkdir(parents=True)
+        path = input_root / "handled.json"
+        document = {"benchmarks": [{"name": "example"}]}
+        path.write_text(json.dumps(document), encoding="utf-8")
+        path.chmod(0o600)
+        plan = {
+            "contract_version": "1",
+            "input_digest": "input-digest",
+            "validation": {"valid": True},
+        }
+        handle, versions = self._persist_test_plan_handle(plan)
+        with (
+            patch.object(self.manager.operations, "prepare_run", return_value=plan),
+            patch.object(
+                self.manager.operations, "plan_component_versions", return_value=versions
+            ),
+        ):
+            job, created = self.manager.submit(
+                "key-handle-path",
+                path=path,
+                plan_handle=handle.handle,
+                caller_fingerprint="a" * 64,
+            )
+
+        self.assertTrue(created)
+        self.manager._threads[job.mcp_job_id].join(timeout=5)
+
+    def test_submission_rejects_both_plan_identifiers(self):
+        with self.assertRaises(OperationError) as raised:
+            self.manager.submit(
+                "key-both-plans",
+                document={"benchmarks": [{"name": "example"}]},
+                plan_digest="digest",
+                plan_handle="handle",
+                caller_fingerprint="a" * 64,
+            )
+        self.assertEqual(raised.exception.code, "invalid_plan")
 
     def test_failed_runner_is_persisted(self):
         manager = RunManager(

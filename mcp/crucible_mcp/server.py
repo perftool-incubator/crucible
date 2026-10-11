@@ -8,6 +8,7 @@ shell commands or exposing arbitrary filesystem access.
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import socket
@@ -21,21 +22,36 @@ from urllib.parse import urlsplit, urlunsplit
 
 from jsonschema import Draft201909Validator
 
-from .jobs import JobConflictError, JobError, JobNotFoundError, JobStore
+from .jobs import (
+    JobConflictError,
+    JobError,
+    JobNotFoundError,
+    JobStore,
+    PlanHandleCapacityError,
+)
 from .models import IndexedQueryStatus, Job, JobState
 from .operations import (
     CrucibleOperations,
     OperationError,
+    DEFAULT_RENDER_RUN_PAGE_ITEMS,
     MAX_LOG_RESPONSE_BYTES,
     MAX_MCP_RESPONSE_BYTES,
     MAX_PLAN_RESPONSE_BYTES,
+    MAX_RENDER_RUN_CURSOR_CHARS,
+    MAX_RENDER_RUN_PAGE_ITEMS,
 )
 from .host import (
     DEFAULT_HOST_BRIDGE_SOCKET,
     host_bridge_command,
     host_bridge_environment,
 )
-from .policy import InputPolicy, PolicyError, read_token, token_matches
+from .policy import (
+    InputPolicy,
+    PolicyError,
+    fingerprint_token,
+    read_token,
+    token_matches,
+)
 from .runner import MAX_IDEMPOTENCY_KEY_LENGTH, RunManager
 from .audit import AuditLogger
 from ssh_identity_profiles import (
@@ -74,6 +90,7 @@ TOOL_NAMES = (
     "list_endpoints",
     "validate_run",
     "prepare_run",
+    "render_run",
     "estimate_run",
     "start_run",
     "get_run_status",
@@ -373,7 +390,7 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "prepare_run",
-        "description": "Build a bounded, side-effect-free plan for an inline run document or approved run-file path.",
+        "description": "Build a bounded, side-effect-free plan for an inline run document or approved run-file path; optionally persist an expiring opaque handle for start_run.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -383,6 +400,7 @@ TOOL_DEFINITIONS = (
                 "max_engine_ids": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "max_tool_entries": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "max_response_bytes": {"type": "integer", "minimum": 1024, "maximum": MAX_PLAN_RESPONSE_BYTES},
+                "persist": {"type": "boolean"},
             },
             "additionalProperties": False,
             "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
@@ -406,13 +424,49 @@ TOOL_DEFINITIONS = (
         },
     },
     {
+        "name": "render_run",
+        "description": (
+            "Render a deterministic page of credential-redacted structural details from a persisted prepare_run plan. "
+            "Supply the same document or approved path and plan_handle on every call; use next_cursor until complete. "
+            "The plan is revalidated on every page, and no plan payload is stored."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "plan_handle": {"type": "string", "minLength": 1, "maxLength": 128},
+                "document": {"type": "object"},
+                "path": {"type": "string", "minLength": 1},
+                "cursor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_RENDER_RUN_CURSOR_CHARS,
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_RENDER_RUN_PAGE_ITEMS,
+                    "default": DEFAULT_RENDER_RUN_PAGE_ITEMS,
+                },
+                "max_response_bytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "maximum": MAX_PLAN_RESPONSE_BYTES,
+                },
+            },
+            "required": ["plan_handle"],
+            "additionalProperties": False,
+            "oneOf": [{"required": ["document"]}, {"required": ["path"]}],
+        },
+    },
+    {
         "name": "start_run",
-        "description": "Start an idempotent asynchronous Crucible run, optionally verifying a prepared plan digest.",
+        "description": "Start an idempotent asynchronous Crucible run, optionally verifying a prepared plan digest or durable plan handle.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "idempotency_key": {"type": "string", "minLength": 1, "maxLength": MAX_IDEMPOTENCY_KEY_LENGTH},
                 "plan_digest": {"type": "string", "minLength": 1, "maxLength": 128},
+                "plan_handle": {"type": "string", "minLength": 1, "maxLength": 128},
                 "document": {"type": "object"},
                 "path": {"type": "string", "minLength": 1},
             },
@@ -1146,6 +1200,36 @@ class MCPHandler(BaseHTTPRequestHandler):
                     value = self.server.operations.validate_run_file(Path(arguments["path"]))
                 else:
                     return self._error(request_id, -32602, "validate_run requires document or path")
+            elif name == "render_run":
+                if "document" in arguments and "path" in arguments:
+                    return self._error(request_id, -32602, "provide exactly one of document or path")
+                authenticated_token = getattr(self, "_authenticated_token", None)
+                if not isinstance(authenticated_token, str):
+                    raise OperationError(
+                        "authorization",
+                        "authenticated caller identity is unavailable",
+                        "invalid_plan_handle",
+                    )
+                render_options = {
+                    "plan_handle": arguments["plan_handle"],
+                    "caller_fingerprint": fingerprint_token(authenticated_token),
+                    "cursor": arguments.get("cursor"),
+                    "limit": arguments.get("limit", DEFAULT_RENDER_RUN_PAGE_ITEMS),
+                    "max_response_bytes": arguments.get(
+                        "max_response_bytes", MAX_PLAN_RESPONSE_BYTES
+                    ),
+                    "request_id": request_id,
+                }
+                if "document" in arguments:
+                    value = self.server.run_manager.render_run(
+                        document=arguments["document"], **render_options
+                    )
+                elif "path" in arguments:
+                    value = self.server.run_manager.render_run(
+                        path=Path(arguments["path"]), **render_options
+                    )
+                else:
+                    return self._error(request_id, -32602, "render_run requires document or path")
             elif name in {"prepare_run", "estimate_run"}:
                 if "document" in arguments and "path" in arguments:
                     return self._error(request_id, -32602, "provide exactly one of document or path")
@@ -1155,7 +1239,87 @@ class MCPHandler(BaseHTTPRequestHandler):
                     if key in arguments
                 }
                 response_limit = arguments.get("max_response_bytes", MAX_PLAN_RESPONSE_BYTES)
-                if "document" in arguments:
+                if name == "prepare_run" and arguments.get("persist", False):
+                    authenticated_token = getattr(self, "_authenticated_token", None)
+                    if not isinstance(authenticated_token, str):
+                        raise OperationError(
+                            "authorization",
+                            "authenticated caller identity is unavailable",
+                            "invalid_plan_handle",
+                        )
+                    if "document" in arguments:
+                        run_document = arguments["document"]
+                    elif "path" in arguments:
+                        run_document = self.server.operations.read_run_document(
+                            Path(arguments["path"])
+                        )
+                    else:
+                        return self._error(
+                            request_id, -32602, f"{name} requires document or path"
+                        )
+
+                    effective_limits = {
+                        "max_parameter_sets": limits.get("max_parameter_sets", 1000),
+                        "max_engine_ids": limits.get("max_engine_ids", 1000),
+                        "max_tool_entries": limits.get("max_tool_entries", 1000),
+                        "max_response_bytes": response_limit,
+                    }
+                    value = self.server.operations.prepare_run(
+                        run_document,
+                        max_response_bytes=response_limit,
+                        request_id=None,
+                        _response_reserve_bytes=(
+                            self.server.operations.plan_handle_response_reserve_bytes()
+                        ),
+                        **limits,
+                    )
+                    validation = value.get("validation")
+                    if (
+                        isinstance(validation, dict)
+                        and validation.get("valid") is True
+                    ):
+                        versions = self.server.operations.plan_component_versions(
+                            run_document, value
+                        )
+                        fingerprint = hashlib.sha256(
+                            json.dumps(
+                                value,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                ensure_ascii=True,
+                            ).encode("utf-8")
+                        ).hexdigest()
+                        preview = dict(value)
+                        preview["plan_handle"] = "x" * 43
+                        preview["expires_at"] = "9999-12-31T23:59:59+00:00"
+                        if self.server.operations._mcp_response_size(
+                            preview, request_id
+                        ) > response_limit:
+                            raise OperationError(
+                                "framework",
+                                "run plan exceeds the response-byte limit",
+                                "result_too_large",
+                            )
+
+                        caller_fingerprint = fingerprint_token(authenticated_token)
+                        try:
+                            handle, _created = self.server.jobs.create_or_get_plan_handle(
+                                caller_fingerprint=caller_fingerprint,
+                                input_digest=value.get("input_digest", ""),
+                                planner_contract=value.get("contract_version", ""),
+                                component_versions=versions,
+                                plan_fingerprint=fingerprint,
+                                effective_limits=effective_limits,
+                            )
+                        except PlanHandleCapacityError as exc:
+                            raise OperationError(
+                                "user",
+                                "live plan-handle capacity is full; retry after handles expire",
+                                "plan_handle_capacity",
+                            ) from exc
+                        value["plan_handle"] = handle.handle
+                        value["expires_at"] = handle.expires_at
+                elif "document" in arguments:
                     value = getattr(self.server.operations, name)(
                         arguments["document"],
                         max_response_bytes=response_limit,
@@ -1182,17 +1346,36 @@ class MCPHandler(BaseHTTPRequestHandler):
                 if "path" in arguments and not isinstance(arguments["path"], str):
                     return self._error(request_id, -32602, "path must be a string")
                 plan_digest = arguments.get("plan_digest")
+                plan_handle = arguments.get("plan_handle")
+                if plan_digest is not None and plan_handle is not None:
+                    return self._error(
+                        request_id,
+                        -32602,
+                        "provide at most one of plan_digest or plan_handle",
+                    )
+                authenticated_token = getattr(self, "_authenticated_token", None)
+                caller_fingerprint = (
+                    fingerprint_token(authenticated_token)
+                    if plan_handle is not None and isinstance(authenticated_token, str)
+                    else None
+                )
+                plan_options = {}
+                if plan_digest is not None:
+                    plan_options["plan_digest"] = plan_digest
+                if plan_handle is not None:
+                    plan_options["plan_handle"] = plan_handle
+                    plan_options["caller_fingerprint"] = caller_fingerprint
                 if "document" in arguments:
                     job, created = self.server.run_manager.submit(
                         arguments.get("idempotency_key", ""),
                         document=arguments["document"],
-                        plan_digest=plan_digest,
+                        **plan_options,
                     )
                 elif "path" in arguments:
                     job, created = self.server.run_manager.submit(
                         arguments.get("idempotency_key", ""),
                         path=Path(arguments["path"]),
-                        plan_digest=plan_digest,
+                        **plan_options,
                     )
                 else:
                     return self._error(request_id, -32602, "start_run requires document or path")

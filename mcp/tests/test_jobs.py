@@ -1,9 +1,16 @@
+import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from crucible_mcp.jobs import JobConflictError, JobStore
+from crucible_mcp.jobs import (
+    MAX_LIVE_PLAN_HANDLES,
+    JobConflictError,
+    JobStore,
+    PlanHandleCapacityError,
+    PlanHandleExpiredError,
+)
 from crucible_mcp.models import IndexedQueryStatus, JobState, ResultStatus
 
 
@@ -112,7 +119,7 @@ class TestJobStore(unittest.TestCase):
         finally:
             migrated.close()
 
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 8)
         self.assertIn("indexed_query_status", columns)
         self.assertIn("indexed_query_checked_at", columns)
         self.assertIn("supervisor_container_name", columns)
@@ -139,7 +146,7 @@ class TestJobStore(unittest.TestCase):
         finally:
             migrated.close()
 
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 8)
         self.assertIn("supervisor_container_name", columns)
         self.assertIn("supervisor_container_id", columns)
 
@@ -182,6 +189,110 @@ class TestJobStore(unittest.TestCase):
         self.assertEqual(restored.plan_digest, "digest")
         self.assertEqual(restored.plan_summary, summary)
         self.assertEqual(restored.as_dict()["plan"], summary)
+
+    def _create_plan_handle(self, **updates):
+        values = {
+            "caller_fingerprint": "a" * 64,
+            "input_digest": "input-digest",
+            "planner_contract": "planner-v1",
+            "component_versions": {"rickshaw": "revision-1"},
+            "plan_fingerprint": "b" * 64,
+            "effective_limits": {
+                "max_parameter_sets": 100,
+                "max_engine_ids": 100,
+                "max_tool_entries": 100,
+                "max_response_bytes": 4096,
+            },
+        }
+        values.update(updates)
+        return self.store.create_or_get_plan_handle(**values)
+
+    def test_plan_handles_reuse_only_identical_live_preparations(self):
+        original, created = self._create_plan_handle()
+        repeated, reused = self._create_plan_handle()
+
+        self.assertTrue(created)
+        self.assertFalse(reused)
+        self.assertEqual(original.handle, repeated.handle)
+        self.assertEqual(original.expires_at, repeated.expires_at)
+
+        for field, value in (
+            ("input_digest", "different-input"),
+            ("caller_fingerprint", "c" * 64),
+            ("planner_contract", "planner-v2"),
+            ("component_versions", {"rickshaw": "revision-2"}),
+            ("plan_fingerprint", "d" * 64),
+            (
+                "effective_limits",
+                {
+                    "max_parameter_sets": 101,
+                    "max_engine_ids": 100,
+                    "max_tool_entries": 100,
+                    "max_response_bytes": 4096,
+                },
+            ),
+        ):
+            other, other_created = self._create_plan_handle(**{field: value})
+            self.assertTrue(other_created, field)
+            self.assertNotEqual(other.handle, original.handle, field)
+
+    def test_plan_handle_survives_store_reopen_without_payload_data(self):
+        handle, _ = self._create_plan_handle()
+        database_path = self.store.database_path
+        self.store.close()
+        self.store = JobStore(database_path)
+
+        restored = self.store.get_plan_handle(handle.handle, "a" * 64)
+
+        self.assertEqual(restored, handle)
+        columns = {
+            row[1]
+            for row in self.store._connection.execute("PRAGMA table_info(plan_handles)")
+        }
+        self.assertNotIn("document", columns)
+        self.assertNotIn("plan", columns)
+        stored_values = json.dumps(dict(self.store._connection.execute(
+            "SELECT * FROM plan_handles WHERE handle = ?", (handle.handle,)
+        ).fetchone()))
+        self.assertNotIn("run_document", stored_values)
+        self.assertNotIn('"benchmarks"', stored_values)
+        self.assertNotIn('"totals"', stored_values)
+
+    def test_plan_handle_owner_mismatch_is_hidden_and_expiry_is_distinct(self):
+        handle, _ = self._create_plan_handle()
+        self.assertIsNone(self.store.get_plan_handle(handle.handle, "z" * 64))
+
+        self.store._connection.execute(
+            "UPDATE plan_handles SET expires_at = ? WHERE handle = ?",
+            ("2000-01-01T00:00:00+00:00", handle.handle),
+        )
+        self.store._connection.commit()
+        with self.assertRaises(PlanHandleExpiredError):
+            self.store.get_plan_handle(handle.handle, "a" * 64)
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT COUNT(*) FROM plan_handles WHERE handle = ?", (handle.handle,)
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_expired_handle_cleanup_frees_capacity_and_live_capacity_is_not_evicted(self):
+        first, _ = self._create_plan_handle()
+        self.store._connection.execute(
+            "UPDATE plan_handles SET expires_at = ? WHERE handle = ?",
+            ("2000-01-01T00:00:00+00:00", first.handle),
+        )
+        self.store._connection.commit()
+
+        for index in range(MAX_LIVE_PLAN_HANDLES):
+            self._create_plan_handle(input_digest=f"digest-{index}")
+        with self.assertRaises(PlanHandleCapacityError):
+            self._create_plan_handle(input_digest="over-capacity")
+
+        live = self.store._connection.execute(
+            "SELECT COUNT(*) FROM plan_handles"
+        ).fetchone()[0]
+        self.assertEqual(live, MAX_LIVE_PLAN_HANDLES)
 
     def test_invalid_transition_is_rejected(self):
         job, _ = self.store.create_or_get("request-1", {"run": 1})
