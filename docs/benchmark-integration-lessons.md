@@ -52,6 +52,13 @@ documented parameters rather than assuming NUMA placement is the only difference
 
 ## 2. Keep build inputs and benchmark parameters separate
 
+For database workloads, verify native connection selection as well as readiness.
+HammerDB's MariaDB driver selects a Unix socket for a local host if its socket
+setting is non-null, even when the host is `127.0.0.1`. A successful external
+TCP login does not establish that this different authentication path works.
+The reviewed adapter forces the native TCP path with the literal `null` socket
+setting and validates the same generated account.
+
 Workshop and userenvs supply the software environment. Multiplex and the
 benchmark adapter select supported workload behavior at runtime.
 
@@ -88,6 +95,15 @@ Workshop provenance and verify other architectures independently.
 
 ## 3. Verify defaults through the real tools
 
+Keep dependency checks separate when software generates executable scripts.
+HammerDB v6 `loadscript` successfully generated database workloads on a host
+where explicit `package require mariatcl` and `package require Pgtcl` failed
+because shared client libraries were absent. Startup and `ldd` of the CLI did
+not establish those dependencies. Record script generation, actual package
+loading, database connectivity and native execution as distinct checks. The
+first Workshop-built Alma9 trial subsequently passed both database workloads;
+this does not qualify other userenvs or architectures.
+
 In CoreMark's first adapter, Multiplex `essentials` replaced explicit requested
 values. A request for one thread expanded into two thread variants. A JSON
 schema check and parser tests did not catch that behavior.
@@ -120,6 +136,37 @@ intended benchmark-only image path. Inspect the actual image request too.
 
 ## 4. Test the declared executable entry points
 
+A service UID must traverse every storage ancestor. Rickshaw's engine sample
+parent is created with `mkdtemp()` and mode 0700; making a benchmark child
+directory traversable cannot grant `mysql` or `postgres` access through that
+parent. Check permissions under the actual service UID. Use adapter-owned
+traversable parents or explicit writable mounts, keep database leaves private,
+and leave framework directories and caller-owned mount roots unchanged.
+HammerDB's mechanics default uses an owned `/tmp` root and records its backing
+filesystem; this does not establish parity with a dedicated storage device.
+Its `log-dir` places native redo/WAL, while diagnostics are archived separately.
+Verify native variables, symlinks and files before shutdown, then owned-tree
+removal and absence of live processes afterward.
+
+A mounted sequential MariaDB repeat exposed a TCP-port reuse edge case. The
+first sample succeeded and removed its database daemon, process group and
+owned data/log children; the next sample rejected engine port 40000 before
+starting a daemon. A target-side live probe found no owned process or directory
+left from the first sample, but `/proc/net/tcp` showed that port only in state
+`06` (`TIME_WAIT`). A bind/listen probe with `SO_REUSEADDR=0` returned
+`EADDRINUSE`; enabling reuse allowed the completed port to be bound again.
+For engine-local listener checks, enable `SO_REUSEADDR` and perform both
+`bind` and `listen`: bind alone can share a port with another reuse-enabled
+socket, while `listen` still rejects a live overlapping listener. Cover
+listeners bound to both `127.0.0.1` and `0.0.0.0`, with reuse enabled and
+disabled. Keep daemon startup as the final owner of the port and fail closed if
+another process binds between preflight and startup; never fall back to
+connecting to an existing database. Local regression tests exercised a real
+loopback `TIME_WAIT` state and all four listener combinations. The mounted
+repeat subsequently passed all eight samples with the corrected adapter,
+including both MariaDB repeats. Independent review matched all native/API
+values and verified owned process/storage cleanup.
+
 Rickshaw invokes its configured hooks directly. A postprocessor that runs with
 `python3 script.py` can still fail in Crucible if its Git mode is not executable.
 The first CoreMark run found exactly that defect.
@@ -131,6 +178,17 @@ Retain the failure artifacts so a corrected postprocessor can be evaluated
 without repeating an expensive workload unnecessarily.
 
 ## 5. Treat native output as the authority
+
+Build fixtures from the pinned native implementation and then captured output.
+HammerDB schema operations catch some errors internally; exit status zero and
+an adapter completion sentinel are insufficient. Require native build/check
+success, successful schema VU status and the expected SQL warehouse count.
+Its serial schema build has one VU, while the timed run adds a monitor. Native
+schema labels differ by backend and worker messages include `Vuser 1:`.
+Invented fixture wording passed unit tests but rejected real native forms;
+source review corrected this before the first database trial, whose captured
+output confirmed the parser. Postprocessing must revalidate retained setup
+logs as well as timed output, iteration arguments and engine identity.
 
 Keep the raw output, effective parameters, process status, timing and build
 provenance together. Require native correctness checks before emitting a valid
@@ -163,6 +221,25 @@ Test invalid output, manifest/raw-output disagreement, timeouts and interrupted
 execution. A failed run must not produce a valid-looking performance score.
 Clean up owned processes, including child process groups, on failure and abort.
 Distinguish an adapter signal test from a full Crucible abort test.
+
+Check process-group members even after the directly owned leader exits. A
+zombie leader can make `killpg(group, 0)` appear live; reap it while checking
+actual member state. Conversely, a reaped leader can leave live descendants.
+Gate deletion of owned database and transaction-log files on confirmed group
+shutdown, and keep deadlines active after stdout EOF. Owned helper tests
+exercised zombie reaping, exited-leader descendants and stdout EOF supervision
+during HammerDB review. Dedicated MariaDB and PostgreSQL adapter SIGTERM
+trials inside Crucible subsequently verified cleanup and client-start-end
+roadblock failure propagation. Both samples were invalid, with no completed
+measurement timestamps, score, or indexed metric/measurement-period records.
+Direct controller SIGINT or immediate cancellation remains untested.
+
+A native counter-window start marker and running-worker logs are diagnostic
+evidence for an interrupted sample, not a completed measurement. CLI process
+age at signal receipt is not measured workload duration. Failed-run parameter,
+tag and run metadata may still be indexed while metric queries return structured
+`RUN_NOT_FOUND`; verify absence of accepted metric and measurement-period
+records rather than claiming the entire run is absent from the index.
 
 ## 6. Define CDM aggregation before debugging CDM
 
@@ -332,6 +409,16 @@ CoreMark execution passed while a missing executable bit broke postprocessing;
 later, disk pressure blocked OpenSearch writes. An index command can report
 success without proving the data is queryable. Query the run and compare its
 values independently instead of trusting the command's exit status alone.
+
+Compare the expected iteration/sample matrix with the retained harness status
+and accepted indexed results. In HammerDB's mounted baseline trial, two repeated
+MariaDB samples failed while six native samples succeeded. The controller exited
+zero and the ordinary summary reported `partial=false`, but omitted both failed
+MariaDB iterations, including their successful first samples. The PostgreSQL
+metric/period records alone were indexed, and only its iterations were
+summarized. A clean exit or a nonpartial
+summary therefore did not establish that the requested matrix passed. Retain
+failed-attempt diagnostics and check missing iterations explicitly.
 
 Preserve data and the development environment while investigating. Do not
 silently relax disk thresholds or remove unrelated results and images. When

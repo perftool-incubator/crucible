@@ -121,6 +121,16 @@
             }
         },
         {
+            "name": "hammerdb",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-hammerdb",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "uperf",
             "type": "benchmark",
             "repository": "https://github.com/perftool-incubator/bench-uperf",
