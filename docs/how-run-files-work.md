@@ -87,6 +87,13 @@ endpoint configuration. For example, if a benchmark has
 `"ids": "1-2"`, the endpoint must include engines with IDs
 1 and 2.
 
+For a client/server benchmark, each client and its paired
+server share an ID. The benchmark's `ids` field lists these
+pair IDs. A single pair uses benchmark ID `"1"` and engine
+ID `1` for both roles. Two pairs use benchmark IDs `"1-2"`
+and engine IDs `1` and `2` for both roles: client 1 pairs
+with server 1, and client 2 pairs with server 2.
+
 In multi-benchmark runs, each benchmark gets its own set of
 IDs:
 
@@ -151,6 +158,12 @@ engine may need different parameter values.  For example, in a
 two-pair run comparing RHEL 9 vs RHEL 10, each client must
 connect to its own paired server — not to all servers.
 
+This example uses benchmark IDs `"1-2"` and assigns IDs `1`
+and `2` to both the client and server roles. Client 1 therefore
+pairs with server 1, and client 2 pairs with server 2. The
+per-ID `remotehost` parameters below target each client by its
+pair ID.
+
 Without per-engine scoping, a `remotehost` parameter applies
 to all clients, causing every client to connect to every
 server.  The `id` field solves this by restricting a parameter
@@ -172,8 +185,8 @@ to the engine whose ID matches:
 }
 ```
 
-Here, client 1 connects to 10.0.0.2 (its paired server) and
-client 2 connects to 10.0.0.4.  All other parameters
+Here, client 1 connects to server 1 at 10.0.0.2 and client 2
+connects to server 2 at 10.0.0.4.  All other parameters
 (test-type, protocol, etc.) apply to both clients since they
 have no `id` field.
 
@@ -239,7 +252,7 @@ configuration:
         {
             "engines": [
                 { "role": "client", "ids": [1] },
-                { "role": "server", "ids": [2] }
+                { "role": "server", "ids": [1] }
             ],
             "config": {
                 "host": "testhost.example.com",
@@ -306,7 +319,7 @@ setting for that remote.
     "ssh-identity-profile": "cluster-admin",
     "engines": {
         "client": "1-2",
-        "server": "3-4"
+        "server": "1-2"
     },
     "host-mounts": {
         "run": true,
@@ -607,7 +620,7 @@ omitted or set to `{}`, no tags are associated with the run.
                 {
                     "engines": [
                         { "role": "client", "ids": [1] },
-                        { "role": "server", "ids": [2] }
+                        { "role": "server", "ids": [1] }
                     ],
                     "config": {
                         "host": "testhost.example.com",
@@ -624,7 +637,7 @@ omitted or set to `{}`, no tags are associated with the run.
     "benchmarks": [
         {
             "name": "uperf",
-            "ids": "1-2",
+            "ids": "1",
             "mv-params": {
                 "global-options": [
                     {
