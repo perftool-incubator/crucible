@@ -101,6 +101,16 @@
             }
         },
         {
+            "name": "coremark",
+            "type": "benchmark",
+            "repository": "https://github.com/perftool-incubator/bench-coremark",
+            "primary-branch": "main",
+            "checkout": {
+                "mode": "follow",
+                "target": "main"
+            }
+        },
+        {
             "name": "fio",
             "type": "benchmark",
             "repository": "https://github.com/perftool-incubator/bench-fio",
