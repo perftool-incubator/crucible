@@ -90,6 +90,7 @@ examples | Examples of different approaches to running Crucible with the various
 cyclictest | Traditional RT latency measurement tool | https://github.com/perftool-incubator/bench-cyclictest
 fio | Traditional block IO testing | https://github.com/perftool-incubator/bench-fio
 flexran | Radio Access Network (RAN) edge framework testing | https://github.com/perftool-incubator/bench-flexran
+hammerdb | Client-only HammerDB TPROC-C with MariaDB or PostgreSQL | https://github.com/perftool-incubator/bench-hammerdb
 hwlatdetect | Baremetal HW latency spike detector | https://github.com/perftool-incubator/bench-hwlatdetect
 hwnoise | Hardware noise detection and quantification | https://github.com/perftool-incubator/bench-hwnoise
 ilab | AI/LLM workload based on InstructLab | https://github.com/perftool-incubator/bench-ilab
