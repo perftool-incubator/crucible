@@ -124,6 +124,12 @@ samples with the same value to reduce data volume.
   uses the period's begin/end timestamps as a time range
   filter rather than a document relationship.
 
+When a query includes a period, CDM selects benchmark
+descriptors attached to that period and periodless
+descriptors for continuous metrics. Descriptors attached
+to other periods in the same run are excluded. Without a
+period, descriptor selection remains run-wide.
+
 ## How results get into OpenSearch
 
 ### The indexing pipeline
@@ -216,9 +222,14 @@ When you query for metrics within a specific period, CDM:
 
 1. Looks up the period document to get its begin and end
    timestamps
-2. **Removes the period ID from the query** — because
-   tool metrics don't have period attribution
-3. Uses the timestamps as a range filter on metric_data
+2. Uses the period ID to select metric descriptors attached
+   to that benchmark period, along with periodless descriptors
+   for continuous tool metrics. Descriptors attached to other
+   periods are excluded.
+3. Queries metric_data using the selected descriptor IDs and
+   the period's begin/end timestamps. Metric data documents
+   have no direct period relationship, so the period ID is not
+   used as a metric_data relationship filter.
 
 This approach works uniformly for both benchmark metrics
 (which have period attribution) and tool metrics (which
