@@ -98,6 +98,32 @@ class TestJobStore(unittest.TestCase):
         self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
         self.assertIsNotNone(updated.indexed_query_checked_at)
 
+    def test_indexed_query_observation_is_applied_after_cdm_id_backfill(self):
+        job, _ = self.store.create_or_get("request-indexed-before-id", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.STARTING)
+
+        updated_count = self.store.update_indexed_query_status(
+            "cdm-late", IndexedQueryStatus.READY
+        )
+        self.assertEqual(updated_count, 0)
+        self.assertEqual(
+            self.store.get(job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.NOT_CHECKED,
+        )
+
+        updated = self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            cdm_run_id="cdm-late",
+        )
+
+        self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
+        self.assertIsNotNone(updated.indexed_query_checked_at)
+        pending = self.store._connection.execute(
+            "SELECT cdm_run_id FROM pending_indexed_query_observations"
+        ).fetchall()
+        self.assertEqual(pending, [])
+
     def test_v4_database_migrates_to_supervisor_job_fields(self):
         database_path = Path(self.directory.name) / "legacy-v4.db"
         connection = sqlite3.connect(database_path)
@@ -119,7 +145,7 @@ class TestJobStore(unittest.TestCase):
         finally:
             migrated.close()
 
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 9)
         self.assertIn("indexed_query_status", columns)
         self.assertIn("indexed_query_checked_at", columns)
         self.assertIn("supervisor_container_name", columns)
@@ -146,9 +172,35 @@ class TestJobStore(unittest.TestCase):
         finally:
             migrated.close()
 
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 9)
         self.assertIn("supervisor_container_name", columns)
         self.assertIn("supervisor_container_id", columns)
+
+    def test_v8_database_migrates_to_pending_indexed_query_observations(self):
+        database_path = Path(self.directory.name) / "legacy-v8.db"
+        connection = sqlite3.connect(database_path)
+        connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO schema_version(version) VALUES (8)")
+        connection.execute("CREATE TABLE jobs (cdm_run_id TEXT)")
+        connection.commit()
+        connection.close()
+
+        migrated = JobStore(database_path)
+        try:
+            version = migrated._connection.execute(
+                "SELECT version FROM schema_version"
+            ).fetchone()[0]
+            tables = {
+                row[0]
+                for row in migrated._connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        finally:
+            migrated.close()
+
+        self.assertEqual(version, 9)
+        self.assertIn("pending_indexed_query_observations", tables)
 
     def test_supervisor_identifiers_are_internal_job_metadata(self):
         job, _ = self.store.create_or_get("supervisor-internal", {"run": True})

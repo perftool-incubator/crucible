@@ -253,6 +253,17 @@ The MCP process stores job state in SQLite, while each active job runs under a
 detached, host-Podman-managed supervisor container. This lets the job continue
 if the MCP service process restarts; on startup MCP reattaches to the
 supervisor or reconciles the durable outcome written in the job directory.
+While waiting for a supervisor, MCP continues reading lifecycle events and
+checks for that durable outcome even if the host `podman wait` request has not
+returned. Before finalizing from an outcome while `podman wait` is still
+pending, MCP confirms the supervisor has exited or disappeared. A run's
+`completed` event records its correlation identifiers and allows MCP to
+backfill them from the result summary, but the supervisor outcome supplies the
+exit status used for terminal job state. This lets MCP finish a run without
+requiring a service restart while preserving recovery behavior when the
+outcome is missing. Closing the bridge client's one-shot request also cancels
+and reaps its host-side command, so an abandoned `podman wait` does not outlive
+the completed job.
 The host bridge starts and observes these supervisors through the host Podman
 engine. Each supervisor uses the configured controller image and mounts only
 the job's supervision directory and Crucible checkout. It invokes the Crucible

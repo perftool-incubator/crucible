@@ -11,10 +11,13 @@ import json
 import os
 from pathlib import Path
 import re
+import select
+import signal
 import socket
 import socketserver
 import subprocess
 import sys
+import time
 import uuid
 from typing import Any
 
@@ -297,9 +300,83 @@ class _ThreadingUnixStreamServer(socketserver.ThreadingMixIn, socketserver.UnixS
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):
+    def _client_disconnected(self) -> bool:
+        """Return when the one-shot bridge client closes its request socket."""
+
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+        except OSError:
+            return True
+        # The client sends exactly one request. Any later socket activity is
+        # either its close or a protocol violation, so the host command should
+        # no longer be allowed to outlive this request.
+        return bool(readable)
+
+    @staticmethod
+    def _terminate_command(process: subprocess.Popen) -> tuple[str, str]:
+        """Stop and reap the host command and any children it started."""
+
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+        return _as_text(stdout), _as_text(stderr)
+
+    def _run_host_command(
+        self,
+        command: list[str],
+        working_directory: str,
+        environment: dict[str, str],
+        timeout: float | None,
+    ) -> dict[str, Any] | None:
+        process = subprocess.Popen(
+            command,
+            cwd=working_directory,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        while True:
+            wait_timeout = 0.1
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    stdout, stderr = self._terminate_command(process)
+                    return {
+                        "returncode": 124,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "error": "host operation timed out",
+                    }
+                wait_timeout = min(wait_timeout, remaining)
+            try:
+                stdout, stderr = process.communicate(timeout=wait_timeout)
+            except subprocess.TimeoutExpired:
+                if self._client_disconnected():
+                    self._terminate_command(process)
+                    return None
+                continue
+            return {
+                "returncode": process.returncode,
+                "stdout": _as_text(stdout),
+                "stderr": _as_text(stderr),
+            }
+
     def handle(self) -> None:
         raw = self.rfile.readline(MAX_REQUEST_BYTES + 1)
-        response: dict[str, Any]
+        response: dict[str, Any] | None
         if len(raw) > MAX_REQUEST_BYTES or not raw.endswith(b"\n"):
             response = {"returncode": 125, "stdout": "", "stderr": "", "error": "request too large or incomplete"}
         else:
@@ -308,31 +385,16 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 if not isinstance(request, dict):
                     raise BridgeRequestError("request must be a JSON object")
                 command, environment, timeout = self.server.policy.validate(request)
-                result = subprocess.run(
+                response = self._run_host_command(
                     command,
-                    cwd=request["working_directory"],
-                    env=environment,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    check=False,
-                    timeout=timeout,
+                    request["working_directory"],
+                    environment,
+                    timeout,
                 )
-                response = {
-                    "returncode": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                }
-            except subprocess.TimeoutExpired as exc:
-                response = {
-                    "returncode": 124,
-                    "stdout": _as_text(exc.stdout),
-                    "stderr": _as_text(exc.stderr),
-                    "error": "host operation timed out",
-                }
             except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 response = {"returncode": 125, "stdout": "", "stderr": "", "error": str(exc)}
+        if response is None:
+            return
         encoded = json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n"
         if len(encoded) > MAX_RESPONSE_BYTES:
             encoded = json.dumps(

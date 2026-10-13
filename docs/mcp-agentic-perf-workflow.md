@@ -312,6 +312,12 @@ a live availability guarantee. Attempt the desired indexed query and handle
 its structured error; retry after addressing `result_services_unavailable` or
 `result_query_failed`.
 
+If a run-scoped query finishes while an active run's CDM ID is still being
+resolved from its completion event or result summary, MCP retains the query
+observation and applies it when the matching ID is captured. If the summary
+contains multiple run IDs, MCP leaves the job's query status unassociated
+rather than choosing one arbitrarily.
+
 If the service restarts, continue polling the same MCP job ID. The managed
 runner reconciles the durable job record and does not launch a duplicate
 workload for a retry.
