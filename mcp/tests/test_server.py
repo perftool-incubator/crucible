@@ -553,6 +553,66 @@ class TestServer(unittest.TestCase):
             1,
         )
 
+    def test_prepare_run_persist_reports_component_version_failure(self):
+        plan = {
+            "contract_version": "1",
+            "input_digest": "a" * 64,
+            "validation": {"valid": True, "errors": [], "warnings": []},
+            "totals": {"global_iteration_count": 2},
+            "runtime": {"confidence": "unavailable"},
+            "limits": {"truncated": False},
+        }
+        request_body = {
+            "jsonrpc": "2.0",
+            "id": 62,
+            "method": "tools/call",
+            "params": {
+                "name": "prepare_run",
+                "arguments": {
+                    "document": {"benchmarks": [{"name": "sleep"}]},
+                    "persist": True,
+                    "max_response_bytes": 2048,
+                },
+            },
+        }
+        failure = OperationError(
+            "framework",
+            "could not identify the installed version for benchmark:sleep "
+            "during git diff",
+            "component_version_unavailable",
+            details={"component": "benchmark:sleep", "stage": "git diff"},
+        )
+        with (
+            patch.object(
+                self.server.operations,
+                "prepare_run",
+                side_effect=lambda *args, **kwargs: dict(plan),
+            ),
+            patch.object(
+                self.server.operations,
+                "plan_component_versions",
+                side_effect=failure,
+            ),
+        ):
+            status, payload = self.request(
+                "POST", "/mcp", json.dumps(request_body), self.token
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["error"]["code"], -32000)
+        error = json.loads(payload["error"]["message"])
+        self.assertEqual(error["code"], "component_version_unavailable")
+        self.assertEqual(
+            error["details"],
+            {"component": "benchmark:sleep", "stage": "git diff"},
+        )
+        self.assertEqual(
+            self.server.jobs._connection.execute(
+                "SELECT COUNT(*) FROM plan_handles"
+            ).fetchone()[0],
+            0,
+        )
+
     def test_render_run_dispatches_handle_and_caller_bound_input(self):
         rendered = {
             "input_digest": "digest",

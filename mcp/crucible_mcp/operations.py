@@ -468,14 +468,67 @@ def _normalize_metadata_shell_key(value: str) -> str:
 class OperationError(RuntimeError):
     """A structured operation failure safe to return to an MCP client."""
 
-    def __init__(self, category: str, message: str, code: str = "operation_error"):
+    def __init__(
+        self,
+        category: str,
+        message: str,
+        code: str = "operation_error",
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.category = category
         self.code = code
         self.message = message
+        self.details = dict(details or {})
 
-    def as_dict(self) -> dict[str, str]:
-        return {"category": self.category, "code": self.code, "message": self.message}
+    def as_dict(self) -> dict[str, Any]:
+        error = {"category": self.category, "code": self.code, "message": self.message}
+        if self.details:
+            error["details"] = dict(self.details)
+        return error
+
+
+def _component_version_error(
+    component: str,
+    path: Path,
+    stage: str,
+    failure: Exception | str | None = None,
+) -> OperationError:
+    """Build a safe MCP error and retain redacted diagnostics in service logs."""
+
+    try:
+        component = CrucibleOperations.redact_log_text(component[:512])
+        log_path = CrucibleOperations.redact_log_text(str(path)[:4096])
+    except OperationError:
+        component = "[redacted]"
+        log_path = "[redacted]"
+    safe_component = re.sub(r"[^A-Za-z0-9_.:-]", "_", component)[:128] or "unknown"
+    safe_stage = re.sub(r"[^A-Za-z0-9_. -]", "_", stage)[:128] or "unknown"
+    diagnostic = str(failure) if failure is not None else "fingerprint check failed"
+    stderr = getattr(failure, "stderr", None)
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if isinstance(stderr, str) and stderr:
+        diagnostic = f"{diagnostic}: {stderr}"
+    try:
+        diagnostic = CrucibleOperations.redact_log_text(diagnostic[:4096])
+    except OperationError:
+        diagnostic = "[diagnostic omitted]"
+    logging.getLogger(__name__).error(
+        "component version fingerprint failed component=%s stage=%s path=%s diagnostic=%s",
+        safe_component,
+        safe_stage,
+        log_path[:2048],
+        diagnostic[:2048],
+    )
+    return OperationError(
+        "framework",
+        "could not identify the installed version for "
+        f"{safe_component} during {safe_stage}; check MCP access to the checkout, "
+        "Git metadata, and component files",
+        "component_version_unavailable",
+        details={"component": safe_component, "stage": safe_stage},
+    )
 
 
 class CrucibleOperations:
@@ -5137,19 +5190,29 @@ class CrucibleOperations:
 
         revision_cache: dict[str, str] = {}
 
-        def revision(path: Path) -> str:
-            resolved = str(Path(path).resolve())
+        def revision(component: str, path: Path) -> str:
+            try:
+                resolved_path = Path(path).resolve()
+            except (OSError, RuntimeError) as exc:
+                raise _component_version_error(
+                    component, Path(path), "resolve checkout", exc
+                ) from exc
+            resolved = str(resolved_path)
             if resolved not in revision_cache:
-                revision_cache[resolved] = self._repository_revision(Path(resolved))
+                revision_cache[resolved] = self._repository_revision(
+                    resolved_path, component
+                )
             return revision_cache[resolved]
 
         versions: dict[str, str] = {
-            "crucible": revision(self.crucible_home),
+            "crucible": revision("crucible", self.crucible_home),
             "rickshaw": revision(
-                self.crucible_home / "subprojects" / "core" / "rickshaw"
+                "rickshaw",
+                self.crucible_home / "subprojects" / "core" / "rickshaw",
             ),
             "multiplex": revision(
-                self.crucible_home / "subprojects" / "core" / "multiplex"
+                "multiplex",
+                self.crucible_home / "subprojects" / "core" / "multiplex",
             ),
         }
         run_components: dict[str, str] = {}
@@ -5160,7 +5223,8 @@ class CrucibleOperations:
                     name = item.get("name") if isinstance(item, dict) else None
                     directory = self._benchmark_directory(name) if isinstance(name, str) else None
                     if directory is not None:
-                        run_components[f"benchmark:{name}"] = revision(directory)
+                        component = f"benchmark:{name}"
+                        run_components[component] = revision(component, directory)
 
             tools = document.get("tool-params")
             if not isinstance(tools, list) and isinstance(plan, dict):
@@ -5173,7 +5237,8 @@ class CrucibleOperations:
                     name = item.get("tool")
                     directory = self._tool_directory(name) if isinstance(name, str) else None
                     if directory is not None:
-                        run_components[f"tool:{name}"] = revision(directory)
+                        component = f"tool:{name}"
+                        run_components[component] = revision(component, directory)
 
         versions["run_components"] = hashlib.sha256(
             json.dumps(
@@ -5183,54 +5248,55 @@ class CrucibleOperations:
         return versions
 
     @staticmethod
-    def _repository_revision(path: Path) -> str:
+    def _repository_revision(
+        path: Path, component: str = "installed component"
+    ) -> str:
         """Fingerprint a checkout's commit, file modes, and working-tree state."""
 
-        unavailable = OperationError(
-            "framework",
-            "an installed component version could not be identified",
-            "component_version_unavailable",
-        )
         try:
             resolved = Path(path).resolve()
-            git_command = ["git", "-C", str(resolved)]
-            completed = subprocess.run(
-                [*git_command, "rev-parse", "HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            working_tree = subprocess.run(
-                [*git_command, "diff", "--raw", "--abbrev=64", "-z", "HEAD"],
-                check=True,
-                capture_output=True,
-                timeout=30,
-            )
-            untracked = subprocess.run(
-                [
-                    *git_command,
-                    "ls-files",
-                    "--others",
-                    "--exclude-standard",
-                    "-z",
-                ],
-                check=True,
-                capture_output=True,
-                timeout=30,
-            )
-            tracked = subprocess.run(
-                [*git_command, "ls-files", "-z"],
-                check=True,
-                capture_output=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.SubprocessError):
-            # A path-only fallback cannot distinguish different installed code.
-            raise unavailable from None
+        except (OSError, RuntimeError) as exc:
+            raise _component_version_error(
+                component, Path(path), "resolve checkout", exc
+            ) from exc
+
+        def unavailable(stage: str, failure: Exception | str | None = None) -> None:
+            error = _component_version_error(component, resolved, stage, failure)
+            if isinstance(failure, Exception):
+                raise error from failure
+            raise error from None
+
+        def run_git(stage: str, arguments: list[str], **options: Any) -> Any:
+            try:
+                return subprocess.run(
+                    ["git", "-C", str(resolved), *arguments],
+                    check=True,
+                    capture_output=True,
+                    **options,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                unavailable(stage, exc)
+
+        completed = run_git(
+            "git rev-parse HEAD", ["rev-parse", "HEAD"], text=True, timeout=5
+        )
+        working_tree = run_git(
+            "git diff",
+            ["diff", "--raw", "--abbrev=64", "-z", "HEAD"],
+            timeout=30,
+        )
+        untracked = run_git(
+            "list untracked files",
+            ["ls-files", "--others", "--exclude-standard", "-z"],
+            timeout=30,
+        )
+        tracked = run_git(
+            "list tracked files", ["ls-files", "-z"], timeout=30
+        )
+
         revision = completed.stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
-            raise unavailable
+            unavailable("validate Git revision", "Git returned an invalid HEAD revision")
 
         untracked_paths = [name for name in untracked.stdout.split(b"\0") if name]
         tracked_paths = [name for name in tracked.stdout.split(b"\0") if name]
@@ -5238,7 +5304,11 @@ class CrucibleOperations:
             len(untracked_paths) > MAX_COMPONENT_FINGERPRINT_FILES
             or len(tracked_paths) > MAX_COMPONENT_FINGERPRINT_FILES
         ):
-            raise unavailable
+            unavailable(
+                "check fingerprint file-count limits",
+                f"tracked files={len(tracked_paths)}, untracked files={len(untracked_paths)}, "
+                f"limit={MAX_COMPONENT_FINGERPRINT_FILES}",
+            )
 
         fingerprint = hashlib.sha256()
         fingerprint.update(b"head\0")
@@ -5256,8 +5326,8 @@ class CrucibleOperations:
                 metadata = source.lstat()
             except FileNotFoundError:
                 metadata = None
-            except OSError:
-                raise unavailable from None
+            except OSError as exc:
+                unavailable("inspect tracked file modes", exc)
             fingerprint.update(b"\0tracked-mode\0")
             fingerprint.update(relative_name)
             fingerprint.update(b"\0")
@@ -5286,7 +5356,10 @@ class CrucibleOperations:
                         total_untracked_bytes + metadata.st_size
                         > MAX_COMPONENT_FINGERPRINT_BYTES
                     ):
-                        raise unavailable
+                        unavailable(
+                            "check untracked file-size limit",
+                            f"limit={MAX_COMPONENT_FINGERPRINT_BYTES} bytes",
+                        )
                     fingerprint.update(metadata.st_size.to_bytes(8, "big"))
                     file_bytes = 0
                     with source.open("rb") as component_file:
@@ -5295,14 +5368,20 @@ class CrucibleOperations:
                             metadata.st_dev,
                             metadata.st_ino,
                         ):
-                            raise unavailable
+                            unavailable(
+                                "verify untracked file identity",
+                                "file was replaced while its fingerprint was calculated",
+                            )
                         while chunk := component_file.read(1_048_576):
                             file_bytes += len(chunk)
                             if (
                                 total_untracked_bytes + file_bytes
                                 > MAX_COMPONENT_FINGERPRINT_BYTES
                             ):
-                                raise unavailable
+                                unavailable(
+                                    "check untracked file-size limit",
+                                    f"limit={MAX_COMPONENT_FINGERPRINT_BYTES} bytes",
+                                )
                             fingerprint.update(chunk)
                     latest = source.lstat()
                     if (
@@ -5315,15 +5394,21 @@ class CrucibleOperations:
                             metadata.st_mtime_ns,
                         )
                     ):
-                        raise unavailable
+                        unavailable(
+                            "verify untracked file stability",
+                            "file changed while its fingerprint was calculated",
+                        )
                     total_untracked_bytes += file_bytes
                 elif stat.S_ISLNK(metadata.st_mode):
                     fingerprint.update(os.fsencode(os.readlink(source)))
                 else:
                     # Special files do not have a stable source fingerprint.
-                    raise unavailable
-            except OSError:
-                raise unavailable from None
+                    unavailable(
+                        "inspect untracked files",
+                        "a special file cannot be fingerprinted",
+                    )
+            except OSError as exc:
+                unavailable("read untracked files", exc)
 
         return fingerprint.hexdigest()
 

@@ -421,6 +421,10 @@ versions, effective planning limits, and a fresh fingerprint of the bounded
 plan. A changed plan returns `stale_plan_handle`, an expired owned handle
 returns `expired_plan_handle`, and unknown or foreign handles return the same
 `invalid_plan_handle` error.
+If Crucible cannot fingerprint an installed component, it returns
+`component_version_unavailable` with the component and failing stage. Check the
+MCP service account's access to that checkout, its Git metadata, and its files;
+the service log includes the redacted underlying diagnostic.
 
 When `prepare_run` omits detail prefixes to fit its response-byte limit, use
 `render_run` with that handle and the same document or approved path to inspect
