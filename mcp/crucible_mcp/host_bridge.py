@@ -304,13 +304,17 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         """Return when the one-shot bridge client closes its request socket."""
 
         try:
-            readable, _, _ = select.select([self.connection], [], [], 0)
-        except OSError:
+            poller = select.poll()
+            poller.register(self.connection, select.POLLIN)
+            events = poller.poll(0)
+        except (OSError, ValueError):
+            # A readiness check failure must stop the child too. In particular,
+            # select.select raises ValueError for descriptors at FD_SETSIZE.
             return True
         # The client sends exactly one request. Any later socket activity is
         # either its close or a protocol violation, so the host command should
         # no longer be allowed to outlive this request.
-        return bool(readable)
+        return bool(events)
 
     @staticmethod
     def _terminate_command(process: subprocess.Popen) -> tuple[str, str]:

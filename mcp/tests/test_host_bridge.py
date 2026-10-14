@@ -1,9 +1,16 @@
+import select
+import subprocess
 import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from crucible_mcp.host_bridge import BridgeRequestError, HostCommandPolicy
+from crucible_mcp.host_bridge import (
+    BridgeRequestError,
+    HostCommandPolicy,
+    _RequestHandler,
+)
 
 
 class TestHostCommandPolicy(unittest.TestCase):
@@ -147,6 +154,48 @@ class TestHostCommandPolicy(unittest.TestCase):
     def test_rejects_relative_operation_paths(self):
         with self.assertRaises(BridgeRequestError):
             self.policy._canonical_child("run-one", self.run_root, directory=True)
+
+
+class TestRequestHandlerDisconnect(unittest.TestCase):
+    def setUp(self):
+        self.handler = object.__new__(_RequestHandler)
+        self.handler.connection = Mock()
+        self.handler.connection.fileno.return_value = 2048
+
+    def test_disconnect_poll_handles_high_descriptor_hangup(self):
+        poller = Mock()
+        poller.poll.return_value = [(2048, select.POLLHUP)]
+
+        with patch("crucible_mcp.host_bridge.select.poll", return_value=poller):
+            self.assertTrue(self.handler._client_disconnected())
+
+        poller.register.assert_called_once_with(self.handler.connection, select.POLLIN)
+        poller.poll.assert_called_once_with(0)
+
+    def test_poll_error_terminates_and_reaps_host_command(self):
+        poller = Mock()
+        poller.poll.side_effect = ValueError("descriptor exceeds select limit")
+        process = Mock()
+        process.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd=["long-running-command"], timeout=0.1
+        )
+
+        with (
+            patch("crucible_mcp.host_bridge.select.poll", return_value=poller),
+            patch("crucible_mcp.host_bridge.subprocess.Popen", return_value=process),
+            patch.object(
+                _RequestHandler,
+                "_terminate_command",
+                return_value=("", ""),
+            ) as terminate_command,
+        ):
+            result = self.handler._run_host_command(
+                ["long-running-command"], "/", {}, timeout=None
+            )
+
+        self.assertIsNone(result)
+        poller.register.assert_called_once_with(self.handler.connection, select.POLLIN)
+        terminate_command.assert_called_once_with(process)
 
 
 if __name__ == "__main__":

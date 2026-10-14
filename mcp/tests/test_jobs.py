@@ -1,11 +1,15 @@
 import json
 import sqlite3
 import tempfile
+import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from crucible_mcp.jobs import (
     MAX_LIVE_PLAN_HANDLES,
+    MAX_PENDING_INDEXED_QUERY_OBSERVATIONS,
     JobConflictError,
     JobStore,
     PlanHandleCapacityError,
@@ -123,6 +127,85 @@ class TestJobStore(unittest.TestCase):
             "SELECT cdm_run_id FROM pending_indexed_query_observations"
         ).fetchall()
         self.assertEqual(pending, [])
+
+    def test_pending_indexed_query_observations_are_bounded_by_oldest_first(self):
+        job, _ = self.store.create_or_get("request-indexed-cap", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.STARTING)
+
+        with patch("crucible_mcp.jobs.MAX_PENDING_INDEXED_QUERY_OBSERVATIONS", 3):
+            for run_id in ("cdm-001", "cdm-002", "cdm-003"):
+                self.store.update_indexed_query_status(
+                    run_id, IndexedQueryStatus.READY
+                )
+
+            base = datetime.now(timezone.utc) - timedelta(minutes=3)
+            for offset, run_id in enumerate(("cdm-001", "cdm-002", "cdm-003")):
+                checked_at = (base + timedelta(minutes=offset)).isoformat(
+                    timespec="seconds"
+                )
+                self.store._connection.execute(
+                    "UPDATE pending_indexed_query_observations SET checked_at = ? "
+                    "WHERE cdm_run_id = ?",
+                    (checked_at, run_id),
+                )
+            self.store._connection.commit()
+
+            # Refreshing an existing ID keeps it and makes it the newest entry.
+            self.store.update_indexed_query_status(
+                "cdm-001", IndexedQueryStatus.UNAVAILABLE
+            )
+            # A new ID at capacity evicts the least recently checked entry.
+            self.store.update_indexed_query_status(
+                "cdm-004", IndexedQueryStatus.READY
+            )
+
+        rows = self.store._connection.execute(
+            "SELECT cdm_run_id, status FROM pending_indexed_query_observations "
+            "ORDER BY cdm_run_id"
+        ).fetchall()
+        self.assertEqual(
+            [(row["cdm_run_id"], row["status"]) for row in rows],
+            [
+                ("cdm-001", IndexedQueryStatus.UNAVAILABLE.value),
+                ("cdm-003", IndexedQueryStatus.READY.value),
+                ("cdm-004", IndexedQueryStatus.READY.value),
+            ],
+        )
+        self.assertLessEqual(len(rows), MAX_PENDING_INDEXED_QUERY_OBSERVATIONS)
+
+    def test_periodic_maintenance_prunes_expired_observations_without_queries(self):
+        database_path = Path(self.directory.name) / "maintenance" / "jobs.db"
+        with patch(
+            "crucible_mcp.jobs.PENDING_INDEXED_QUERY_OBSERVATION_CLEANUP_INTERVAL",
+            timedelta(milliseconds=10),
+        ):
+            store = JobStore(database_path)
+        try:
+            store._connection.execute(
+                "INSERT INTO pending_indexed_query_observations "
+                "(cdm_run_id, status, checked_at) VALUES (?, ?, ?)",
+                (
+                    "expired-cdm-id",
+                    IndexedQueryStatus.READY.value,
+                    "2000-01-01T00:00:00+00:00",
+                ),
+            )
+            store._connection.commit()
+
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                remaining = store._connection.execute(
+                    "SELECT 1 FROM pending_indexed_query_observations "
+                    "WHERE cdm_run_id = ?",
+                    ("expired-cdm-id",),
+                ).fetchone()
+                if remaining is None:
+                    break
+                time.sleep(0.01)
+
+            self.assertIsNone(remaining)
+        finally:
+            store.close()
 
     def test_v4_database_migrates_to_supervisor_job_fields(self):
         database_path = Path(self.directory.name) / "legacy-v4.db"
