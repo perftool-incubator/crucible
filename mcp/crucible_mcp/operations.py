@@ -5268,8 +5268,18 @@ class CrucibleOperations:
 
         def run_git(stage: str, arguments: list[str], **options: Any) -> Any:
             try:
+                # The MCP container's UID may differ from the owner of its
+                # read-only checkout mount, so scope Git's ownership exception
+                # to this resolved component instead of changing global config.
                 return subprocess.run(
-                    ["git", "-C", str(resolved), *arguments],
+                    [
+                        "git",
+                        "-c",
+                        f"safe.directory={resolved}",
+                        "-C",
+                        str(resolved),
+                        *arguments,
+                    ],
                     check=True,
                     capture_output=True,
                     **options,
