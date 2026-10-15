@@ -337,6 +337,14 @@ characters with a fixed omission marker and sets `command_truncated: true`.
 unique CDM run. If the summary contains multiple run IDs, select the desired ID
 from the summary rather than relying on an arbitrary status value.
 
+Indexed-result query tools limit each run ID to 4096 UTF-8 bytes. For
+`list_indexed_results`, this limit applies to each comma-separated ID, and an
+oversized ID is rejected before the MCP server starts CDM services. While a run
+is active and its CDM ID is not yet attached to the job, readiness observations
+are retained for up to 24 hours, with a combined limit of 1000 IDs and 1 MiB of
+UTF-8 ID data. When either capacity is reached, the oldest observations are
+evicted first.
+
 In `get_run_status`, `result_status` describes the local result-summary
 artifact only: `available` means the summary can be read, not that CDM-backed
 queries are ready. `indexed_query_status` is tracked separately as

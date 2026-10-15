@@ -132,12 +132,13 @@ transfers it back to the controller via SSH. The controller extracts
 and reorganizes the data into the result directory structure (see
 [Data flow](#data-flow-and-directory-structure) below).
 
-During organization, Rickshaw checks each non-profiler engine archive
-against that engine's generated tool start command. A warning names
-configured tools whose data directories are missing and clarifies that
-run completion is unaffected, though those tools' metrics may be
-incomplete. An empty `tool-data/` directory is expected when no tools
-were assigned to the engine.
+During organization, Rickshaw checks each non-profiler engine archive where
+tool collection is enabled against that engine's generated tool start command.
+It skips this check for `remotehosts` and `osp` endpoints, where tool collection
+is disabled. A warning names configured tools whose data directories are
+missing and clarifies that run completion is unaffected, though those tools'
+metrics may be incomplete. An empty `tool-data/` directory is expected when no
+tools were assigned to the engine.
 
 ### 7. Post-processing
 

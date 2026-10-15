@@ -19,7 +19,11 @@ from crucible_mcp.operations import (
     MAX_LOG_RESPONSE_BYTES,
     MAX_MCP_RESPONSE_BYTES,
 )
-from crucible_mcp.jobs import JobConflictError, JobNotFoundError
+from crucible_mcp.jobs import (
+    MAX_INDEXED_QUERY_RUN_ID_BYTES,
+    JobConflictError,
+    JobNotFoundError,
+)
 from crucible_mcp.audit import AuditLogger
 from crucible_mcp.host import DEFAULT_HOST_BRIDGE_SOCKET, host_bridge_command
 from crucible_mcp.models import IndexedQueryStatus, Job, JobState, ResultStatus
@@ -1210,6 +1214,45 @@ class TestServer(unittest.TestCase):
                 self.assertEqual(payload["result"]["structuredContent"], result)
                 ensure_services.assert_called_once_with()
                 operation.assert_called_once()
+
+    def test_indexed_query_rejects_oversized_utf8_ids_before_service_start(self):
+        job, _ = self.server.jobs.create_or_get(
+            "active-indexed-query", {"run": "pending"}
+        )
+        self.server.jobs.transition(job.mcp_job_id, JobState.STARTING)
+        ensure_services = Mock()
+        self.server.operations.set_result_services_ensurer(ensure_services)
+        list_operation = Mock()
+        get_operation = Mock()
+        self.server.operations.list_indexed_results = list_operation
+        self.server.operations.get_indexed_result = get_operation
+        oversized_id = "é" * (MAX_INDEXED_QUERY_RUN_ID_BYTES // 2 + 1)
+        cases = (
+            ("list_indexed_results", {"run": f"valid-id,{oversized_id}"}),
+            ("get_indexed_result", {"run": oversized_id}),
+        )
+
+        for request_id, (tool, arguments) in enumerate(cases, start=72):
+            body = json.dumps({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments},
+            })
+            status, payload = self.request("POST", "/mcp", body, self.token)
+
+            with self.subTest(tool=tool):
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["error"]["code"], -32602)
+                self.assertIn("4096 UTF-8 bytes", payload["error"]["message"])
+
+        ensure_services.assert_not_called()
+        list_operation.assert_not_called()
+        get_operation.assert_not_called()
+        pending_count = self.server.jobs._connection.execute(
+            "SELECT COUNT(*) FROM pending_indexed_query_observations"
+        ).fetchone()[0]
+        self.assertEqual(pending_count, 0)
 
     def test_indexed_query_service_start_failure_is_structured(self):
         job = self.create_completed_indexed_job("cdm-run-unavailable")
