@@ -253,6 +253,17 @@ The MCP process stores job state in SQLite, while each active job runs under a
 detached, host-Podman-managed supervisor container. This lets the job continue
 if the MCP service process restarts; on startup MCP reattaches to the
 supervisor or reconciles the durable outcome written in the job directory.
+While waiting for a supervisor, MCP continues reading lifecycle events and
+checks for that durable outcome even if the host `podman wait` request has not
+returned. Before finalizing from an outcome while `podman wait` is still
+pending, MCP confirms the supervisor has exited or disappeared. A run's
+`completed` event records its correlation identifiers and allows MCP to
+backfill them from the result summary, but the supervisor outcome supplies the
+exit status used for terminal job state. This lets MCP finish a run without
+requiring a service restart while preserving recovery behavior when the
+outcome is missing. Closing the bridge client's one-shot request also cancels
+and reaps its host-side command, so an abandoned `podman wait` does not outlive
+the completed job.
 The host bridge starts and observes these supervisors through the host Podman
 engine. Each supervisor uses the configured controller image and mounts only
 the job's supervision directory and Crucible checkout. It invokes the Crucible
@@ -325,6 +336,14 @@ characters with a fixed omission marker and sets `command_truncated: true`.
 `get_run_status` includes `cdm_run_id` when the result summary identifies one
 unique CDM run. If the summary contains multiple run IDs, select the desired ID
 from the summary rather than relying on an arbitrary status value.
+
+Indexed-result query tools limit each run ID to 4096 UTF-8 bytes. For
+`list_indexed_results`, this limit applies to each comma-separated ID, and an
+oversized ID is rejected before the MCP server starts CDM services. While a run
+is active and its CDM ID is not yet attached to the job, readiness observations
+are retained for up to 24 hours, with a combined limit of 1000 IDs and 1 MiB of
+UTF-8 ID data. When either capacity is reached, the oldest observations are
+evicted first.
 
 In `get_run_status`, `result_status` describes the local result-summary
 artifact only: `available` means the summary can be read, not that CDM-backed
@@ -410,6 +429,10 @@ versions, effective planning limits, and a fresh fingerprint of the bounded
 plan. A changed plan returns `stale_plan_handle`, an expired owned handle
 returns `expired_plan_handle`, and unknown or foreign handles return the same
 `invalid_plan_handle` error.
+If Crucible cannot fingerprint an installed component, it returns
+`component_version_unavailable` with the component and failing stage. Check the
+MCP service account's access to that checkout, its Git metadata, and its files;
+the service log includes the redacted underlying diagnostic.
 
 When `prepare_run` omits detail prefixes to fit its response-byte limit, use
 `render_run` with that handle and the same document or approved path to inspect

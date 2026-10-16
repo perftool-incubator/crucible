@@ -1,7 +1,8 @@
 """Helpers for running Crucible commands in the host execution context."""
 
-from collections.abc import Mapping, Sequence
+import os
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 
@@ -23,6 +24,14 @@ _MCP_SESSION_ENVIRONMENT = (
 )
 DEFAULT_HOST_BRIDGE_SOCKET = Path(
     "/var/lib/crucible/mcp/host-bridge/bridge.sock"
+)
+_HOST_SYSTEM_PATH = (
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
 )
 
 
@@ -46,7 +55,7 @@ def host_context_command(
 def host_context_environment(
     environment: Mapping[str, str], *, preserve_mcp_session: bool = False
 ) -> dict[str, str]:
-    """Remove container-only runtime overrides before using host Podman."""
+    """Prepare an environment for commands running in the host root."""
 
     result = dict(environment)
     for name in _CONTAINER_RUNTIME_ENVIRONMENT:
@@ -54,6 +63,15 @@ def host_context_environment(
     if not preserve_mcp_session:
         for name in _MCP_SESSION_ENVIRONMENT:
             result.pop(name, None)
+
+    # nsenter switches to the host root but keeps this process's PATH. Make
+    # sure host utilities installed in sbin directories remain discoverable.
+    path_entries = [
+        entry for entry in result.get("PATH", "").split(os.pathsep) if entry
+    ]
+    result["PATH"] = os.pathsep.join(
+        dict.fromkeys((*_HOST_SYSTEM_PATH, *path_entries))
+    )
     return result
 
 

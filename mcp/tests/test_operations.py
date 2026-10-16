@@ -680,6 +680,43 @@ class TestCrucibleOperations(unittest.TestCase):
             self.operations.prepare_run_file(run_file)
         self.assertEqual(context.exception.code, "invalid_json")
 
+    def test_component_version_failure_identifies_checkout_and_stage(self):
+        with patch(
+            "crucible_mcp.operations.subprocess.run",
+            side_effect=OSError("git executable is unavailable"),
+        ):
+            with self.assertLogs("crucible_mcp.operations", level="ERROR") as logs:
+                with self.assertRaises(OperationError) as context:
+                    self.operations._repository_revision(
+                        self.root, "benchmark:example"
+                    )
+
+        self.assertEqual(context.exception.code, "component_version_unavailable")
+        self.assertEqual(
+            context.exception.details,
+            {"component": "benchmark:example", "stage": "git rev-parse HEAD"},
+        )
+        self.assertNotIn(
+            "git executable is unavailable", json.dumps(context.exception.as_dict())
+        )
+        self.assertIn("benchmark:example", logs.output[0])
+        self.assertIn("git executable is unavailable", logs.output[0])
+
+    def test_plan_component_version_passes_component_identity_to_fingerprinting(self):
+        with patch.object(
+            self.operations,
+            "_repository_revision",
+            return_value="a" * 40,
+        ) as repository_revision:
+            self.operations.plan_component_versions(
+                {"benchmarks": [{"name": "example"}]}
+            )
+
+        self.assertEqual(
+            [call.args[1] for call in repository_revision.call_args_list],
+            ["crucible", "rickshaw", "multiplex", "benchmark:example"],
+        )
+
     def test_estimate_projects_before_applying_response_limit(self):
         plan = {
             "contract_version": "1",
