@@ -41,7 +41,7 @@ class TestHostContext(unittest.TestCase):
             "CRUCIBLE_MCP_SESSION_ID": "job-session",
             "CRUCIBLE_MCP_EVENT_FILE": "/var/lib/crucible/events.jsonl",
             "CRUCIBLE_MCP_HOST_SERVICE_STARTS": "true",
-            "PATH": "/usr/bin:/bin",
+            "PATH": "/usr/bin:/bin:/opt/custom/bin",
         }
 
         result = host_context_environment(source, preserve_mcp_session=True)
@@ -55,7 +55,10 @@ class TestHostContext(unittest.TestCase):
             result["CRUCIBLE_MCP_EVENT_FILE"], "/var/lib/crucible/events.jsonl"
         )
         self.assertNotIn("CRUCIBLE_MCP_HOST_SERVICE_STARTS", result)
-        self.assertEqual(result["PATH"], "/usr/bin:/bin")
+        self.assertEqual(
+            result["PATH"],
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/custom/bin",
+        )
 
     def test_host_bridge_command_uses_the_private_socket_client(self):
         command = host_bridge_command(

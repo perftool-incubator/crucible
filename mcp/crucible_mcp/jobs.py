@@ -3,6 +3,7 @@
 import hashlib
 import json
 import fcntl
+import logging
 import secrets
 import sqlite3
 import threading
@@ -102,6 +103,13 @@ PLAN_HANDLE_TTL = timedelta(hours=1)
 PLAN_HANDLE_EXPIRY_RETENTION = timedelta(hours=24)
 MAX_LIVE_PLAN_HANDLES = 1000
 MAX_PLAN_HANDLE_METADATA_BYTES = 65536
+PENDING_INDEXED_QUERY_OBSERVATION_TTL = timedelta(hours=24)
+MAX_PENDING_INDEXED_QUERY_OBSERVATIONS = 1000
+MAX_INDEXED_QUERY_RUN_ID_BYTES = 4096
+MAX_PENDING_INDEXED_QUERY_OBSERVATION_BYTES = 1024 * 1024
+PENDING_INDEXED_QUERY_OBSERVATION_CLEANUP_INTERVAL = timedelta(hours=1)
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class JobStore:
@@ -125,9 +133,78 @@ class JobStore:
         self._connection.execute("PRAGMA journal_mode = WAL")
         self._connection.execute("PRAGMA busy_timeout = 10000")
         self._migrate()
+        self._maintenance_stop = threading.Event()
+        self._maintenance_interval = (
+            PENDING_INDEXED_QUERY_OBSERVATION_CLEANUP_INTERVAL.total_seconds()
+        )
+        self.cleanup_pending_indexed_query_observations()
+        self._maintenance_thread = threading.Thread(
+            target=self._pending_observation_maintenance_loop,
+            name="mcp-pending-query-observation-cleanup",
+            daemon=True,
+        )
+        self._maintenance_thread.start()
 
     def close(self) -> None:
+        self._maintenance_stop.set()
+        self._maintenance_thread.join()
         self._connection.close()
+
+    def _pending_observation_maintenance_loop(self) -> None:
+        while not self._maintenance_stop.wait(self._maintenance_interval):
+            try:
+                self.cleanup_pending_indexed_query_observations()
+            except sqlite3.Error:
+                _LOGGER.warning(
+                    "Could not prune expired pending indexed-query observations",
+                    exc_info=True,
+                )
+
+    @staticmethod
+    def _prune_pending_indexed_query_observations(
+        connection: sqlite3.Connection,
+    ) -> int:
+        expiry_cutoff = (
+            datetime.now(timezone.utc) - PENDING_INDEXED_QUERY_OBSERVATION_TTL
+        ).isoformat(timespec="seconds")
+        cursor = connection.execute(
+            "DELETE FROM pending_indexed_query_observations WHERE checked_at < ?",
+            (expiry_cutoff,),
+        )
+        deleted = cursor.rowcount
+        cursor = connection.execute(
+            "DELETE FROM pending_indexed_query_observations "
+            "WHERE length(CAST(cdm_run_id AS BLOB)) > ?",
+            (MAX_INDEXED_QUERY_RUN_ID_BYTES,),
+        )
+        deleted += cursor.rowcount
+        cursor = connection.execute(
+            "DELETE FROM pending_indexed_query_observations "
+            "WHERE cdm_run_id IN ("
+            "SELECT cdm_run_id FROM ("
+            "SELECT cdm_run_id, "
+            "ROW_NUMBER() OVER ("
+            "ORDER BY checked_at DESC, observation_order DESC, cdm_run_id DESC"
+            ") AS newest_rank, "
+            "SUM(length(CAST(cdm_run_id AS BLOB))) OVER ("
+            "ORDER BY checked_at DESC, observation_order DESC, cdm_run_id DESC"
+            ") AS newest_bytes "
+            "FROM pending_indexed_query_observations"
+            ") WHERE newest_rank > ? OR newest_bytes > ?"
+            ")",
+            (
+                MAX_PENDING_INDEXED_QUERY_OBSERVATIONS,
+                MAX_PENDING_INDEXED_QUERY_OBSERVATION_BYTES,
+            ),
+        )
+        deleted += cursor.rowcount
+        return deleted
+
+    def cleanup_pending_indexed_query_observations(self) -> int:
+        """Remove expired observations and enforce durable row and byte bounds."""
+
+        with self._transaction() as connection:
+            return self._prune_pending_indexed_query_observations(connection)
 
     @contextmanager
     def lifecycle_lock(self, exclusive: bool = False) -> Iterator[None]:
@@ -218,7 +295,7 @@ class JobStore:
                 connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_status TEXT NOT NULL DEFAULT 'not_checked'")
                 connection.execute("ALTER TABLE jobs ADD COLUMN indexed_query_checked_at TEXT")
                 connection.execute("UPDATE schema_version SET version = 5")
-            elif version[0] not in {5, 6, 7, 8}:
+            elif version[0] not in {5, 6, 7, 8, 9, 10}:
                 raise JobError(f"unsupported MCP job database schema: {version[0]}")
             current_version = connection.execute(
                 "SELECT version FROM schema_version LIMIT 1"
@@ -232,7 +309,7 @@ class JobStore:
                 )
                 connection.execute("UPDATE schema_version SET version = 6")
                 current_version = 6
-            elif current_version not in {6, 7, 8}:
+            elif current_version not in {6, 7, 8, 9, 10}:
                 raise JobError(f"unsupported MCP job database schema: {current_version}")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS jobs_cdm_run_id_idx ON jobs(cdm_run_id)"
@@ -275,6 +352,29 @@ class JobStore:
                     "ON expired_plan_handles(cleaned_at)"
                 )
                 connection.execute("UPDATE schema_version SET version = 8")
+                current_version = 8
+            if current_version == 8:
+                connection.execute(
+                    """
+                    CREATE TABLE pending_indexed_query_observations (
+                        cdm_run_id TEXT PRIMARY KEY,
+                        status TEXT NOT NULL,
+                        checked_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX pending_indexed_query_checked_at_idx "
+                    "ON pending_indexed_query_observations(checked_at)"
+                )
+                connection.execute("UPDATE schema_version SET version = 9")
+                current_version = 9
+            if current_version == 9:
+                connection.execute(
+                    "ALTER TABLE pending_indexed_query_observations "
+                    "ADD COLUMN observation_order INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute("UPDATE schema_version SET version = 10")
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -549,15 +649,87 @@ class JobStore:
 
         if not cdm_run_id:
             return 0
+        try:
+            run_id_bytes = len(cdm_run_id.encode("utf-8"))
+        except UnicodeEncodeError:
+            return 0
+        if run_id_bytes > MAX_INDEXED_QUERY_RUN_ID_BYTES:
+            return 0
         status = IndexedQueryStatus(status)
         checked_at = _now()
         with self._transaction() as connection:
+            self._prune_pending_indexed_query_observations(connection)
             cursor = connection.execute(
                 "UPDATE jobs SET indexed_query_status = ?, indexed_query_checked_at = ?, "
                 "updated_at = ? WHERE cdm_run_id = ?",
                 (status.value, checked_at, checked_at, cdm_run_id),
             )
+            if cursor.rowcount:
+                connection.execute(
+                    "DELETE FROM pending_indexed_query_observations WHERE cdm_run_id = ?",
+                    (cdm_run_id,),
+                )
+            else:
+                active_states = tuple(state.value for state in ACTIVE_JOB_STATES)
+                placeholders = ",".join("?" for _ in active_states)
+                unresolved_run = connection.execute(
+                    "SELECT 1 FROM jobs WHERE operation = 'run' AND cdm_run_id IS NULL "
+                    f"AND state IN ({placeholders}) LIMIT 1",
+                    active_states,
+                ).fetchone()
+                if unresolved_run is not None:
+                    # Timestamps have second precision; this order preserves arrivals
+                    # when pruning observations recorded within the same second.
+                    observation_order = connection.execute(
+                        "SELECT COALESCE(MAX(observation_order), 0) + 1 "
+                        "FROM pending_indexed_query_observations"
+                    ).fetchone()[0]
+                    connection.execute(
+                        "INSERT INTO pending_indexed_query_observations "
+                        "(cdm_run_id, status, checked_at, observation_order) "
+                        "VALUES (?, ?, ?, ?) "
+                        "ON CONFLICT(cdm_run_id) DO UPDATE SET "
+                        "status = excluded.status, checked_at = excluded.checked_at, "
+                        "observation_order = excluded.observation_order",
+                        (cdm_run_id, status.value, checked_at, observation_order),
+                    )
+                    self._prune_pending_indexed_query_observations(connection)
+                else:
+                    connection.execute(
+                        "DELETE FROM pending_indexed_query_observations WHERE cdm_run_id = ?",
+                        (cdm_run_id,),
+                    )
             return cursor.rowcount
+
+    @staticmethod
+    def _apply_pending_indexed_query_observation(
+        connection: sqlite3.Connection, cdm_run_id: str
+    ) -> None:
+        observation = connection.execute(
+            "SELECT status, checked_at FROM pending_indexed_query_observations "
+            "WHERE cdm_run_id = ?",
+            (cdm_run_id,),
+        ).fetchone()
+        if observation is None:
+            return
+        expiry_cutoff = (
+            datetime.now(timezone.utc) - PENDING_INDEXED_QUERY_OBSERVATION_TTL
+        ).isoformat(timespec="seconds")
+        if observation["checked_at"] < expiry_cutoff:
+            connection.execute(
+                "DELETE FROM pending_indexed_query_observations WHERE cdm_run_id = ?",
+                (cdm_run_id,),
+            )
+            return
+        connection.execute(
+            "UPDATE jobs SET indexed_query_status = ?, indexed_query_checked_at = ?, "
+            "updated_at = ? WHERE cdm_run_id = ?",
+            (observation["status"], observation["checked_at"], _now(), cdm_run_id),
+        )
+        connection.execute(
+            "DELETE FROM pending_indexed_query_observations WHERE cdm_run_id = ?",
+            (cdm_run_id,),
+        )
 
     def list_active(
         self,
@@ -614,6 +786,11 @@ class JobStore:
                 f"UPDATE jobs SET {assignments} WHERE mcp_job_id = ?",
                 tuple(updates.values()) + (job_id,),
             )
+            cdm_run_id = updates.get("cdm_run_id")
+            if cdm_run_id:
+                self._apply_pending_indexed_query_observation(
+                    connection, cdm_run_id
+                )
         return self.get(job_id)
 
     @staticmethod

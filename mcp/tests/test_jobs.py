@@ -1,11 +1,15 @@
 import json
 import sqlite3
 import tempfile
+import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from crucible_mcp.jobs import (
     MAX_LIVE_PLAN_HANDLES,
+    MAX_PENDING_INDEXED_QUERY_OBSERVATIONS,
     JobConflictError,
     JobStore,
     PlanHandleCapacityError,
@@ -98,6 +102,254 @@ class TestJobStore(unittest.TestCase):
         self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
         self.assertIsNotNone(updated.indexed_query_checked_at)
 
+    def test_indexed_query_observation_is_applied_after_cdm_id_backfill(self):
+        job, _ = self.store.create_or_get("request-indexed-before-id", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.STARTING)
+
+        updated_count = self.store.update_indexed_query_status(
+            "cdm-late", IndexedQueryStatus.READY
+        )
+        self.assertEqual(updated_count, 0)
+        self.assertEqual(
+            self.store.get(job.mcp_job_id).indexed_query_status,
+            IndexedQueryStatus.NOT_CHECKED,
+        )
+
+        updated = self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            cdm_run_id="cdm-late",
+        )
+
+        self.assertEqual(updated.indexed_query_status, IndexedQueryStatus.READY)
+        self.assertIsNotNone(updated.indexed_query_checked_at)
+        pending = self.store._connection.execute(
+            "SELECT cdm_run_id FROM pending_indexed_query_observations"
+        ).fetchall()
+        self.assertEqual(pending, [])
+
+    def test_pending_indexed_query_observations_are_bounded_by_oldest_first(self):
+        job, _ = self.store.create_or_get("request-indexed-cap", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.STARTING)
+
+        with patch("crucible_mcp.jobs.MAX_PENDING_INDEXED_QUERY_OBSERVATIONS", 3):
+            for run_id in ("cdm-001", "cdm-002", "cdm-003"):
+                self.store.update_indexed_query_status(
+                    run_id, IndexedQueryStatus.READY
+                )
+
+            base = datetime.now(timezone.utc) - timedelta(minutes=3)
+            for offset, run_id in enumerate(("cdm-001", "cdm-002", "cdm-003")):
+                checked_at = (base + timedelta(minutes=offset)).isoformat(
+                    timespec="seconds"
+                )
+                self.store._connection.execute(
+                    "UPDATE pending_indexed_query_observations SET checked_at = ? "
+                    "WHERE cdm_run_id = ?",
+                    (checked_at, run_id),
+                )
+            self.store._connection.commit()
+
+            # Refreshing an existing ID keeps it and makes it the newest entry.
+            self.store.update_indexed_query_status(
+                "cdm-001", IndexedQueryStatus.UNAVAILABLE
+            )
+            # A new ID at capacity evicts the least recently checked entry.
+            self.store.update_indexed_query_status(
+                "cdm-004", IndexedQueryStatus.READY
+            )
+
+        rows = self.store._connection.execute(
+            "SELECT cdm_run_id, status FROM pending_indexed_query_observations "
+            "ORDER BY cdm_run_id"
+        ).fetchall()
+        self.assertEqual(
+            [(row["cdm_run_id"], row["status"]) for row in rows],
+            [
+                ("cdm-001", IndexedQueryStatus.UNAVAILABLE.value),
+                ("cdm-003", IndexedQueryStatus.READY.value),
+                ("cdm-004", IndexedQueryStatus.READY.value),
+            ],
+        )
+        self.assertLessEqual(len(rows), MAX_PENDING_INDEXED_QUERY_OBSERVATIONS)
+
+    def test_pending_indexed_query_observations_respect_utf8_byte_cap(self):
+        job, _ = self.store.create_or_get("request-indexed-bytes", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.STARTING)
+
+        oldest_id = "é" * 3
+        middle_id = "b" * 3
+        newest_id = "c" * 2
+        with patch(
+            "crucible_mcp.jobs.MAX_PENDING_INDEXED_QUERY_OBSERVATION_BYTES", 10
+        ):
+            for run_id in (oldest_id, middle_id):
+                self.store.update_indexed_query_status(
+                    run_id, IndexedQueryStatus.READY
+                )
+            base = datetime.now(timezone.utc) - timedelta(minutes=10)
+            for offset, run_id in enumerate((oldest_id, middle_id)):
+                checked_at = (base + timedelta(minutes=offset)).isoformat(
+                    timespec="seconds"
+                )
+                self.store._connection.execute(
+                    "UPDATE pending_indexed_query_observations SET checked_at = ? "
+                    "WHERE cdm_run_id = ?",
+                    (checked_at, run_id),
+                )
+            self.store._connection.commit()
+            self.store.update_indexed_query_status(
+                newest_id, IndexedQueryStatus.READY
+            )
+
+        rows = self.store._connection.execute(
+            "SELECT cdm_run_id FROM pending_indexed_query_observations "
+            "ORDER BY cdm_run_id"
+        ).fetchall()
+        self.assertEqual(
+            [row["cdm_run_id"] for row in rows], [middle_id, newest_id]
+        )
+        self.assertEqual(
+            sum(len(row["cdm_run_id"].encode("utf-8")) for row in rows), 5
+        )
+
+        with patch("crucible_mcp.jobs.MAX_INDEXED_QUERY_RUN_ID_BYTES", 4):
+            self.store.update_indexed_query_status(
+                "é" * 3, IndexedQueryStatus.READY
+            )
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT COUNT(*) FROM pending_indexed_query_observations "
+                "WHERE cdm_run_id = ?",
+                ("é" * 3,),
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_pending_observation_ties_keep_new_arrivals_and_refreshes(self):
+        job, _ = self.store.create_or_get("request-indexed-ties", {"run": 1})
+        self.store.transition(job.mcp_job_id, JobState.STARTING)
+        checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        with (
+            patch("crucible_mcp.jobs._now", return_value=checked_at),
+            patch("crucible_mcp.jobs.MAX_PENDING_INDEXED_QUERY_OBSERVATIONS", 2),
+        ):
+            for run_id in ("z-old", "y-middle", "a-new"):
+                self.store.update_indexed_query_status(
+                    run_id, IndexedQueryStatus.READY
+                )
+
+            rows = self.store._connection.execute(
+                "SELECT cdm_run_id, observation_order "
+                "FROM pending_indexed_query_observations "
+                "ORDER BY observation_order"
+            ).fetchall()
+            self.assertEqual(
+                [(row["cdm_run_id"], row["observation_order"]) for row in rows],
+                [("y-middle", 2), ("a-new", 3)],
+            )
+
+            # A repeated observation is a new arrival even when its timestamp ties.
+            self.store.update_indexed_query_status(
+                "y-middle", IndexedQueryStatus.UNAVAILABLE
+            )
+            self.store.update_indexed_query_status(
+                "b-new", IndexedQueryStatus.READY
+            )
+
+        rows = self.store._connection.execute(
+            "SELECT cdm_run_id, status, observation_order "
+            "FROM pending_indexed_query_observations "
+            "ORDER BY observation_order"
+        ).fetchall()
+        self.assertEqual(
+            [
+                (row["cdm_run_id"], row["status"], row["observation_order"])
+                for row in rows
+            ],
+            [
+                ("y-middle", IndexedQueryStatus.UNAVAILABLE.value, 4),
+                ("b-new", IndexedQueryStatus.READY.value, 5),
+            ],
+        )
+
+    def test_startup_cleanup_enforces_pending_observation_byte_and_row_caps(self):
+        database_path = self.store.database_path
+        checked_at = datetime.now(timezone.utc)
+        entries = (
+            ("é" * 2, checked_at - timedelta(minutes=3)),
+            ("ab", checked_at - timedelta(minutes=2)),
+            ("cd", checked_at - timedelta(minutes=1)),
+            ("toolong", checked_at),
+        )
+        for run_id, timestamp in entries:
+            self.store._connection.execute(
+                "INSERT INTO pending_indexed_query_observations "
+                "(cdm_run_id, status, checked_at) VALUES (?, ?, ?)",
+                (
+                    run_id,
+                    IndexedQueryStatus.READY.value,
+                    timestamp.isoformat(timespec="seconds"),
+                ),
+            )
+        self.store._connection.commit()
+        self.store.close()
+
+        with (
+            patch("crucible_mcp.jobs.MAX_INDEXED_QUERY_RUN_ID_BYTES", 4),
+            patch("crucible_mcp.jobs.MAX_PENDING_INDEXED_QUERY_OBSERVATIONS", 2),
+            patch(
+                "crucible_mcp.jobs.MAX_PENDING_INDEXED_QUERY_OBSERVATION_BYTES",
+                5,
+            ),
+        ):
+            self.store = JobStore(database_path)
+
+        rows = self.store._connection.execute(
+            "SELECT cdm_run_id FROM pending_indexed_query_observations "
+            "ORDER BY cdm_run_id"
+        ).fetchall()
+        self.assertEqual([row["cdm_run_id"] for row in rows], ["ab", "cd"])
+        self.assertLessEqual(len(rows), 2)
+        self.assertLessEqual(
+            sum(len(row["cdm_run_id"].encode("utf-8")) for row in rows), 5
+        )
+
+    def test_periodic_maintenance_prunes_expired_observations_without_queries(self):
+        database_path = Path(self.directory.name) / "maintenance" / "jobs.db"
+        with patch(
+            "crucible_mcp.jobs.PENDING_INDEXED_QUERY_OBSERVATION_CLEANUP_INTERVAL",
+            timedelta(milliseconds=10),
+        ):
+            store = JobStore(database_path)
+        try:
+            store._connection.execute(
+                "INSERT INTO pending_indexed_query_observations "
+                "(cdm_run_id, status, checked_at) VALUES (?, ?, ?)",
+                (
+                    "expired-cdm-id",
+                    IndexedQueryStatus.READY.value,
+                    "2000-01-01T00:00:00+00:00",
+                ),
+            )
+            store._connection.commit()
+
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                remaining = store._connection.execute(
+                    "SELECT 1 FROM pending_indexed_query_observations "
+                    "WHERE cdm_run_id = ?",
+                    ("expired-cdm-id",),
+                ).fetchone()
+                if remaining is None:
+                    break
+                time.sleep(0.01)
+
+            self.assertIsNone(remaining)
+        finally:
+            store.close()
+
     def test_v4_database_migrates_to_supervisor_job_fields(self):
         database_path = Path(self.directory.name) / "legacy-v4.db"
         connection = sqlite3.connect(database_path)
@@ -119,7 +371,7 @@ class TestJobStore(unittest.TestCase):
         finally:
             migrated.close()
 
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 10)
         self.assertIn("indexed_query_status", columns)
         self.assertIn("indexed_query_checked_at", columns)
         self.assertIn("supervisor_container_name", columns)
@@ -146,9 +398,79 @@ class TestJobStore(unittest.TestCase):
         finally:
             migrated.close()
 
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 10)
         self.assertIn("supervisor_container_name", columns)
         self.assertIn("supervisor_container_id", columns)
+
+    def test_v8_database_migrates_to_pending_indexed_query_observations(self):
+        database_path = Path(self.directory.name) / "legacy-v8.db"
+        connection = sqlite3.connect(database_path)
+        connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO schema_version(version) VALUES (8)")
+        connection.execute("CREATE TABLE jobs (cdm_run_id TEXT)")
+        connection.commit()
+        connection.close()
+
+        migrated = JobStore(database_path)
+        try:
+            version = migrated._connection.execute(
+                "SELECT version FROM schema_version"
+            ).fetchone()[0]
+            tables = {
+                row[0]
+                for row in migrated._connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            columns = {
+                row[1]
+                for row in migrated._connection.execute(
+                    "PRAGMA table_info(pending_indexed_query_observations)"
+                )
+            }
+        finally:
+            migrated.close()
+
+        self.assertEqual(version, 10)
+        self.assertIn("pending_indexed_query_observations", tables)
+        self.assertIn("observation_order", columns)
+
+    def test_v9_database_migrates_pending_observation_order(self):
+        database_path = Path(self.directory.name) / "legacy-v9.db"
+        connection = sqlite3.connect(database_path)
+        connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO schema_version(version) VALUES (9)")
+        connection.execute("CREATE TABLE jobs (cdm_run_id TEXT)")
+        connection.execute(
+            "CREATE TABLE pending_indexed_query_observations ("
+            "cdm_run_id TEXT PRIMARY KEY, status TEXT NOT NULL, checked_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO pending_indexed_query_observations VALUES (?, ?, ?)",
+            (
+                "existing-run",
+                IndexedQueryStatus.READY.value,
+                datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        migrated = JobStore(database_path)
+        try:
+            version = migrated._connection.execute(
+                "SELECT version FROM schema_version"
+            ).fetchone()[0]
+            observation = migrated._connection.execute(
+                "SELECT observation_order FROM pending_indexed_query_observations "
+                "WHERE cdm_run_id = ?",
+                ("existing-run",),
+            ).fetchone()
+        finally:
+            migrated.close()
+
+        self.assertEqual(version, 10)
+        self.assertEqual(observation["observation_order"], 0)
 
     def test_supervisor_identifiers_are_internal_job_metadata(self):
         job, _ = self.store.create_or_get("supervisor-internal", {"run": True})

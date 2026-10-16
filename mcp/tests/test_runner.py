@@ -500,6 +500,88 @@ class TestRunManager(unittest.TestCase):
         finish.assert_called_once_with(job.mcp_job_id, -15, event_path)
         inspect.assert_not_called()
 
+    def test_wait_stops_waiting_when_durable_outcome_precedes_podman_wait_exit(self):
+        job, _ = self.store.create_or_get("key-wait-durable-outcome", {"run": True})
+        job_directory = self.root / "runs" / job.mcp_job_id
+        job_directory.mkdir(parents=True)
+        (job_directory / "supervisor-outcome.json").write_text(
+            json.dumps({"operation": "run", "exit_code": 0}), encoding="utf-8"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            supervision_directory=str(job_directory),
+            supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+        )
+        process = Mock()
+        process.poll.return_value = None
+        process.communicate.return_value = ("", "")
+        event_path = job_directory / "events.jsonl"
+
+        with (
+            patch("crucible_mcp.runner.subprocess.Popen", return_value=process),
+            patch.object(self.manager, "_consume_events", return_value=0),
+            patch.object(
+                self.manager, "_inspect_supervisor_container", return_value=None
+            ) as inspect,
+            patch.object(self.manager, "_finish_supervised_job") as finish,
+        ):
+            self.manager._wait_for_supervisor(
+                job.mcp_job_id,
+                f"crucible-mcp-job-{job.mcp_job_id}",
+                event_path,
+            )
+
+        process.terminate.assert_called_once_with()
+        process.communicate.assert_called_once_with(timeout=1)
+        finish.assert_called_once_with(job.mcp_job_id, 0, event_path)
+        inspect.assert_called_once_with(f"crucible-mcp-job-{job.mcp_job_id}")
+
+    def test_wait_keeps_supervisor_with_durable_outcome_until_it_exits(self):
+        job, _ = self.store.create_or_get("key-wait-outcome-active", {"run": True})
+        job_directory = self.root / "runs" / job.mcp_job_id
+        job_directory.mkdir(parents=True)
+        (job_directory / "supervisor-outcome.json").write_text(
+            json.dumps({"operation": "run", "exit_code": 0}), encoding="utf-8"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+            supervision_directory=str(job_directory),
+            supervisor_container_name=f"crucible-mcp-job-{job.mcp_job_id}",
+        )
+        process = Mock()
+        process.poll.side_effect = [None, None]
+        process.communicate.return_value = ("", "")
+        event_path = job_directory / "events.jsonl"
+        active_container = {
+            "id": "supervisor-id",
+            "state": "running",
+            "exit_code": 0,
+            "pid": 1234,
+        }
+
+        with (
+            patch("crucible_mcp.runner.subprocess.Popen", return_value=process),
+            patch.object(self.manager, "_consume_events", return_value=0),
+            patch.object(
+                self.manager,
+                "_inspect_supervisor_container",
+                side_effect=[active_container, None],
+            ) as inspect,
+            patch.object(self.manager, "_finish_supervised_job") as finish,
+            patch("crucible_mcp.runner.time.sleep"),
+        ):
+            self.manager._wait_for_supervisor(
+                job.mcp_job_id,
+                f"crucible-mcp-job-{job.mcp_job_id}",
+                event_path,
+            )
+
+        self.assertEqual(inspect.call_count, 2)
+        process.terminate.assert_called_once_with()
+        finish.assert_called_once_with(job.mcp_job_id, 0, event_path)
+
     def test_submission_is_idempotent_and_completes_asynchronously(self):
         document = {"benchmarks": [{"name": "example"}]}
         job, created = self.manager.submit("key-1", document=document)
@@ -1911,6 +1993,39 @@ class TestRunManager(unittest.TestCase):
         updated = self.store.get(job.mcp_job_id)
         self.assertEqual(updated.rickshaw_run_id, "rickshaw-2")
         self.assertEqual(updated.cdm_run_id, "cdm-2")
+
+    def test_completed_event_persists_ids_without_marking_job_terminal(self):
+        job, _ = self.store.create_or_get("key-completed-event", {"run": 1})
+        run_directory = self.root / "completed-event-run"
+        (run_directory / "run").mkdir(parents=True)
+        (run_directory / "run" / "result-summary.json").write_text(
+            '{"runs":[{"run-id":"cdm-completed"}]}', encoding="utf-8"
+        )
+        self.store.transition(
+            job.mcp_job_id,
+            JobState.STARTING,
+        )
+        self.store.transition(job.mcp_job_id, JobState.INDEXING)
+        event_path = self.root / "completed-events.jsonl"
+        event_path.write_text(
+            json.dumps(
+                {
+                    "state": "completed",
+                    "run_directory": str(run_directory),
+                    "rickshaw_run_id": "rickshaw-completed",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        self.manager._consume_events(job.mcp_job_id, event_path, 0)
+
+        updated = self.store.get(job.mcp_job_id)
+        self.assertEqual(updated.state, JobState.INDEXING)
+        self.assertEqual(updated.run_directory, str(run_directory))
+        self.assertEqual(updated.rickshaw_run_id, "rickshaw-completed")
+        self.assertEqual(updated.cdm_run_id, "cdm-completed")
 
     def test_backfill_does_not_choose_between_multiple_cdm_run_ids(self):
         job, _ = self.store.create_or_get("key-backfill-ambiguous", {"run": 1})

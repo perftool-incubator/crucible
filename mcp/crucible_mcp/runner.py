@@ -1174,43 +1174,107 @@ class RunManager:
                     process = None
 
                 exit_code = None
+                supervisor_exit_confirmed = False
                 if process is None:
                     exit_code = self._read_supervisor_outcome(self.store.get(job_id))
                 else:
+                    outcome_exit_code = None
                     while process.poll() is None:
                         event_position = self._consume_events(
                             job_id, event_path, event_position
                         )
+                        outcome_exit_code = self._read_supervisor_outcome(
+                            self.store.get(job_id)
+                        )
+                        if outcome_exit_code is not None:
+                            try:
+                                container = self._inspect_supervisor_container(
+                                    container_name
+                                )
+                            except SupervisorInspectionError:
+                                # An uncertain inspection cannot prove that the
+                                # supervisor has stopped; keep observing it.
+                                time.sleep(0.1)
+                                continue
+                            if container is not None and container["state"] not in {
+                                "exited",
+                                "stopped",
+                            }:
+                                time.sleep(0.1)
+                                continue
+                            supervisor_exit_confirmed = True
+                            # The supervisor records its outcome before the
+                            # detached container necessarily makes `podman wait`
+                            # return. Once inspection confirms exit or absence,
+                            # stop and reap the local waiter. In host execution,
+                            # this closes its bridge socket so the bridge also
+                            # stops and reaps the host-side wait command.
+                            try:
+                                process.terminate()
+                            except OSError:
+                                pass
+                            try:
+                                process.communicate(timeout=1)
+                            except subprocess.TimeoutExpired:
+                                try:
+                                    process.kill()
+                                except OSError:
+                                    pass
+                                process.communicate()
+                            event_position = self._consume_events(
+                                job_id, event_path, event_position
+                            )
+                            break
                         time.sleep(0.1)
-                    stdout, _stderr = process.communicate()
-                    event_position = self._consume_events(
-                        job_id, event_path, event_position
-                    )
-                    # A nonzero podman-wait status describes the wait request,
-                    # not the supervised command. Only trust its output when
-                    # the wait itself succeeded. The durable child outcome is
-                    # authoritative because SystemExit wraps negative signal
-                    # statuses into the container's 0-255 exit-code range.
-                    exit_code = self._read_supervisor_outcome(
-                        self.store.get(job_id)
-                    )
-                    if exit_code is None and process.returncode == 0:
-                        try:
-                            exit_code = int(stdout.strip().splitlines()[-1])
-                        except (ValueError, IndexError):
-                            pass
-                    if exit_code is None:
+                    if outcome_exit_code is not None:
+                        exit_code = outcome_exit_code
+                    else:
+                        stdout, _stderr = process.communicate()
+                        supervisor_exit_confirmed = process.returncode == 0
+                        event_position = self._consume_events(
+                            job_id, event_path, event_position
+                        )
+                        # A nonzero podman-wait status describes the wait
+                        # request, not the supervised command. Only trust its
+                        # output when the wait itself succeeded. The durable
+                        # child outcome is authoritative because SystemExit
+                        # wraps negative signal statuses into the container's
+                        # 0-255 exit-code range.
                         exit_code = self._read_supervisor_outcome(
                             self.store.get(job_id)
                         )
+                        if exit_code is None and process.returncode == 0:
+                            try:
+                                exit_code = int(stdout.strip().splitlines()[-1])
+                            except (ValueError, IndexError):
+                                pass
+                        if exit_code is None:
+                            exit_code = self._read_supervisor_outcome(
+                                self.store.get(job_id)
+                            )
 
                 container = None
                 inspection_uncertain = False
-                if exit_code is None:
+                if exit_code is None or not supervisor_exit_confirmed:
                     try:
                         container = self._inspect_supervisor_container(container_name)
                     except SupervisorInspectionError:
                         inspection_uncertain = True
+                    else:
+                        supervisor_exit_confirmed = container is None or container[
+                            "state"
+                        ] in {"exited", "stopped"}
+
+                if exit_code is not None and not supervisor_exit_confirmed:
+                    # A durable outcome describes the command, but an
+                    # unsuccessful or missing wait request does not confirm
+                    # that its supervisor has stopped. Keep watching active
+                    # or uncertain supervisors before finalizing the job.
+                    event_position = self._consume_events(
+                        job_id, event_path, event_position
+                    )
+                    time.sleep(0.25)
+                    continue
 
                 if exit_code is None:
                     if inspection_uncertain or (
@@ -2108,6 +2172,22 @@ class RunManager:
                         self.store.transition(job_id, state, **updates)
                     except RuntimeError:
                         # A terminal process result may race with its final event.
+                        pass
+                elif state == JobState.COMPLETED:
+                    current = self.store.get(job_id)
+                    if current.operation != "run":
+                        continue
+                    try:
+                        if updates:
+                            self.store.transition(job_id, current.state, **updates)
+                        # The run command emits this after post-processing,
+                        # indexing, and summary creation. Persist its IDs now,
+                        # but wait for the supervisor outcome before making
+                        # lifecycle state terminal.
+                        self._backfill_identifiers(job_id)
+                    except RuntimeError:
+                        # Finalization can race the event reader; terminal
+                        # status and artifacts will be reconciled by the waiter.
                         pass
             return events.tell()
 

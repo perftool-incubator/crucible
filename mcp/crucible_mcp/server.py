@@ -27,6 +27,7 @@ from .jobs import (
     JobError,
     JobNotFoundError,
     JobStore,
+    MAX_INDEXED_QUERY_RUN_ID_BYTES,
     PlanHandleCapacityError,
 )
 from .models import IndexedQueryStatus, Job, JobState
@@ -294,7 +295,11 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "list_indexed_results",
-        "description": "List historical run IDs from the configured CDM service.",
+        "description": (
+            "List historical run IDs from the configured CDM service. Each run ID "
+            "in the comma-separated run filter is limited to "
+            f"{MAX_INDEXED_QUERY_RUN_ID_BYTES} UTF-8 bytes."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -310,17 +315,28 @@ TOOL_DEFINITIONS = (
     },
     {
         "name": "get_indexed_result",
-        "description": "Get structured metadata for a historical CDM run; credential-like tag values are redacted.",
+        "description": (
+            "Get structured metadata for a historical CDM run (run ID limited to "
+            f"{MAX_INDEXED_QUERY_RUN_ID_BYTES} UTF-8 bytes); "
+            "credential-like tag values are redacted."
+        ),
         "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
     },
     {
         "name": "list_indexed_periods",
-        "description": "List the primary periods and samples associated with a historical run.",
+        "description": (
+            "List the primary periods and samples associated with a historical run "
+            f"(run ID limited to {MAX_INDEXED_QUERY_RUN_ID_BYTES} UTF-8 bytes)."
+        ),
         "inputSchema": {"type": "object", "properties": {"run": {"type": "string", "minLength": 1}}, "required": ["run"], "additionalProperties": False},
     },
     {
         "name": "get_indexed_metric",
-        "description": "Query metric data for a historical CDM run; credential-like text fields are redacted.",
+        "description": (
+            "Query metric data for a historical CDM run (run ID limited to "
+            f"{MAX_INDEXED_QUERY_RUN_ID_BYTES} UTF-8 bytes); "
+            "credential-like text fields are redacted."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1034,6 +1050,22 @@ class MCPHandler(BaseHTTPRequestHandler):
             if name in _INDEXED_RESULT_TOOLS
             else []
         )
+        for indexed_query_run in indexed_query_runs:
+            try:
+                run_id_bytes = len(indexed_query_run.encode("utf-8"))
+            except UnicodeEncodeError:
+                return self._error(
+                    request_id,
+                    -32602,
+                    "invalid arguments: run IDs must contain valid Unicode",
+                )
+            if run_id_bytes > MAX_INDEXED_QUERY_RUN_ID_BYTES:
+                return self._error(
+                    request_id,
+                    -32602,
+                    "invalid arguments: each run ID must be at most "
+                    f"{MAX_INDEXED_QUERY_RUN_ID_BYTES} UTF-8 bytes",
+                )
         try:
             # Service startup can take minutes; reject an invalid query window first.
             if (
