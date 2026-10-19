@@ -448,3 +448,39 @@ For this migration effort, use the agreed implementation/review roles:
 revision, test commands, raw evidence and unexecuted cases. Keep unrelated shared
 framework issues in separate issues or PRs so a new benchmark's dependencies
 remain clear.
+
+## 10. Port suite-selected payloads as native benchmarks
+
+A suite profile may select a patched or repackaged workload rather than the
+pristine upstream release. Compare the profile payload with the upstream source,
+pin and document both inputs, review the differences, and apply any required
+changes as a checked-in patch. Preserve the source license and attribution. The
+benchmark subproject should invoke the native workload directly; do not add the
+suite harness as a runtime dependency when the goal is to support that workload
+in Crucible.
+
+PHPBench 0.8.1 demonstrated why native output needs row-level validation. Its
+fixed search paths can discover the same tests twice when installed under
+`/opt/phpbench`; it still prints `Tests: 56`. Install outside those search paths
+and validate the full ordered set of 56 timed rows, including uniqueness and
+completeness. Also distinguish suite repetition from native work: PTS
+`TimesToRun=3` maps to Crucible `num-samples=3`, while PHPBench's `-i 2000000`
+is the native `iterations` benchmark parameter.
+
+## 11. Validate Workshop archives before root extraction
+
+Workshop build stages can run with root privileges. Verify the pinned archive's
+size and digest before extraction, reject unsafe paths, duplicate members,
+links, special files, unsafe modes and oversized contents, and extract only
+validated files into controlled staging. Compare the extracted inventory with
+the archive before applying patches or running build steps; validating only
+after ordinary extraction cannot undo writes outside the source tree.
+
+Record effective runtime configuration as part of build provenance when
+environment variables can change native behavior. PHPBench clears `PHPRC` and
+`PHP_INI_SCAN_DIR` overrides but keeps normal PHP configuration loading enabled;
+using `php -n` would change the runtime. Its manifest records configuration
+file hashes, effective directives, active modules and package identities, and
+the client checks them before execution. Include preflight and result validation
+in the client deadline, reserve time for process cleanup before the framework
+roadblock, and test signal/timeout cleanup against the owned process group.

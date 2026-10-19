@@ -97,6 +97,7 @@ ilab | AI/LLM workload based on InstructLab | https://github.com/perftool-incuba
 iperf | Traditional network communication testing | https://github.com/perftool-incubator/bench-iperf
 oslat | Latency measurement tool that simulates a continuously polling application (ie. DPDK PMD) | https://github.com/perftool-incubator/bench-oslat
 osnoise | Operating system noise measurement | https://github.com/perftool-incubator/bench-osnoise
+phpbench | Native PHPBench 0.8.1 microbenchmark suite | https://github.com/perftool-incubator/bench-phpbench
 pytorch | PyTorch ML benchmark automation | https://github.com/perftool-incubator/bench-pytorch
 sleep | Minimal benchmark for CI and testing | https://github.com/perftool-incubator/bench-sleep
 stream | STREAM memory bandwidth benchmark | https://github.com/perftool-incubator/bench-stream
