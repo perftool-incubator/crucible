@@ -271,12 +271,56 @@ are included:
   userenvs but no external.
 - **`minimal`**: Only the default userenv. Smallest matrix.
 
+### Per-benchmark userenv restrictions
+
+Each benchmark entry in rickshaw's `util/crucible-ci.json` can optionally
+specify a `userenvs.allowlist` or `userenvs.denylist`. The job generator applies
+that restriction to the effective userenv set before it expands the benchmark
+matrix. Normally, `--userenv-filter` determines that set. For a PR that changes
+only userenv files, the affected userenvs instead determine it, subject to CI
+exclusions. This lets each benchmark run only in the base images its Workshop
+recipe supports.
+
+With `--job-size small`, the generator creates one matrix entry per eligible
+userenv. With `--job-size big`, it combines each benchmark's eligible userenvs
+into a comma-separated value, which the integration action expands into
+individual runs. `ci-run-file-creator.py` writes each selected userenv into the
+matching kube or remotehosts endpoint configuration so the run uses the
+corresponding engine image.
+
 ### Smart rickshaw PR detection
 
 When a rickshaw PR only modifies userenv files (and no other
 code), the CI system detects this and only tests the modified
 userenvs instead of all of them. This dramatically reduces
 the job count for userenv-only changes.
+
+### Changed-scenario filtering
+
+The rickshaw job generator also uses the existing `HEAD^1` to `HEAD` changed
+path list to narrow the benchmark and endpoint scenarios before it expands the
+userenv matrix. An added or modified `util/crucible-ci/<benchmark>.<endpoint>.json`
+file selects that current benchmark and endpoint job. Multiple run-file edits
+select the union of their jobs. When benchmark configuration and schema changes
+add multiple benchmarks together, CI narrows to the union of those benchmarks'
+current enabled endpoint jobs.
+
+Changes to `util/crucible-ci.json` are compared structurally, without treating
+JSON object or array ordering as a change. A change limited to benchmark entries
+selects the enabled current jobs for those benchmarks. Changes to shared CI
+settings select the full scenario matrix. A change to `schema/crucible-ci.json`
+is narrowed only when `util/crucible-ci.json` also adds each benchmark and
+every schema enum addition matches one of those new entries. Schema-only
+changes, enum removals, or other schema structure changes select the full
+scenario matrix.
+
+Unclassified paths or combinations that cannot be safely classified, removed
+scenario files or benchmark entries, changes without a current enabled job, or
+unavailable base history select the full current scenario matrix. If selected
+scenarios do not overlap jobs requested by an invocation, the generator keeps
+that invocation's full requested matrix. Scenario selection does not change
+the effective userenv set; benchmark restrictions and small or big job sizing
+are applied when the remaining jobs are expanded.
 
 ## Release matrix testing
 
