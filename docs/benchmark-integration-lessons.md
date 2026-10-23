@@ -76,6 +76,15 @@ Use Workshop's supported source-build mechanisms where packages are unavailable.
 Build and install during image preparation; the benchmark client should execute
 the prepared software without fetching dependencies or compiling it.
 
+PHPBench's 2026 x86_64 smoke matrix found two EL8 packaging issues: Alma 8's PHP
+CLI needed `php-json` for `json_encode()`, and RHUI 8's base `coreutils-single`
+conflicted with explicitly installing `coreutils`. Keep `php-json` in the
+`alma8`/`rhubi8` Workshop override and avoid reinstalling `coreutils` there.
+EL8 also needs PHPBench's Python 3.12 selection because its code uses APIs
+missing from Python 3.6. Verify package resolution and an actual benchmark
+sample on each target; a successful image build alone does not prove runtime
+compatibility.
+
 For source builds, pin a revision and retain compiler flags, source integrity
 checks, binary hashes and build logs. Include the actual port headers and build
 files among relevant integrity inputs. CoreMark's pinned upstream integrity
