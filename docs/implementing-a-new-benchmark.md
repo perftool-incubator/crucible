@@ -132,6 +132,15 @@ Defines how the benchmark runs on client engines:
   positionally. When set to `"1:N"`, one or more clients can
   drive any number of servers — rickshaw distributes servers
   across clients round-robin within each run-file benchmark entry.
+  When set to `"N:M"` on a Rickshaw runtime with N:M topology support,
+  client and server counts and engine IDs can differ independently.
+  Every client in a benchmark instance receives the service information
+  from every server in that same instance, so each client can build a
+  contact list for the full server group. Older runtimes do not recognize
+  `N:M`: they reject unequal counts and use positional pairing when
+  counts match, so they do not provide all-to-all routing.
+  Repeated instances of the same benchmark keep their client and server
+  groups separate.
   The pairing is logged early in the console output so users can
   verify the topology before execution begins.
   See trafficgen for a reference implementation.
@@ -611,10 +620,11 @@ The server writes a plain payload (no roadblock wrapping):
 }
 ```
 
-### Reading messages on the client side
+### Reading a single service message on the client side
 
-The engine infrastructure resolves the best message and writes
-it to `msgs/rx/svc`. The client reads from this single file:
+When a benchmark needs one service contact, the engine infrastructure
+resolves the best message and writes it to `msgs/rx/svc`. The client
+can read that single file:
 
 ```bash
 file="msgs/rx/svc"
@@ -627,6 +637,34 @@ fi
 The engine automatically prefers endpoint-relayed messages
 (which may have transformed addresses) over direct server
 messages.
+
+### Collecting services for an N:M client-server topology
+
+In an `N:M` benchmark, each client needs the service address for every
+server in its benchmark instance. At client start, scan all
+`endpoint-start-end:*` JSON messages in that sample's `msgs/rx`
+directory. Keep messages that contain both `server-engine` and `svc`,
+and build the contact list keyed by `server-engine`, deduplicating
+repeated messages for the same server. Rickshaw's N:M endpoint relay
+retains the originating `server-engine` beside `svc` in the client-facing
+user-object, including when an endpoint rewrites the service address.
+A service message has this shape:
+
+```json
+{
+    "server-engine": "server-2",
+    "svc": {
+        "ip": "192.0.2.12",
+        "ports": [9042]
+    }
+}
+```
+
+The legacy `msgs/rx/svc` symlink resolves to only one service message,
+so it cannot provide the full contact list for an `N:M` client. Use the
+complete set of endpoint messages instead. `cs_buddy` remains the
+primary peer for existing engine behavior; use the collected service
+messages to reach the full server group.
 
 ---
 
