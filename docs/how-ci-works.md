@@ -281,6 +281,19 @@ only userenv files, the affected userenvs instead determine it, subject to CI
 exclusions. This lets each benchmark run only in the base images its Workshop
 recipe supports.
 
+Changed-file filtering is enabled for Rickshaw jobs on the `upstream` release
+when triggered by `pull_request` or a merged `pull_request_target` event. The
+workflow passes the event's base and head SHAs plus the PR number to the
+generator; it reads the diff and base configuration from those commits without
+checking out the PR head. Release-tag jobs do not receive these arguments
+because their generators do not support them; they keep full scenario
+selection. Non-Rickshaw targets, scheduled runs, manual dispatches, and
+unmerged `pull_request_target` events also receive no PR diff inputs. If a PR
+SHA cannot be resolved or its diff cannot be read, the generator uses the full
+scenario selection. In all cases without a usable PR diff, `--userenv-filter`
+continues to determine the userenv selection, so explicit values such as
+`unique` and `minimal` still apply.
+
 With `--job-size small`, the generator creates one matrix entry per eligible
 userenv. With `--job-size big`, it combines each benchmark's eligible userenvs
 into a comma-separated value, which the integration action expands into
