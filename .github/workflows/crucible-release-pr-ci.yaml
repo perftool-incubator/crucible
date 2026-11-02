@@ -13,3 +13,20 @@ jobs:
     uses: ./.github/workflows/crucible-release-ci.yaml
     secrets:
       PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}
+
+  crucible-release-ci-complete:
+    name: crucible-release-ci-complete
+    needs: call-crucible-release-ci
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify reusable release CI succeeded
+        env:
+          RELEASE_CI_RESULT: ${{ needs.call-crucible-release-ci.result }}
+        run: |
+          if [ "$RELEASE_CI_RESULT" != "success" ]; then
+              echo "Reusable release CI result: $RELEASE_CI_RESULT"
+              exit 1
+          fi
+          echo "crucible-release-ci-complete"
