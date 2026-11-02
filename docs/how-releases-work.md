@@ -177,16 +177,26 @@ Releases are tested automatically in two ways:
 
 ### PR-level testing
 
-The `crucible-release-ci.yaml` workflow runs on every pull
-request to crucible's master branch. It exercises the release
-lifecycle by:
+The `crucible-release-pr-ci.yaml` workflow starts on every pull
+request to crucible's master branch and calls the reusable
+`crucible-release-ci.yaml` workflow. New commits to the same PR
+cancel its older pending or running PR workflow. The reusable
+workflow uses a repository-wide queue, so separate PRs and manual
+runs wait for one another while each release test sequence runs
+without overlap.
+
+For code changes, the release CI workflow exercises the lifecycle
+by:
 
 1. Deleting a test release branch (`ci-version-test`)
 2. Creating the test release branch
 3. Updating the test release branch
 
-This validates that the release creation and management
-workflows function correctly with the current code.
+Docs-only changes take a lightweight route. The completion check
+requires the expected route to succeed: the faux CI job for
+docs-only pull requests, or all three release phases for code
+changes and manual runs. The manual `workflow_dispatch` trigger
+remains available on `crucible-release-ci.yaml`.
 
 ### Release verification
 

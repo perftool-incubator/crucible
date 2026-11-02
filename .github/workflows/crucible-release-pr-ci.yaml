@@ -1,0 +1,15 @@
+name: crucible-release-ci
+
+on:
+  pull_request:
+    branches: [ master ]
+
+concurrency:
+  group: crucible-release-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  call-crucible-release-ci:
+    uses: ./.github/workflows/crucible-release-ci.yaml
+    secrets:
+      PRIVATE_KEY__TAG_CRUCIBLE_RELEASE: ${{ secrets.PRIVATE_KEY__TAG_CRUCIBLE_RELEASE }}

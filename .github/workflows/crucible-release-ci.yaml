@@ -1,13 +1,16 @@
 name: crucible-release-ci
 
 on:
-  pull_request:
-    branches: [ master ]
+  workflow_call:
+    secrets:
+      PRIVATE_KEY__TAG_CRUCIBLE_RELEASE:
+        required: true
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.ref }}/release-ci
-  cancel-in-progress: true
+  group: crucible-release-ci-global-queue
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   changes:
@@ -82,15 +85,55 @@ jobs:
       - run: echo "faux-crucible-release-ci-complete"
 
   crucible-release-ci-complete:
-    needs: [ call-crucible-release-update, faux-crucible-release-ci ]
+    needs:
+      - changes
+      - call-crucible-release-remove
+      - call-crucible-release-create
+      - call-crucible-release-update
+      - faux-crucible-release-ci
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check Results
-        if: >-
-          contains(needs.*.result, 'failure') ||
-          contains(needs.*.result, 'cancelled')
-        run: exit 1
-      - name: complete
-        run: echo "crucible-release-ci-complete"
+      - name: Verify expected release CI route succeeded
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ONLY_DOCS: ${{ needs.changes.outputs.only-docs }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          REMOVE_RESULT: ${{ needs.call-crucible-release-remove.result }}
+          CREATE_RESULT: ${{ needs.call-crucible-release-create.result }}
+          UPDATE_RESULT: ${{ needs.call-crucible-release-update.result }}
+          FAUX_RESULT: ${{ needs.faux-crucible-release-ci.result }}
+        run: |
+          set -euo pipefail
+
+          if [ "$CHANGES_RESULT" != "success" ]; then
+              echo "Change detection did not succeed: $CHANGES_RESULT"
+              exit 1
+          fi
+
+          if [ "$EVENT_NAME" != "workflow_dispatch" ] && [ "$ONLY_DOCS" = "true" ]; then
+              if [ "$FAUX_RESULT" != "success" ]; then
+                  echo "Docs-only route did not succeed: $FAUX_RESULT"
+                  exit 1
+              fi
+              if [ "$REMOVE_RESULT" != "skipped" ] || \
+                  [ "$CREATE_RESULT" != "skipped" ] || \
+                  [ "$UPDATE_RESULT" != "skipped" ]; then
+                  echo "Release phases unexpectedly ran for a docs-only change"
+                  exit 1
+              fi
+          else
+              if [ "$REMOVE_RESULT" != "success" ] || \
+                  [ "$CREATE_RESULT" != "success" ] || \
+                  [ "$UPDATE_RESULT" != "success" ]; then
+                  echo "Release phase results were remove=$REMOVE_RESULT create=$CREATE_RESULT update=$UPDATE_RESULT"
+                  exit 1
+              fi
+              if [ "$FAUX_RESULT" != "skipped" ]; then
+                  echo "Docs-only route unexpectedly ran: $FAUX_RESULT"
+                  exit 1
+              fi
+          fi
+
+          echo "crucible-release-ci-complete"
