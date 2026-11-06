@@ -12,7 +12,7 @@ For how services run inside the controller, see
 
 ## Overview
 
-The controller image is a Fedora-based container image
+The controller image is a Fedora 45-based container image
 containing all the software needed to orchestrate benchmark
 runs. Every `crucible` command runs inside this image — when
 you type `crucible run`, `crucible update`, or
@@ -48,7 +48,7 @@ The orchestration framework and its dependencies:
 The controller builds engine images internally, so it needs
 its own container tooling:
 
-- **Podman** — container runtime (for building and running
+- **Podman 6** — container runtime (for building and running
   nested containers)
 - **Buildah** — image building
 - **Skopeo** — image inspection and registry operations
@@ -67,7 +67,7 @@ controller containers:
 
 ### Build tools and languages
 
-- **Python 3** with pip, FastAPI, uvicorn, pydantic,
+- **Python 3.15** with pip, FastAPI, uvicorn, pydantic,
   jsonschema, invoke
 - **Perl** with JSON, validation, REST, and UUID modules
 - **GCC, make, autoconf, automake, libtool** — for source
