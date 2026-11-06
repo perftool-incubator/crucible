@@ -212,7 +212,7 @@ POST /api/v1/metric-data
     "period": "<period-uuid>",
     "source": "mpstat",
     "type": "Busy-CPU",
-    "breakouts": ["hostname", "cpu"]
+    "breakout": ["hostname", "cpu"]
 }
 ```
 
@@ -240,7 +240,7 @@ within that time window.
 
 Metrics can be broken down by their dimension values.  For
 example, `Busy-CPU` from mpstat has dimensions like
-`hostname` and `cpu`.  Querying with `breakouts: ["hostname"]`
+`hostname` and `cpu`.  Querying with `breakout: ["hostname"]`
 returns separate time series per host.  Adding `"cpu"` splits
 further by individual CPU.
 
@@ -268,7 +268,7 @@ describe breakout state:
   produce the value keys.
 - **`remainingBreakouts`** — dimensions still available for
   further disaggregation.  These are the dimensions you can
-  add to the `breakouts` array to split the data further.
+  add to the `breakout` array to split the data further.
 
 With breakouts applied:
 
@@ -286,7 +286,7 @@ With breakouts applied:
 
 #### Breakout query syntax
 
-The `breakouts` array supports three forms:
+The `breakout` array supports three forms:
 
 - **Basic**: `["hostname", "cpu"]` — split by all values
   of each dimension
@@ -330,7 +330,9 @@ endpoint and tool name (e.g., `remotehosts-1-sysstat-1`).
 Use the `remainingBreakouts` response to discover which
 dimensions are available, then query breakout values with
 `POST /api/v1/iterations/breakout-values` to see the actual
-values before filtering.
+values before filtering. This endpoint uses the plural
+`breakouts` request field; `/api/v1/metric-data` uses the
+singular `breakout` field.
 
 ## The web dashboard
 
