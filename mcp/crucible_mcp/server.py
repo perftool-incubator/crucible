@@ -70,6 +70,7 @@ TOOL_NAMES = (
     "import_ssh_identity_profile",
     "list_tools",
     "list_benchmarks",
+    "list_userenvs",
     "list_local_runs",
     "list_active_runs",
     "get_local_run_summary",
@@ -196,6 +197,27 @@ TOOL_DEFINITIONS = (
         },
     },
     {"name": "list_benchmarks", "description": "List installed Crucible benchmarks and credential-redacted metadata.", "inputSchema": _EMPTY_INPUT},
+    {
+        "name": "list_userenvs",
+        "description": (
+            "List Crucible userenv definitions using the CLI's official, external, "
+            "and deprecated categories. By default, return official and external "
+            "userenvs; set one or more category flags to true to return only those "
+            "categories. Results include labels, pull-token requirements, official "
+            "aliases and CI exclusions, or the external source repo. This inventory "
+            "does not guarantee compatibility with a particular benchmark or that "
+            "an image can be built."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "official": {"type": "boolean"},
+                "external": {"type": "boolean"},
+                "deprecated": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    },
     {
         "name": "list_local_runs",
         "description": "List local run artifacts from approved run roots.",
@@ -1132,6 +1154,12 @@ class MCPHandler(BaseHTTPRequestHandler):
                 }
             elif name == "list_benchmarks":
                 value = {"benchmarks": self.server.operations.list_benchmarks()}
+            elif name == "list_userenvs":
+                value = self.server.operations.list_userenvs(
+                    official=arguments.get("official", False),
+                    external=arguments.get("external", False),
+                    deprecated=arguments.get("deprecated", False),
+                )
             elif name == "list_local_runs":
                 value = self.server.operations.list_local_runs(
                     arguments.get("limit", 1000),

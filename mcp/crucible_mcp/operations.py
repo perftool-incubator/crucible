@@ -586,6 +586,7 @@ class CrucibleOperations:
                 "list_ssh_identity_profiles",
                 "import_ssh_identity_profile",
                 "list_benchmarks",
+                "list_userenvs",
                 "describe_benchmark",
                 "list_tools",
                 "list_endpoints",
@@ -3934,6 +3935,185 @@ class CrucibleOperations:
             if metadata is not None:
                 entries.append(self._redact_summary(metadata))
         return entries
+
+    def list_userenvs(
+        self,
+        official: bool = False,
+        external: bool = False,
+        deprecated: bool = False,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """List userenv definitions using the same categories as the CLI."""
+
+        if not (official or external or deprecated):
+            # Match `crucible userenvs list`: official and external are the
+            # default; deprecated entries require an explicit selection.
+            official = True
+            external = True
+
+        managed_roots = []
+        for root in (
+            self.crucible_home / "subprojects",
+            self.crucible_home / "repos",
+        ):
+            try:
+                resolved_root = root.resolve(strict=True)
+            except OSError:
+                continue
+            if (
+                resolved_root == self.crucible_home
+                or self.crucible_home in resolved_root.parents
+            ):
+                managed_roots.append(resolved_root)
+
+        def resolve_managed(path: Path) -> Path | None:
+            try:
+                resolved = path.resolve(strict=True)
+            except OSError:
+                return None
+            if not any(
+                self._under_managed_root(resolved, root) for root in managed_roots
+            ):
+                return None
+            return resolved
+
+        def read_definition(path: Path) -> dict[str, Any] | None:
+            resolved = resolve_managed(path)
+            if resolved is None or not resolved.is_file():
+                return None
+            try:
+                document = json.loads(resolved.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                document = {}
+            return document if isinstance(document, dict) else {}
+
+        def entry_metadata(document: dict[str, Any]) -> tuple[str, bool]:
+            userenv = document.get("userenv")
+            userenv = userenv if isinstance(userenv, dict) else {}
+            label = userenv.get("label")
+            if label is None or label is False:
+                label = "—"
+            elif not isinstance(label, str):
+                label = json.dumps(label, ensure_ascii=False, separators=(",", ":"))
+            origin = userenv.get("origin")
+            origin = origin if isinstance(origin, dict) else {}
+            pull_token = origin.get("requires-pull-token", False)
+            return (
+                self._redact_metadata(label),
+                pull_token is True or pull_token == "true",
+            )
+
+        result: dict[str, list[dict[str, Any]]] = {
+            "official": [],
+            "external": [],
+            "deprecated": [],
+        }
+        official_root = (
+            self.crucible_home
+            / "subprojects"
+            / "core"
+            / "rickshaw"
+            / "userenvs"
+        )
+        external_root = self.crucible_home / "subprojects" / "userenvs"
+        resolved_official_root = resolve_managed(official_root)
+
+        if official:
+            if resolved_official_root is not None and resolved_official_root.is_dir():
+                ci_excludes = set()
+                # ci-excludes.txt is a text file rather than JSON, so read it
+                # directly after applying the same managed-root boundary.
+                excludes_path = resolve_managed(
+                    resolved_official_root / "ci-excludes.txt"
+                )
+                if excludes_path is not None and excludes_path.is_file():
+                    try:
+                        ci_excludes = set(
+                            excludes_path.read_text(encoding="utf-8").split()
+                        )
+                    except (OSError, UnicodeDecodeError):
+                        pass
+
+                for path in sorted(
+                    resolved_official_root.iterdir(), key=lambda item: item.name
+                ):
+                    if path.suffix != ".json":
+                        continue
+                    document = read_definition(path)
+                    if document is None:
+                        continue
+                    label, requires_pull_token = entry_metadata(document)
+                    alias = None
+                    if path.is_symlink():
+                        try:
+                            target = os.readlink(path)
+                            alias = target[:-5] if target.endswith(".json") else target
+                        except OSError:
+                            pass
+                    result["official"].append(
+                        {
+                            "name": path.stem,
+                            "label": label,
+                            "requires_pull_token": requires_pull_token,
+                            "alias": self._redact_metadata(alias),
+                            "not_ci_tested": path.stem in ci_excludes,
+                        }
+                    )
+
+        if (
+            deprecated
+            and resolved_official_root is not None
+            and resolved_official_root.is_dir()
+        ):
+            non_userenv_dirs = {"components", "requirement-sources"}
+            for path in sorted(
+                resolved_official_root.iterdir(), key=lambda item: item.name
+            ):
+                if path.name in non_userenv_dirs or not path.is_dir():
+                    continue
+                # The CLI calls a directory deprecated when its corresponding
+                # official JSON definition is absent.
+                if (resolved_official_root / f"{path.name}.json").is_file():
+                    continue
+                if resolve_managed(path) is not None:
+                    result["deprecated"].append(
+                        {"name": self._redact_metadata(path.name)}
+                    )
+
+        if external:
+            resolved_external_root = resolve_managed(external_root)
+            if resolved_external_root is not None and resolved_external_root.is_dir():
+                for repo_dir in sorted(
+                    resolved_external_root.iterdir(), key=lambda item: item.name
+                ):
+                    if not repo_dir.is_dir() or resolve_managed(repo_dir) is None:
+                        continue
+                    for path in sorted(repo_dir.iterdir(), key=lambda item: item.name):
+                        if path.suffix != ".json":
+                            continue
+                        document = read_definition(path)
+                        if document is None:
+                            continue
+                        label, requires_pull_token = entry_metadata(document)
+                        result["external"].append(
+                            {
+                                "name": path.stem,
+                                "label": label,
+                                "requires_pull_token": requires_pull_token,
+                                "source": self._redact_metadata(repo_dir.name),
+                            }
+                        )
+
+        for category in ("official", "external"):
+            for entry in result[category]:
+                entry["name"] = self._redact_metadata(entry["name"])
+
+        if self._mcp_response_size(result) > MAX_METADATA_RESPONSE_BYTES:
+            raise OperationError(
+                "framework",
+                "userenv discovery response exceeds size limit",
+                "result_too_large",
+            )
+        return result
 
     def list_tools(self, name: str | None = None) -> list[dict[str, Any]]:
         """List installed tools without invoking the host CLI or a shell."""
