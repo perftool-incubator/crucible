@@ -201,12 +201,12 @@ TOOL_DEFINITIONS = (
         "name": "list_userenvs",
         "description": (
             "List Crucible userenv definitions using the CLI's official, external, "
-            "and deprecated categories. By default, return official and external "
-            "userenvs; set one or more category flags to true to return only those "
-            "categories. Results include labels, pull-token requirements, official "
-            "aliases and CI exclusions, or the external source repo. This inventory "
-            "does not guarantee compatibility with a particular benchmark or that "
-            "an image can be built."
+            "and deprecated categories. When all category flags are omitted or "
+            "false, return official and external userenvs. If one or more flags "
+            "are true, return only those selected categories. Results include "
+            "labels, pull-token requirements, official aliases and CI exclusions, "
+            "or the external source repo. This inventory does not guarantee "
+            "compatibility with a particular benchmark or that an image can be built."
         ),
         "inputSchema": {
             "type": "object",

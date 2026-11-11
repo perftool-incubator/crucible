@@ -93,10 +93,22 @@ it does not discover operator-configured profiles, reachable hosts or clusters,
 or available credentials. Crucible has no named endpoint-profile registry. The
 caller must bring the endpoint type and deployment details (such as hosts,
 cluster access, engine IDs, and tool configuration) from the user, operator, or
-task context. `list_userenvs` mirrors `crucible userenvs list`: it returns
-official and external definitions by default, and can include deprecated
-definitions with `call_tool("list_userenvs", {"deprecated": true})`. The
-inventory reports pull-token requirements,
+task context. `list_userenvs` mirrors `crucible userenvs list`. When all category
+flags are omitted or false, it returns official and external definitions. When
+one or more flags are true, the selection is exclusive: it returns only the
+selected categories. Set only `deprecated` to return deprecated definitions;
+enable all three flags to return every category:
+
+```text
+deprecated_userenvs = call_tool("list_userenvs", {"deprecated": true})
+all_userenvs = call_tool("list_userenvs", {
+    "official": true,
+    "external": true,
+    "deprecated": true
+})
+```
+
+The inventory reports pull-token requirements,
 official aliases, CI exclusions, and external source repos; it does not prove
 that a userenv is compatible with a benchmark or that its image can be built.
 Use the requested userenv when one is specified. If the task does not identify
