@@ -67,6 +67,7 @@ Select a benchmark from the returned list before requesting its details:
 ```text
 benchmarks = call_tool("list_benchmarks", {})
 endpoints = call_tool("list_endpoints", {})
+userenvs = call_tool("list_userenvs", {})
 if not benchmarks["benchmarks"]:
     stop and report "no installed benchmarks"
 if not endpoints["endpoints"]:
@@ -91,9 +92,29 @@ partial guide rather than an exhaustive list.
 it does not discover operator-configured profiles, reachable hosts or clusters,
 or available credentials. Crucible has no named endpoint-profile registry. The
 caller must bring the endpoint type and deployment details (such as hosts,
-cluster access, engine IDs, user environment, and tool configuration) from the
-user, operator, or task context. If those details are missing, ask for them
-rather than guessing or treating an installed endpoint type as a usable target.
+cluster access, engine IDs, and tool configuration) from the user, operator, or
+task context. `list_userenvs` mirrors `crucible userenvs list`. When all category
+flags are omitted or false, it returns official and external definitions. When
+one or more flags are true, the selection is exclusive: it returns only the
+selected categories. Set only `deprecated` to return deprecated definitions;
+enable all three flags to return every category:
+
+```text
+deprecated_userenvs = call_tool("list_userenvs", {"deprecated": true})
+all_userenvs = call_tool("list_userenvs", {
+    "official": true,
+    "external": true,
+    "deprecated": true
+})
+```
+
+The inventory reports pull-token requirements,
+official aliases, CI exclusions, and external source repos; it does not prove
+that a userenv is compatible with a benchmark or that its image can be built.
+Use the requested userenv when one is specified. If the task does not identify
+one, ask the user or operator rather than choosing an installed candidate by
+guesswork. If deployment details are missing, ask for them rather than treating
+an installed endpoint type as a usable target.
 `validate_run` and `prepare_run` check the supplied configuration statically;
 they do not verify live connectivity. The generic run-file skeleton in
 `how-run-files-work.md` is not necessarily executable without deployment-specific
