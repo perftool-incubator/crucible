@@ -294,6 +294,7 @@ through the standard `tools/list` request; the current interface is:
 | `list_endpoints` | List installed endpoint types, schemas, and coarse capabilities; credential-like schema descriptions are redacted. It does not discover configured or reachable targets; callers supply target-specific endpoint configuration. |
 | `list_active_runs` | List active MCP jobs, including runs and maintenance operations, with cursor pagination; credential-like text in job metadata and errors is redacted. |
 | `list_benchmarks` | List installed benchmarks and credential-redacted metadata. |
+| `list_userenvs` | List official and external userenv definitions when no category flag is true. If one or more of `official`, `external`, or `deprecated` is true, return only the selected categories. Reports labels, pull-token requirements, aliases, CI exclusions, and external source repos; it does not establish benchmark compatibility or image buildability. |
 | `list_local_runs` | List local run artifacts from approved run roots with bounded responses and offset pagination. |
 | `get_local_run_summary` | Read a completed result summary with credential-like fields redacted. |
 | `get_local_run_metadata` | Read rickshaw run metadata from an approved local run artifact. |
