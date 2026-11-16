@@ -113,8 +113,8 @@ has:
 - `vals` (required): Array of values. Multiple values cause
   cartesian expansion.
 - `role` (optional): Restricts this parameter to a specific
-  engine role (`"client"` or `"server"`). Parameters without a
-  role apply to all engines.
+  engine role (`"client"`, `"server"`, or `"all"`). If `role`
+  is omitted, it defaults to `"client"`.
 - `enabled` (optional): `"yes"` or `"no"` — disabled parameters
   are excluded
 
@@ -154,8 +154,9 @@ role. The `role` field controls this:
 ```
 
 Parameters with `"role": "client"` are only passed to client
-engines; `"role": "server"` only to server engines. Parameters
-without a role field are passed to all engines.
+engines; `"role": "server"` only to server engines. If `role` is
+omitted, it defaults to `"client"`; use `"role": "all"` to pass a
+parameter to every engine.
 
 ### Samples and test order
 
