@@ -144,7 +144,7 @@ all multi-valued parameters to produce the iteration matrix.
 | `arg` | Yes | Parameter name (passed as `--arg` to the benchmark) |
 | `vals` | Yes* | Array of values. Multiple values create iterations via cartesian product. |
 | `val` | Yes* | Single value (alternative to `vals`) |
-| `role` | No | Restrict to a specific role: `"client"`, `"server"`, or `"all"` (default) |
+| `role` | No | Restrict to a specific role: `"client"`, `"server"`, or `"all"`. Defaults to `"client"`; use `"all"` explicitly to target every engine. |
 | `enabled` | No | `"yes"` (default) or `"no"` — disabled params are excluded |
 | `id` | No | Restrict this parameter to a single engine ID.  When set, only the engine whose ID matches receives this parameter.  Without `id`, the parameter applies to all engines of the specified role. |
 | `ids` | No | Array of engine ID ranges (e.g., `["1", "2-4"]`) that this parameter applies to.  Alternative to `id` for targeting multiple engines. |
