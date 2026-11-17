@@ -59,6 +59,7 @@ Through the use of containers built at runtime for software distribution (which 
 - [How Services Work](docs/how-services-work.md)
 - [How the Controller Image Works](docs/how-the-controller-image-works.md)
 - [How the Repo System Works](docs/how-the-repo-system-works.md)
+- [Crucible Repository Relationships](docs/crucible-repo-relationships.md) — Mermaid diagram of how the repos fit together
 - [How Releases Work](docs/how-releases-work.md)
 - [How CI Works](docs/how-ci-works.md)
 - [How the Logger Works](docs/how-the-logger-works.md)
