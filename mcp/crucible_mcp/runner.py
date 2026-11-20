@@ -991,6 +991,7 @@ class RunManager:
             "--pull=never",
             "--name",
             container_name,
+            "--cgroups=disabled",
             "--label",
             f"io.crucible.mcp.job-id={job_id}",
             "--label",

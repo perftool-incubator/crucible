@@ -52,6 +52,7 @@ class TestHostCommandPolicy(unittest.TestCase):
             child = [str(self.home / "bin" / "crucible"), "run", str(self.run_file)]
         return [
             "podman", "run", "--detach", "--rm", "--pull=never", "--name", name,
+            "--cgroups=disabled",
             "--label", f"io.crucible.mcp.job-id={self.job_id}", "--label",
             "io.crucible.mcp.supervisor=true", "--privileged", "--pid=host", "--ipc=host",
             "--net=host", "--security-opt=label=disable",

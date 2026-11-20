@@ -160,7 +160,7 @@ class HostCommandPolicy:
             raise BridgeRequestError("unarchive operation must target a .tar.xz file")
 
     def _validate_supervisor_run(self, command: list[str]) -> None:
-        if len(command) < 36 or command[:5] != [
+        if len(command) < 37 or command[:5] != [
             "podman", "run", "--detach", "--rm", "--pull=never"
         ]:
             raise BridgeRequestError("unsupported host Podman command")
@@ -173,7 +173,9 @@ class HostCommandPolicy:
         job_directory = (self.job_root / job_id).resolve(strict=True)
         if job_directory.parent != self.job_root or not job_directory.is_dir():
             raise BridgeRequestError("supervision directory is outside the configured job root")
-        if command[7:11] != [
+        if command[7] != "--cgroups=disabled":
+            raise BridgeRequestError("supervisor cgroups must be disabled")
+        if command[8:12] != [
             "--label",
             f"io.crucible.mcp.job-id={job_id}",
             "--label",
@@ -181,9 +183,9 @@ class HostCommandPolicy:
         ]:
             raise BridgeRequestError("supervisor labels do not match the job")
 
-        session_value = command[21] if len(command) > 21 else ""
-        event_value = command[23] if len(command) > 23 else ""
-        operation = command[29] if len(command) > 29 else ""
+        session_value = command[22] if len(command) > 22 else ""
+        event_value = command[24] if len(command) > 24 else ""
+        operation = command[30] if len(command) > 30 else ""
         try:
             session_id = self._uuid(session_value.removeprefix("CRUCIBLE_MCP_SESSION_ID="))
         except BridgeRequestError:
@@ -191,6 +193,7 @@ class HostCommandPolicy:
         event_path = str(job_directory / "events.jsonl")
         expected = [
             "podman", "run", "--detach", "--rm", "--pull=never", "--name", command[6],
+            "--cgroups=disabled",
             "--label", f"io.crucible.mcp.job-id={job_id}", "--label",
             "io.crucible.mcp.supervisor=true", "--privileged", "--pid=host", "--ipc=host",
             "--net=host", "--security-opt=label=disable",
@@ -202,11 +205,11 @@ class HostCommandPolicy:
             "python3", "-m", "crucible_mcp.supervisor", "--operation", operation,
             "--job-directory", "/job", "--working-directory", str(self.home), "--",
         ]
-        if command[:35] != expected or event_value != f"CRUCIBLE_MCP_EVENT_FILE={event_path}":
+        if command[:36] != expected or event_value != f"CRUCIBLE_MCP_EVENT_FILE={event_path}":
             raise BridgeRequestError("supervisor launch arguments do not match the host policy")
         if operation not in _ALLOWED_OPERATIONS:
             raise BridgeRequestError("unsupported MCP supervisor operation")
-        self._validate_cli_operation(operation, command[35:], job_directory)
+        self._validate_cli_operation(operation, command[36:], job_directory)
 
     def validate(self, request: dict[str, Any]) -> tuple[list[str], str, float | None]:
         command = request.get("command")

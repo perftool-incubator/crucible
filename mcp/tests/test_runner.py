@@ -172,6 +172,7 @@ class TestRunManager(unittest.TestCase):
         )
         self.assertIn("--detach", launched_command)
         self.assertIn("--rm", launched_command)
+        self.assertIn("--cgroups=disabled", launched_command)
         self.assertIn(
             f"--mount=type=bind,source={job_directory.resolve()},destination=/job",
             launched_command,
