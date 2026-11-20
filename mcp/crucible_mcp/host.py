@@ -22,6 +22,7 @@ _MCP_SESSION_ENVIRONMENT = (
     "CRUCIBLE_MCP_SESSION_ID",
     "CRUCIBLE_MCP_EVENT_FILE",
 )
+MCP_SERVICE_CGROUP_PARENT = "crucible-mcp.slice"
 DEFAULT_HOST_BRIDGE_SOCKET = Path(
     "/var/lib/crucible/mcp/host-bridge/bridge.sock"
 )

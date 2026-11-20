@@ -16,6 +16,7 @@ from typing import Any, Sequence
 
 from .host import (
     DEFAULT_HOST_BRIDGE_SOCKET,
+    MCP_SERVICE_CGROUP_PARENT,
     host_bridge_command,
     host_bridge_environment,
 )
@@ -991,7 +992,6 @@ class RunManager:
             "--pull=never",
             "--name",
             container_name,
-            "--cgroups=disabled",
             "--label",
             f"io.crucible.mcp.job-id={job_id}",
             "--label",
@@ -1009,6 +1009,8 @@ class RunManager:
             f"CRUCIBLE_MCP_SESSION_ID={session_id}",
             "--env",
             f"CRUCIBLE_MCP_EVENT_FILE={event_path}",
+            "--env",
+            f"CRUCIBLE_MCP_CGROUP_PARENT={MCP_SERVICE_CGROUP_PARENT}",
             self.supervisor_image,
             "python3",
             "-m",

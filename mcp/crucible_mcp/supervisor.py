@@ -1,8 +1,9 @@
 """Run one MCP job inside a host-Podman-managed supervisor container.
 
 The container is a sibling of the MCP service container.  Its main process
-enters the host namespaces before invoking Crucible, while its own Podman
-cgroup keeps the job alive if the MCP service is restarted.
+enters the host namespaces before invoking Crucible.  Services started by the
+job use a durable MCP cgroup parent, so they remain available after the
+supervisor and MCP host bridge exit.
 """
 
 import argparse

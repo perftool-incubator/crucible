@@ -172,7 +172,8 @@ class TestRunManager(unittest.TestCase):
         )
         self.assertIn("--detach", launched_command)
         self.assertIn("--rm", launched_command)
-        self.assertIn("--cgroups=disabled", launched_command)
+        self.assertNotIn("--cgroups=disabled", launched_command)
+        self.assertIn("CRUCIBLE_MCP_CGROUP_PARENT=crucible-mcp.slice", launched_command)
         self.assertIn(
             f"--mount=type=bind,source={job_directory.resolve()},destination=/job",
             launched_command,
