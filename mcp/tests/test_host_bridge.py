@@ -59,7 +59,8 @@ class TestHostCommandPolicy(unittest.TestCase):
             f"--mount=type=bind,source={self.home.resolve()},destination={self.home.resolve()}",
             "--env", f"PYTHONPATH={self.home.resolve() / 'mcp'}", "--env",
             f"CRUCIBLE_MCP_SESSION_ID={self.session_id}", "--env",
-            f"CRUCIBLE_MCP_EVENT_FILE={event_file.resolve()}", "controller:test",
+            f"CRUCIBLE_MCP_EVENT_FILE={event_file.resolve()}", "--env",
+            "CRUCIBLE_MCP_CGROUP_PARENT=crucible-mcp.slice", "controller:test",
             "python3", "-m", "crucible_mcp.supervisor", "--operation", operation,
             "--job-directory", "/job", "--working-directory", str(self.home.resolve()),
             "--", *child,
@@ -73,6 +74,9 @@ class TestHostCommandPolicy(unittest.TestCase):
         self.assertEqual(validated[-len(command):], command)
         self.assertNotIn("CONTAINER_HOST", environment)
         self.assertNotIn("CRUCIBLE_MCP_SESSION_ID", environment)
+        self.assertEqual(
+            environment["CRUCIBLE_MCP_CGROUP_PARENT"], "crucible-mcp.slice"
+        )
         self.assertEqual(timeout, 30.0)
 
     def test_rejects_arbitrary_host_commands_and_mount_changes(self):
@@ -96,7 +100,7 @@ class TestHostCommandPolicy(unittest.TestCase):
         home_alias = self.root / "crucible-alias"
         home_alias.symlink_to(self.home, target_is_directory=True)
         command = [str(home_alias / "bin" / "crucible"), "start", "opensearch"]
-        validated, _environment, timeout = self.policy.validate(
+        validated, environment, timeout = self.policy.validate(
             {"command": command, "working_directory": str(self.home), "environment": {}}
         )
         self.assertEqual(
@@ -104,6 +108,20 @@ class TestHostCommandPolicy(unittest.TestCase):
             [str(self.policy.home / "bin" / "crucible"), "start", "opensearch"],
         )
         self.assertEqual(timeout, 300.0)
+        self.assertEqual(
+            environment["CRUCIBLE_MCP_CGROUP_PARENT"], "crucible-mcp.slice"
+        )
+
+        with self.assertRaises(BridgeRequestError):
+            self.policy.validate(
+                {
+                    "command": command,
+                    "working_directory": str(self.home),
+                    "environment": {
+                        "CRUCIBLE_MCP_CGROUP_PARENT": "attacker.slice"
+                    },
+                }
+            )
 
         with self.assertRaises(BridgeRequestError):
             self.policy.validate(

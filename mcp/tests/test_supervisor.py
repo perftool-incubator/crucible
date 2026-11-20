@@ -33,6 +33,7 @@ class TestSupervisor(unittest.TestCase):
                 {
                     "CRUCIBLE_MCP_SESSION_ID": "session-1",
                     "CRUCIBLE_MCP_EVENT_FILE": "/var/lib/crucible/mcp/runs/job-1/events.jsonl",
+                    "CRUCIBLE_MCP_CGROUP_PARENT": "crucible-mcp.slice",
                 },
                 clear=True,
             ),
@@ -54,6 +55,10 @@ class TestSupervisor(unittest.TestCase):
         )
         self.assertEqual(
             run.call_args.kwargs["env"]["CRUCIBLE_MCP_SESSION_ID"], "session-1"
+        )
+        self.assertEqual(
+            run.call_args.kwargs["env"]["CRUCIBLE_MCP_CGROUP_PARENT"],
+            "crucible-mcp.slice",
         )
         outcome = json.loads(
             (self.root / "job" / "supervisor-outcome.json").read_text()

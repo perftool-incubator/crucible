@@ -18,6 +18,7 @@ class TestSSHAgentService(unittest.TestCase):
             'container_run_file_args=("--mount=type=bind,source=/,destination=/hostfs")',
             base,
         )
+
         listener_start = base.index("container_mcp_listener_args=()")
         bridge_start = base.index("container_mcp_host_bridge_args=()", listener_start)
         listener_args = base[listener_start:bridge_start]
@@ -45,6 +46,14 @@ class TestSSHAgentService(unittest.TestCase):
         self.assertIn(
             '"--mount=type=bind,source=${mcp_ssh_agent_dir},'
             'destination=${mcp_ssh_agent_dir},readonly"',
+            base,
+        )
+
+    def test_mcp_host_operations_use_a_durable_service_cgroup_parent(self):
+        base = (self.repository / "bin/base").read_text(encoding="utf-8")
+        self.assertIn('if [ -n "${CRUCIBLE_MCP_CGROUP_PARENT:-}" ]; then', base)
+        self.assertIn(
+            'container_common_args+=("--cgroup-parent=${CRUCIBLE_MCP_CGROUP_PARENT}")',
             base,
         )
 

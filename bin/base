@@ -2890,6 +2890,13 @@ container_common_args+=("--pid=host")
 container_common_args+=("--net=host")
 container_common_args+=("--security-opt=label=disable")
 
+# MCP host operations launch services from transient supervisor and bridge
+# containers. Give those services a durable parent so their cgroups are not
+# removed when either transient container exits.
+if [ -n "${CRUCIBLE_MCP_CGROUP_PARENT:-}" ]; then
+    container_common_args+=("--cgroup-parent=${CRUCIBLE_MCP_CGROUP_PARENT}")
+fi
+
 # The MCP listener only sees its configured data paths and the private host
 # bridge socket; host namespace access belongs to the isolated bridge service.
 container_mcp_listener_args=()
